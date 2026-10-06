@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.5
+
+- Every collaboration on the Starfront panel shows its sky (DSS2 colour) with the region outlined and, once joined, your own panels drawn on it with tonight's share filled; cutouts are kept on disk.
+- *Show in Framing Assistant* opens N.I.N.A.'s Framing Assistant on the region at its angle, with your camera's footprint.
+
 ## 1.0.0.4
 
 - The Starfront panel on the Imaging tab lists every field of the night's run with where it has got to - done, shooting (frame n of N, or slewing, centring, changing filter), waiting, skipped and why - live, and keeps the last run until the next begins.

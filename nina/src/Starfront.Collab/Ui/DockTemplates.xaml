@@ -71,6 +71,27 @@
                                         <TextBlock Margin="6,0,0,0" Opacity="0.7" Text="{Binding Coordinator}" />
                                     </StackPanel>
                                     <TextBlock Opacity="0.85" Text="{Binding Detail}" TextWrapping="Wrap" />
+                                    <!--  The sky, with the region outlined and this telescope's panels on it.  -->
+                                    <Border
+                                        Width="320"
+                                        Height="200"
+                                        Margin="0,6,0,2"
+                                        HorizontalAlignment="Left"
+                                        Background="Black"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1">
+                                        <Grid>
+                                            <Image Source="{Binding Framing}" Stretch="Uniform" Visibility="{Binding HasFraming, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                            <TextBlock
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Opacity="0.7"
+                                                Text="{Binding FramingNote}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{Binding FramingNote, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Opacity="0.6" FontSize="11" Text="{Binding FramingCaption}" Visibility="{Binding FramingCaption, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                                     <TextBlock Opacity="0.85" Text="{Binding ProgressText}" />
                                     <TextBlock Opacity="0.7" Text="{Binding PeopleText}" TextWrapping="Wrap" />
                                     <TextBlock
@@ -90,6 +111,11 @@
                                             Command="{Binding LeaveCommand}"
                                             Content="Leave"
                                             Visibility="{Binding Joined, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                        <Button
+                                            Margin="8,0,0,0"
+                                            Padding="10,2"
+                                            Command="{Binding ShowInFramingCommand}"
+                                            Content="Show in Framing Assistant" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

@@ -3,13 +3,16 @@ using System.ComponentModel.Composition;
 using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
+using NINA.Astrometry;
 using NINA.Astrometry.Interfaces;
+using NINA.Core.Enum;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Equipment.Interfaces.ViewModel;
 using NINA.Profile.Interfaces;
 using NINA.WPF.Base.Interfaces.Mediator;
+using NINA.WPF.Base.Interfaces.ViewModel;
 using NINA.WPF.Base.ViewModel;
 using Starfront.Collab.Server;
 using Starfront.Collab.Services;
@@ -19,11 +22,17 @@ namespace Starfront.Collab.Ui {
 
     /// <summary>One open collaboration, as the panel lists it.</summary>
     public sealed class ProjectRowVM : BaseINPC {
+        public const int ThumbWidth = 320;
+        public const int ThumbHeight = 200;
+        private ImageSource framing;
+        private string framingNote = "fetching the sky…";
+
         public ProjectRowVM(ProjectListing listing, DealTask task, StarfrontDockVM owner) {
             Listing = listing;
             Task = task;
             JoinCommand = new AsyncRelayCommand(() => owner.JoinAsync(listing.Id), () => CanJoin);
             LeaveCommand = new AsyncRelayCommand(() => owner.LeaveAsync(task?.Id), () => task != null);
+            ShowInFramingCommand = new AsyncRelayCommand(() => owner.ShowInFramingAsync(listing), () => listing.Region != null);
         }
 
         public ProjectListing Listing { get; }
@@ -36,6 +45,30 @@ namespace Starfront.Collab.Ui {
         public bool Compatible => Listing.Compatibility?.Ok == true;
         public AsyncRelayCommand JoinCommand { get; }
         public AsyncRelayCommand LeaveCommand { get; }
+        public AsyncRelayCommand ShowInFramingCommand { get; }
+
+        /// <summary>The sky with the region outlined and, once joined, this telescope's panels on it.</summary>
+        public ImageSource Framing {
+            get => framing;
+            set { framing = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(HasFraming)); }
+        }
+
+        public bool HasFraming => framing != null;
+
+        public string FramingNote {
+            get => framingNote;
+            set { framingNote = value ?? ""; RaisePropertyChanged(); }
+        }
+
+        public string FramingCaption {
+            get {
+                if (Listing.Region == null) return "";
+                var cells = Task?.Cells?.Count ?? 0;
+                if (cells == 0) return "yellow: the collaboration's region";
+                var mine = Task?.Share?.Count ?? 0;
+                return mine > 0 ? $"yellow: the region · white: your {cells} panels · green: tonight's {mine}" : $"yellow: the region · white: your {cells} panels";
+            }
+        }
 
         public string Detail {
             get {
@@ -76,6 +109,9 @@ namespace Starfront.Collab.Ui {
     /// </summary>
     [Export(typeof(IDockableVM))]
     public class StarfrontDockVM : DockableVM, IDisposable {
+        private readonly IFramingAssistantVM framingAssistant;
+        private readonly IApplicationMediator applicationMediator;
+        private readonly SkyThumbnails thumbnails;
         private bool initialized;
         private string message = "";
 
@@ -87,9 +123,14 @@ namespace Starfront.Collab.Ui {
                                IRotatorMediator rotatorMediator,
                                IGuiderMediator guiderMediator,
                                IImageSaveMediator imageSaveMediator,
-                               INighttimeCalculator nighttimeCalculator) : base(profileService) {
+                               INighttimeCalculator nighttimeCalculator,
+                               IFramingAssistantVM framingAssistant,
+                               IApplicationMediator applicationMediator) : base(profileService) {
             Runtime.Ensure(new HostServices(profileService, cameraMediator, telescopeMediator, filterWheelMediator,
                                             rotatorMediator, guiderMediator, imageSaveMediator, nighttimeCalculator));
+            this.framingAssistant = framingAssistant;
+            this.applicationMediator = applicationMediator;
+            thumbnails = new SkyThumbnails(Runtime.Settings.DataFolder);
             Title = "Starfront";
             try {
                 var dictionary = new ResourceDictionary { Source = new Uri("Starfront.Collab;component/Sequencer/SequencerTemplates.xaml", UriKind.RelativeOrAbsolute) };
@@ -182,7 +223,9 @@ namespace Starfront.Collab.Ui {
                 Projects.Clear();
                 foreach (var listing in session.Projects.OrderByDescending(p => p.Joined).ThenBy(p => p.Name)) {
                     var task = tasks.FirstOrDefault(t => t.Live && t.Project == listing.Id);
-                    Projects.Add(new ProjectRowVM(listing, task, this));
+                    var row = new ProjectRowVM(listing, task, this);
+                    Projects.Add(row);
+                    _ = LoadFramingAsync(row);
                 }
                 Tonight.Clear();
                 foreach (var deal in session.DealTonight()) Tonight.Add($"{deal.ProjectName}: {StarfrontSession.Describe(deal)}");
@@ -210,6 +253,51 @@ namespace Starfront.Collab.Ui {
                 await Runtime.Session.PollAsync(CancellationToken.None);
             } catch (Exception ex) {
                 Message = ex.Message;
+            }
+        }
+
+        /// <summary>The sky picture for a row: the cutout from the cache or CDS, then the region and panels drawn on it here.</summary>
+        private async Task LoadFramingAsync(ProjectRowVM row) {
+            var region = row.Listing.Region;
+            if (region == null || region.Width <= 0 || region.Height <= 0) {
+                row.FramingNote = "";
+                return;
+            }
+            try {
+                var cutout = await thumbnails.CutoutAsync(region, ProjectRowVM.ThumbWidth, ProjectRowVM.ThumbHeight);
+                Dispatch.OnUi(() => {
+                    try {
+                        row.Framing = SkyThumbnails.Compose(cutout, region, row.Task?.Cells, row.Task?.Share, ProjectRowVM.ThumbWidth, ProjectRowVM.ThumbHeight);
+                        row.FramingNote = cutout == null ? "no sky picture (offline?); the outline is drawn to scale" : "";
+                    } catch (Exception ex) {
+                        row.FramingNote = "";
+                        Logger.Debug($"Starfront: framing picture - {ex.Message}");
+                    }
+                });
+            } catch (Exception ex) {
+                row.FramingNote = "";
+                Logger.Debug($"Starfront: framing picture - {ex.Message}");
+            }
+        }
+
+        /// <summary>Open N.I.N.A.'s Framing Assistant on the collaboration's region, at its angle, with this camera's footprint.</summary>
+        public async Task ShowInFramingAsync(ProjectListing listing) {
+            var region = listing?.Region;
+            if (region == null) return;
+            try {
+                var profile = Runtime.Host.Profile.ActiveProfile;
+                var coordinates = new Coordinates(Angle.ByDegree(region.Ra), Angle.ByDegree(region.Dec), Epoch.J2000);
+                var dso = new DeepSkyObject(listing.Name, coordinates, profile.AstrometrySettings.Horizon) {
+                    RotationPositionAngle = region.Rotation,
+                };
+                // Wide enough to see the whole region, within what the survey will serve.
+                framingAssistant.FieldOfView = Math.Max(0.2, Math.Min(50.0, Math.Max(region.Width, region.Height) * 1.4));
+                applicationMediator.ChangeTab(ApplicationTab.FRAMINGASSISTANT);
+                await framingAssistant.SetCoordinates(dso);
+                Message = $"Framing Assistant shows {listing.Name}: the region is {region.Width:0.0}° × {region.Height:0.0}°; the rectangle is your camera.";
+            } catch (Exception ex) {
+                Message = $"Could not open the Framing Assistant: {ex.Message}";
+                Logger.Error("Starfront: framing assistant", ex);
             }
         }
 
