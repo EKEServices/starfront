@@ -125,7 +125,12 @@ def render_png_array(image: np.ndarray, stretch: dict[str, float] | None = None,
     """Produce the 8-bit array the viewer displays.
 
     `region` is (x, y, w, h) in full-resolution pixels; when given, that crop is
-    returned at 1:1 so the user can inspect focus at native scale.
+    what comes back, decimated only as far as `max_dim` asks. The viewer asks
+    for the part of the frame on screen at the size of the screen, so what it
+    shows is sharp at every zoom rather than only at 1:1 - a 9600-pixel frame
+    squeezed to 1600 for the overview and then blown up again looked soft all
+    the way to full zoom, which is exactly where people look at their stars.
+    A `max_dim` of 0 leaves the crop at 1:1.
     """
     source = image
     if region is not None:
@@ -135,7 +140,8 @@ def render_png_array(image: np.ndarray, stretch: dict[str, float] | None = None,
         w = int(np.clip(w, 1, image.shape[1] - x))
         h = int(np.clip(h, 1, image.shape[0] - y))
         source = image[y:y + h, x:x + w]
-        factor = 1
+        factor = fit_factor(w, h, max_dim)
+        source = downsample(source, factor)
     else:
         factor = fit_factor(image.shape[1], image.shape[0], max_dim)
         source = downsample(image, factor)

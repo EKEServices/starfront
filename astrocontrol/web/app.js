@@ -3979,10 +3979,12 @@ function draw() {
   ctx.drawImage(viewer.preview, viewer.tx, viewer.ty,
     viewer.width * viewer.scale, viewer.height * viewer.scale);
 
-  // The 1:1 crop, when we have one for the visible area, draws sharply on top.
+  // The crop of what is on screen, rendered at the screen's own resolution,
+  // draws sharply on top of the soft overview. Pixel-for-pixel or larger it
+  // is shown as pixels; shrunk a little it is smoothed.
   const detail = viewer.detail;
-  if (detail && viewer.scale >= 0.9) {
-    ctx.imageSmoothingEnabled = false;
+  if (detail) {
+    ctx.imageSmoothingEnabled = viewer.scale * detail.factor < 1;
     ctx.drawImage(detail.img,
       viewer.tx + detail.x * viewer.scale,
       viewer.ty + detail.y * viewer.scale,
@@ -4028,32 +4030,45 @@ function updateCursorReadout() {
   }, 110);
 }
 
-/** Ask the server for a full-resolution crop of whatever is on screen. */
+/** Ask the server for whatever is on screen, rendered at the screen's resolution. */
 function scheduleDetail() {
   clearTimeout(viewer.detailTimer);
   viewer.detailTimer = setTimeout(loadDetail, 220);
 }
 
+/* The overview is the whole frame squeezed to 1600 pixels. As soon as the zoom
+ * stretches that past one overview pixel per screen pixel it goes soft, which
+ * on a 9600-pixel frame is from a sixth of full size upwards - most of the
+ * zooms anybody uses. So from that point the part of the frame on screen is
+ * fetched again, cropped and decimated to just fit the screen, and drawn on
+ * top; at 1:1 and beyond that is the full-resolution crop it always was. */
 async function loadDetail() {
   if (!state.currentId || !viewer.preview) return;
-  if (viewer.scale < 0.9 || viewer.previewFactor <= 1) { viewer.detail = null; draw(); return; }
+  if (viewer.scale * viewer.previewFactor <= 1.02) { viewer.detail = null; draw(); return; }
 
   const wrap = $('canvasWrap');
   const topLeft = screenToImage(0, 0);
   const bottomRight = screenToImage(wrap.clientWidth, wrap.clientHeight);
   const x = Math.max(0, topLeft.x - 8);
   const y = Math.max(0, topLeft.y - 8);
-  const w = Math.min(viewer.width - x, bottomRight.x - x + 16);
-  const h = Math.min(viewer.height - y, bottomRight.y - y + 16);
-  if (w < 2 || h < 2 || w * h > 16e6) { viewer.detail = null; draw(); return; }
+  const w = Math.ceil(Math.min(viewer.width - x, bottomRight.x - x + 16));
+  const h = Math.ceil(Math.min(viewer.height - y, bottomRight.y - y + 16));
+  if (w < 2 || h < 2) { viewer.detail = null; draw(); return; }
+
+  // The crop at the size it takes up on screen, in device pixels, so a sharp
+  // screen gets a sharp picture; 0 asks for 1:1 once that would be finer.
+  const ratio = window.devicePixelRatio || 1;
+  const onScreen = Math.ceil(Math.max(w, h) * viewer.scale * ratio);
+  const maxDim = onScreen >= Math.max(w, h) ? 0 : Math.min(8192, Math.max(64, onScreen));
+  const factor = maxDim === 0 ? 1 : Math.ceil(Math.max(w, h) / maxDim);
 
   const token = ++viewer.detailToken;
   const url = `/api/images/${state.currentId}/render.png?${stretchQuery()}` +
-    `&region=${x},${y},${Math.ceil(w)},${Math.ceil(h)}`;
+    `&region=${x},${y},${w},${h}&maxDim=${maxDim}`;
   const img = new Image();
   img.onload = () => {
     if (token !== viewer.detailToken) return;
-    viewer.detail = { img, x, y, w: Math.ceil(w), h: Math.ceil(h) };
+    viewer.detail = { img, x, y, w, h, factor };
     draw();
   };
   img.src = url;

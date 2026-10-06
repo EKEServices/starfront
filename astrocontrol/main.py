@@ -3144,9 +3144,14 @@ def image_render(
     white: float = Query(default=1.0, ge=0.0, le=1.0),
     midtone: float = Query(default=0.5, gt=0.0, lt=1.0),
     invert: bool = False,
-    maxDim: int = Query(default=1600, ge=64, le=8192),
+    maxDim: int = Query(default=1600, ge=0, le=8192),
     region: str | None = None,
 ) -> Response:
+    """The frame as a picture. Without `region`, the whole frame fitted inside
+    `maxDim`; with one, that crop fitted inside `maxDim` (0 for 1:1), which is
+    how the viewer keeps what is on screen sharp at any zoom."""
+    if not region and maxDim < 64:
+        maxDim = 64
     frame = _guard(_image_source(image_id).frame, image_id)
 
     stretch = render.auto_stretch(frame) if auto else {"black": black, "white": white,
