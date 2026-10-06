@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.1
+
+- The container follows the server only while it sits in a sequence.
+
 ## 1.0.0.0
 
 First closed-test release for the Starfront Observatories community.

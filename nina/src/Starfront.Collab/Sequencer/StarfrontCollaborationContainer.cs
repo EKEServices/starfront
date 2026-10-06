@@ -102,7 +102,15 @@ namespace Starfront.Collab.Sequencer {
             this.nighttimeCalculator = nighttimeCalculator;
             Runtime.Ensure(new HostServices(profileService, cameraMediator, telescopeMediator, filterWheelMediator,
                                             rotatorMediator, guiderMediator, imageSaveMediator, nighttimeCalculator));
-            Runtime.Session.Updated += OnSessionUpdated;
+        }
+
+        private bool listening;
+
+        /// <summary>Follow the session only while this container sits in a sequence; the palette's prototype and detached clones do not.</summary>
+        private void Listen(bool on) {
+            if (!Runtime.Ready || on == listening) return;
+            if (on) Runtime.Session.Updated += OnSessionUpdated; else Runtime.Session.Updated -= OnSessionUpdated;
+            listening = on;
         }
 
         private void OnSessionUpdated(object sender, EventArgs e) {
@@ -428,12 +436,14 @@ namespace Starfront.Collab.Sequencer {
 
         public override void AfterParentChanged() {
             base.AfterParentChanged();
+            Listen(Parent != null);
             Validate();
+            RaisePropertyChanged(nameof(TonightText));
         }
 
         public override void Teardown() {
             base.Teardown();
-            if (Runtime.Ready) Runtime.Session.Updated -= OnSessionUpdated;
+            Listen(false);
         }
 
         public override TimeSpan GetEstimatedDuration() {

@@ -5,7 +5,7 @@
                     "Major":  "1",
                     "Minor":  "0",
                     "Patch":  "0",
-                    "Build":  "0"
+                    "Build":  "1"
                 },
     "Author":  "Starfront Observatories",
     "Homepage":  "https://starfront-bray.duckdns.org",
@@ -35,9 +35,9 @@
                          "AltScreenshotURL":  ""
                      },
     "Installer":  {
-                      "URL":  "https://starfront-bray.duckdns.org/nina/download/Starfront.Collab.1.0.0.0.zip",
+                      "URL":  "https://starfront-bray.duckdns.org/nina/download/Starfront.Collab.1.0.0.1.zip",
                       "Type":  "ARCHIVE",
-                      "Checksum":  "18A956DAE1827961DB7F7284FC3C70FA32993EB977FBBAF5ED6E36C37884CAE2",
+                      "Checksum":  "A271E7FB2BAA09FAB0E11E9B6E7E64F244BAD7B0D828D30E845EEF8C29788248",
                       "ChecksumType":  "SHA256"
                   }
 }
