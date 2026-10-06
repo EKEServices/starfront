@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <!-- N.I.N.A. 3.x is a .NET 8 WPF application; a plugin is a .NET 8 WPF class library. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>12</LangVersion>
+    <!-- The host build these contracts come from. MinimumNinaVersion in Plugin.props
+         must never be lower than this: a plugin built against newer assemblies than
+         the N.I.N.A. it is loaded into may not bind. -->
+    <NinaPackageVersion>3.2.0.9001</NinaPackageVersion>
+    <Deterministic>true</Deterministic>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Older WinForms-era packages pulled in by N.I.N.A.'s own dependencies. -->
+    <NoWarn>$(NoWarn);NU1701;CS1591</NoWarn>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,71 @@
+<ResourceDictionary
+    x:Class="Starfront.Collab.Sequencer.SequencerTemplates"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:Starfront.Collab.Sequencer"
+    xmlns:nina="clr-namespace:NINA.View.Sequencer;assembly=NINA.Sequencer">
+
+    <!--  Four tiles of a mosaic, one lit: the collaboration's mark in the palette.  -->
+    <GeometryGroup x:Key="Starfront_CollabSVG">
+        <RectangleGeometry Rect="2,2,14,10" />
+        <RectangleGeometry Rect="18,2,14,10" />
+        <RectangleGeometry Rect="2,14,14,10" />
+        <RectangleGeometry Rect="18,14,14,10" />
+        <EllipseGeometry Center="25,19" RadiusX="3" RadiusY="3" />
+    </GeometryGroup>
+
+    <DataTemplate DataType="{x:Type local:StarfrontCollaborationContainer}">
+        <nina:SequenceContainerView>
+            <nina:SequenceContainerView.SequenceContainerContent>
+                <StackPanel Orientation="Vertical">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock VerticalAlignment="Center" Text="Collaboration" />
+                        <ComboBox
+                            MinWidth="220"
+                            Margin="8,0,0,0"
+                            DisplayMemberPath="Name"
+                            ItemsSource="{Binding ProjectChoices}"
+                            SelectedValue="{Binding ProjectId}"
+                            SelectedValuePath="Id" />
+                    </StackPanel>
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        Opacity="0.8"
+                        Text="{Binding TonightText}"
+                        TextWrapping="Wrap" />
+                    <ItemsControl Margin="0,4,0,0" ItemsSource="{Binding Issues}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Foreground="{DynamicResource NotificationWarningBrush}" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </nina:SequenceContainerView.SequenceContainerContent>
+        </nina:SequenceContainerView>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type local:StarfrontPanel}">
+        <nina:SequenceContainerView>
+            <nina:SequenceContainerView.SequenceContainerContent>
+                <TextBlock Opacity="0.8" Text="{Binding Detail}" TextWrapping="Wrap" />
+            </nina:SequenceContainerView.SequenceContainerContent>
+        </nina:SequenceContainerView>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type local:AltitudeGate}">
+        <nina:SequenceBlockView>
+            <nina:SequenceBlockView.SequenceItemContent>
+                <TextBlock VerticalAlignment="Center" Text="{Binding Detail}" />
+            </nina:SequenceBlockView.SequenceItemContent>
+        </nina:SequenceBlockView>
+    </DataTemplate>
+
+    <DataTemplate DataType="{x:Type local:NoteCameraAngle}">
+        <nina:SequenceBlockView>
+            <nina:SequenceBlockView.SequenceItemContent>
+                <TextBlock VerticalAlignment="Center" Text="{Binding Detail}" />
+            </nina:SequenceBlockView.SequenceItemContent>
+        </nina:SequenceBlockView>
+    </DataTemplate>
+</ResourceDictionary>

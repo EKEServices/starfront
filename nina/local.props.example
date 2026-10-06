@@ -1,0 +1,10 @@
+<Project>
+  <!-- Copy to local.props (ignored by git) for development on this machine. -->
+  <PropertyGroup>
+    <NinaExecutable>C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy\NINA.exe</NinaExecutable>
+    <!-- Where DeployPlugin copies to. Leave unset for N.I.N.A.'s own plugin folder. -->
+    <!-- <PluginDeployDirectory>C:\NinaPluginTest\Starfront Collaboration</PluginDeployDirectory> -->
+    <!-- PowerShell 7 where installed; Windows PowerShell is the default. -->
+    <!-- <PluginPowerShell>pwsh</PluginPowerShell> -->
+  </PropertyGroup>
+</Project>

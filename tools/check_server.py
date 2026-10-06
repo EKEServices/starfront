@@ -125,6 +125,22 @@ os.environ["ASTROCOLLAB_PUBLIC_URL"] = BASE
 os.environ["ASTROCOLLAB_DISCORD_API"] = DISCORD_BASE
 os.environ["ASTROCOLLAB_DISCORD_AUTHORIZE"] = f"{DISCORD_BASE}/oauth2/authorize"
 
+# A folder of N.I.N.A. plugin releases for the server to offer: one manifest
+# and the zip it points at, plus a file that is not a release at all.
+NINA_DIR = Path(tempfile.mkdtemp())
+os.environ["ASTROCOLLAB_NINA_DIR"] = str(NINA_DIR)
+(NINA_DIR / "Starfront.Collab.1.0.0.0.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+(NINA_DIR / "Starfront.Collab.1.0.0.0.manifest.json").write_text(json.dumps({
+    "Name": "Starfront Collaboration", "Identifier": "896B4E28-7CEB-4731-BB97-8BADE7460268",
+    "Version": {"Major": "1", "Minor": "0", "Patch": "0", "Build": "0"},
+    "Author": "test", "Repository": "https://example.org", "License": "MPL-2.0",
+    "LicenseURL": "https://www.mozilla.org/en-US/MPL/2.0/",
+    "MinimumApplicationVersion": {"Major": "3", "Minor": "2", "Patch": "0", "Build": "9001"},
+    "Descriptions": {"ShortDescription": "test"},
+    "Installer": {"URL": f"{BASE}/nina/download/Starfront.Collab.1.0.0.0.zip", "Type": "ARCHIVE",
+                  "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
+(NINA_DIR / "notes.txt").write_text("not a release", encoding="utf-8")
+
 
 def serve():
     import uvicorn
@@ -1462,6 +1478,30 @@ case("...and every cell carries the hours the whole field was given",
      all(s >= 2 * 3600 * 0.9 for s in depth_map["seconds"]["H"])
      and depth_map["progress"]["H"]["atGoal"] == 1.0,
      f'min {min(depth_map["seconds"]["H"]):.0f}s')
+
+# ------------------------------------------------- the N.I.N.A. plugin feed
+print("\n-- the server as a N.I.N.A. plugin repository --")
+
+# N.I.N.A. is given `<url>/nina` as a plugin repository and fetches
+# `<url>/nina/plugins/manifests`: a JSON list of manifests, each naming the
+# zip to download. The zip comes from the same server.
+status, feed = call("GET", "/nina/plugins/manifests")
+case("the server offers the plugin manifests as a list",
+     status == 200 and isinstance(feed, list) and len(feed) == 1
+     and feed[0]["Name"] == "Starfront Collaboration",
+     str(feed)[:120])
+case("...and health says which releases are on offer",
+     "Starfront Collaboration 1.0.0.0" in call("GET", "/api/v1/health")[1].get("ninaPlugins", []))
+request = urllib.request.Request(feed[0]["Installer"]["URL"], method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    zipped = response.read(), response.headers.get("Content-Type", "")
+case("the zip the manifest points at downloads from the server",
+     zipped[0].startswith(b"PK") and "zip" in zipped[1], zipped[1])
+for wrong in ("notes.txt", "..%2Fcollab.sqlite", "nothing.zip", ".zip"):
+    status, _ = call("GET", f"/nina/download/{wrong}")
+    if status != 404:
+        break
+case("...and anything that is not a release is not served", status == 404)
 
 print()
 print(f"{sum(results)}/{len(results)} passed")

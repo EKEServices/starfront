@@ -25,6 +25,8 @@ echo.
 echo == checking what is running now
 curl -s https://%PUBLIC%/api/v1/health
 echo.
+echo.
+echo The N.I.N.A. plugin feed people add as a plugin repository:  https://%PUBLIC%/nina
 echo Done. Restart Starfront to pick up the new deal.
 pause
 exit /b 0

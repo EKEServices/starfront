@@ -1,0 +1,58 @@
+<Project>
+  <!-- The single editable source of the plugin's identity and manifest metadata.
+       The DLL's assembly attributes and the manifest.json are both generated from
+       what is written here, so the two can never disagree.
+
+       The GUID is the plugin's identity for its whole life. Never change it. -->
+  <PropertyGroup>
+    <PluginId>896B4E28-7CEB-4731-BB97-8BADE7460268</PluginId>
+    <Version Condition="'$(Version)' == ''">1.0.0.0</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <Title>Starfront Collaboration</Title>
+    <AssemblyTitle>$(Title)</AssemblyTitle>
+    <Product>$(Title)</Product>
+    <Copyright>Copyright © 2026 Starfront Observatories</Copyright>
+    <Company>Starfront Observatories</Company>
+    <Authors>Starfront Observatories</Authors>
+    <Description>Shoot your share of a Starfront mosaic from N.I.N.A.: sign in with Discord, join a collaboration, and a sequence container takes the panels and filter dealt to your telescope tonight at your own exposures.</Description>
+    <PluginLongDescription>Starfront Collaboration lets several telescopes finish one mosaic together.
+
+A coordinator starts a collaboration on the Starfront server: a rectangle of sky, the filters wanted, and how deep to go at every point. Each telescope that joins is handed its own tiling of that sky, and every night the server deals it a list of panels and one filter - Ha or SII on a bright Moon, broadband or OIII on a dark one - sized to the hours it gives. A night's deal, once made, holds for the whole night.
+
+This plugin is the N.I.N.A. side of that:
+
+- **Sign in with Discord.** Only members of the Starfront Discord server can take part; membership is the account, there is no password.
+- **Your exposures stay yours.** You tell the plugin how long you normally shoot each filter; the server deals your share at those lengths, so every light calibrates against your own darks. Gain, offset and binning come from your N.I.N.A. profile.
+- **One instruction.** Drop the *Starfront collaboration* container into your Advanced Sequence where a target would go, inside your usual autofocus, meridian-flip and dither triggers. When it runs it reads tonight's deal once, then slews, centres (and rotates, if you have a rotator), switches filter and takes the frames for each panel in turn, skipping any panel below the project's altitude floor.
+- **Frames are reported as they land.** Every light the container takes is credited to the panel it covered, with its star size and guiding error, and sent to the server on the next check-in, so everyone's depth map moves on and tomorrow's deal is made from what was really collected.
+- **An Imaging-tab panel** shows who is online, which collaborations are open to your telescope, how far each has got, and what you have been dealt tonight.
+
+Closed test release for the Starfront Observatories community.</PluginLongDescription>
+    <RepositoryUrl>https://github.com/bray-sfro/starfront</RepositoryUrl>
+    <PluginHomepage>https://starfront-bray.duckdns.org</PluginHomepage>
+    <PluginTags>Collaboration,Mosaic,Discord,Starfront,Community,Sequencer</PluginTags>
+    <MinimumNinaVersion>3.2.0.9001</MinimumNinaVersion>
+    <PluginLicense>MPL-2.0</PluginLicense>
+    <PluginLicenseUrl>https://www.mozilla.org/en-US/MPL/2.0/</PluginLicenseUrl>
+    <PluginChangelogUrl>https://github.com/bray-sfro/starfront/blob/main/nina/CHANGELOG.md</PluginChangelogUrl>
+    <PluginFeaturedImageUrl></PluginFeaturedImageUrl>
+    <PluginScreenshotUrl></PluginScreenshotUrl>
+    <PluginAltScreenshotUrl></PluginAltScreenshotUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.InteropServices.GuidAttribute"><_Parameter1>$(PluginId)</_Parameter1></AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.InteropServices.ComVisibleAttribute"><_Parameter1>false</_Parameter1></AssemblyAttribute>
+    <AssemblyMetadata Include="MinimumApplicationVersion" Value="$(MinimumNinaVersion)" />
+    <AssemblyMetadata Include="License" Value="$(PluginLicense)" />
+    <AssemblyMetadata Include="LicenseURL" Value="$(PluginLicenseUrl)" />
+    <AssemblyMetadata Include="Repository" Value="$(RepositoryUrl)" />
+    <AssemblyMetadata Include="Homepage" Value="$(PluginHomepage)" />
+    <AssemblyMetadata Include="Tags" Value="$(PluginTags)" />
+    <AssemblyMetadata Include="LongDescription" Value="$(PluginLongDescription)" />
+    <AssemblyMetadata Include="ChangelogURL" Value="$(PluginChangelogUrl)" />
+    <AssemblyMetadata Include="FeaturedImageURL" Value="$(PluginFeaturedImageUrl)" />
+    <AssemblyMetadata Include="ScreenshotURL" Value="$(PluginScreenshotUrl)" />
+    <AssemblyMetadata Include="AltScreenshotURL" Value="$(PluginAltScreenshotUrl)" />
+  </ItemGroup>
+</Project>

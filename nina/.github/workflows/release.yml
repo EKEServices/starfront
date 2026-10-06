@@ -1,0 +1,68 @@
+name: Publish the N.I.N.A. plugin
+# Runs when a tag like v1.0.0.0 is pushed. Builds and packages the plugin,
+# verifies the zip and manifest agree, publishes them as release assets, then
+# downloads what was actually published and verifies it again - the manifest's
+# checksum has to be of the bytes people download, not of a rebuilt zip.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build, package and validate
+        shell: pwsh
+        working-directory: nina
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PLUGIN_REPOSITORY: ${{ github.repository }}
+          PLUGIN_CHANNEL: ${{ vars.PLUGIN_CHANNEL || 'Release' }}
+        run: ./build/Build-Release.ps1 -Tag $env:RELEASE_TAG -Repository $env:PLUGIN_REPOSITORY -Channel $env:PLUGIN_CHANNEL
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-release
+          path: nina/artifacts/release/*
+          if-no-files-found: error
+  publish:
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-release
+          path: release
+      - name: Verify before publishing
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PLUGIN_REPOSITORY: ${{ github.repository }}
+        run: ./nina/build/Verify-ReleaseArtifacts.ps1 -Directory release -Tag $env:RELEASE_TAG -Repository $env:PLUGIN_REPOSITORY
+      - name: Publish the verified assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ vars.PLUGIN_CHANNEL == 'Beta' }}
+      - name: Verify what was published
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PLUGIN_REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release download $env:RELEASE_TAG --repo $env:PLUGIN_REPOSITORY --dir published --pattern '*.zip' --pattern '*.manifest.json'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./nina/build/Verify-ReleaseArtifacts.ps1 -Directory published -Tag $env:RELEASE_TAG -Repository $env:PLUGIN_REPOSITORY

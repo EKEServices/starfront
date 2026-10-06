@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="../../Plugin.props" />
+  <PropertyGroup>
+    <RootNamespace>Starfront.Collab</RootNamespace>
+    <AssemblyName>Starfront.Collab</AssemblyName>
+    <!-- NuGet runtime dependencies land in the build output, so the package
+         script can pick up the ones the plugin owns. N.I.N.A.'s own assemblies
+         are never bundled; see build/Plugin.targets. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NINA.Plugin" Version="$(NinaPackageVersion)" />
+  </ItemGroup>
+  <Import Project="../../build/Plugin.targets" />
+</Project>

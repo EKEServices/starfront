@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup>
+    <PluginRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</PluginRoot>
+    <PluginArtifactDirectory>$(PluginRoot)/artifacts</PluginArtifactDirectory>
+    <PluginStageDirectory>$(PluginArtifactDirectory)/stage/$(Configuration)</PluginStageDirectory>
+    <PluginChannel Condition="'$(PluginChannel)' == ''">Release</PluginChannel>
+    <!-- The scripts run on PowerShell 7 and on Windows PowerShell 5.1 alike;
+         override with -p:PluginPowerShell=pwsh where 7 is installed. -->
+    <PluginPowerShell Condition="'$(PluginPowerShell)' == ''">powershell</PluginPowerShell>
+  </PropertyGroup>
+  <Import Project="$(PluginRoot)/local.props" Condition="Exists('$(PluginRoot)/local.props')" />
+  <PropertyGroup Condition="'$(NinaExecutable)' != ''">
+    <StartAction>Program</StartAction>
+    <StartProgram>$(NinaExecutable)</StartProgram>
+    <StartWorkingDirectory>$([System.IO.Path]::GetDirectoryName('$(NinaExecutable)'))</StartWorkingDirectory>
+  </PropertyGroup>
+
+  <!-- What ships. Plugin-owned files only: never NINA.* assemblies, never the
+       whole build output, because N.I.N.A. supplies its own copies of everything
+       it exports and a second copy of one of them breaks composition. -->
+  <ItemGroup>
+    <PluginPackageFile Include="$(TargetPath)" Destination="$(TargetFileName)" />
+    <PluginPackageFile Include="$(TargetDir)$(TargetName).pdb" Destination="$(TargetName).pdb" />
+    <PluginPackageFile Include="$(PluginRoot)/LICENSE.txt" Destination="LICENSE.txt" />
+  </ItemGroup>
+
+  <Target Name="StagePlugin" DependsOnTargets="Build">
+    <MakeDir Directories="$(PluginArtifactDirectory)" />
+    <WriteLinesToFile File="$(PluginArtifactDirectory)/package-files.txt" Lines="@(PluginPackageFile->'%(FullPath)|%(Destination)')" Overwrite="true" Encoding="UTF-8" />
+    <Exec Command="$(PluginPowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Stage-Plugin.ps1&quot; -FileList &quot;$(PluginArtifactDirectory)/package-files.txt&quot; -Destination &quot;$(PluginStageDirectory)&quot;" />
+  </Target>
+  <Target Name="DeployPlugin" DependsOnTargets="StagePlugin">
+    <Exec Command="$(PluginPowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Deploy-Plugin.ps1&quot; -Stage &quot;$(PluginStageDirectory)&quot; -Title &quot;$(Title)&quot; -Destination &quot;$(PluginDeployDirectory)&quot;" />
+  </Target>
+  <Target Name="PackagePlugin" DependsOnTargets="StagePlugin">
+    <Exec Command="$(PluginPowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Package-Plugin.ps1&quot; -Stage &quot;$(PluginStageDirectory)&quot; -AssemblyName &quot;$(TargetFileName)&quot; -Props &quot;$(PluginRoot)/Plugin.props&quot; -Version &quot;$(FileVersion)&quot; -Repository &quot;$(RepositoryUrl)&quot; -OutputDirectory &quot;$(PluginArtifactDirectory)/release&quot; -InstallerUrl &quot;$(PluginInstallerUrl)&quot; -Channel &quot;$(PluginChannel)&quot;" />
+  </Target>
+</Project>

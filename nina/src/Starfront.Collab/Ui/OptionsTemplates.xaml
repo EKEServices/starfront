@@ -1,0 +1,181 @@
+<ResourceDictionary
+    x:Class="Starfront.Collab.Ui.OptionsTemplates"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:Starfront.Collab.Ui">
+
+    <local:ShowWhenTrue x:Key="Starfront_ShowWhenTrue" />
+    <local:ShowWhenFalse x:Key="Starfront_ShowWhenFalse" />
+    <local:ShowWhenSomething x:Key="Starfront_ShowWhenSomething" />
+
+    <!--  Keyed by the plugin's title in code-behind, as N.I.N.A. looks it up.  -->
+    <DataTemplate x:Key="Starfront_OptionsTemplate">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="760" Margin="10" HorizontalAlignment="Left">
+
+                <TextBlock FontSize="16" FontWeight="SemiBold" Text="Starfront Collaboration" />
+                <TextBlock
+                    Margin="0,4,0,0"
+                    Opacity="0.8"
+                    Text="Several telescopes, one mosaic. Sign in with Discord, join a collaboration on the Starfront panel of the Imaging tab, and put the Starfront collaboration container in your sequence where a target would go."
+                    TextWrapping="Wrap" />
+
+                <!--  Sign in  -->
+                <TextBlock Margin="0,18,0,4" FontWeight="SemiBold" Text="Account" />
+                <StackPanel Orientation="Horizontal" Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenFalse}}">
+                    <Button
+                        MinWidth="180"
+                        Padding="12,6"
+                        Command="{Binding SignInCommand}"
+                        Content="Sign in with Discord" />
+                    <TextBlock
+                        Margin="12,0,0,0"
+                        VerticalAlignment="Center"
+                        Opacity="0.8"
+                        Text="Only members of the Starfront Discord server can take part. A browser window opens; come back here when it says you are signed in." TextWrapping="Wrap" MaxWidth="440" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenTrue}}">
+                    <TextBlock VerticalAlignment="Center">
+                        <Run Text="Signed in as " /><Run FontWeight="SemiBold" Text="{Binding Settings.UserName, Mode=OneWay}" /><Run Text="; this telescope is enrolled as " /><Run FontWeight="SemiBold" Text="{Binding Settings.AgentName, Mode=OneWay}" /><Run Text="." />
+                    </TextBlock>
+                    <Button
+                        Margin="12,0,0,0"
+                        Padding="10,4"
+                        Command="{Binding SignOutCommand}"
+                        Content="Sign out" />
+                </StackPanel>
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Opacity="0.8"
+                    Text="{Binding Session.SignInStatus}"
+                    TextWrapping="Wrap"
+                    Visibility="{Binding Session.SignInStatus, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                    <TextBlock VerticalAlignment="Center" Opacity="0.8" Text="{Binding Session.StatusText}" />
+                    <Button
+                        Margin="12,0,0,0"
+                        Padding="10,4"
+                        Command="{Binding RefreshCommand}"
+                        Content="Check in now"
+                        Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                </StackPanel>
+
+                <!--  Exposures  -->
+                <TextBlock Margin="0,18,0,4" FontWeight="SemiBold" Text="Your exposures" />
+                <TextBlock
+                    Opacity="0.8"
+                    Text="{Binding Exposures.Hint}"
+                    TextWrapping="Wrap" />
+                <DataGrid
+                    MaxHeight="280"
+                    Margin="0,6,0,0"
+                    AutoGenerateColumns="False"
+                    CanUserAddRows="False"
+                    CanUserDeleteRows="False"
+                    CanUserReorderColumns="False"
+                    CanUserResizeRows="False"
+                    CanUserSortColumns="False"
+                    HeadersVisibility="Column"
+                    ItemsSource="{Binding Exposures.Rows}"
+                    SelectionMode="Single">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn
+                            Width="180"
+                            Binding="{Binding Name, Mode=OneWay}"
+                            Header="Filter"
+                            IsReadOnly="True" />
+                        <DataGridTextColumn
+                            Width="120"
+                            Binding="{Binding Seconds, ValidatesOnExceptions=True}"
+                            Header="Seconds per sub" />
+                        <DataGridTextColumn
+                            Width="*"
+                            Binding="{Binding CountsAs, Mode=OneWay}"
+                            Header=""
+                            IsReadOnly="True" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock
+                    Margin="0,6,0,0"
+                    Opacity="0.7"
+                    Text="A project may set a shortest or longest sub it will take; if yours falls outside, joining tells you which filter to change. Gain, offset and binning below are what the frames are taken with."
+                    TextWrapping="Wrap" />
+
+                <!--  Camera  -->
+                <TextBlock Margin="0,18,0,4" FontWeight="SemiBold" Text="Camera" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="200" />
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Gain (-1 = camera default)" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Gain, ValidatesOnExceptions=True}" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Offset (-1 = camera default)" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Offset, ValidatesOnExceptions=True}" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Binning" />
+                    <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Binning, ValidatesOnExceptions=True}" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Dither after every N frames" />
+                    <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Text="{Binding Settings.DitherEvery, ValidatesOnExceptions=True}" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="0 leaves dithering to the triggers around the container" TextWrapping="Wrap" />
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Rotate to the project's angle" />
+                    <CheckBox Grid.Row="4" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.MatchRotation}" />
+                    <TextBlock Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="when a rotator is connected; a fixed camera shoots at the angle it sits" TextWrapping="Wrap" />
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Camera angle (no rotator)" />
+                    <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" Text="{Binding Settings.CameraAngleText}" />
+                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="read from the first plate solve of each panel; the server lays your panels along the camera's axes" TextWrapping="Wrap" />
+                </Grid>
+
+                <!--  Telescope  -->
+                <TextBlock Margin="0,18,0,4" FontWeight="SemiBold" Text="This telescope" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="200" />
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Name on the chart" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4" Text="{Binding Settings.TelescopeName}" />
+                    <TextBlock Grid.Row="0" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the profile's name unless you type one" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Hours a night to give" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Text="{Binding Settings.HoursPerNight, ValidatesOnExceptions=True}" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="0 lets the server assume six; the deal is sized to this" TextWrapping="Wrap" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Show where I point" />
+                    <CheckBox Grid.Row="2" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.SharePosition}" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the mount's RA and Dec and what it is doing, for the others' charts; never your site" TextWrapping="Wrap" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Check in every (minutes)" />
+                    <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Text="{Binding Settings.PollMinutes, ValidatesOnExceptions=True}" />
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Server" />
+                    <TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Text="{Binding Settings.ServerUrl}" />
+                    <Button Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" Padding="10,2" HorizontalAlignment="Left" Command="{Binding OpenServerCommand}" Content="Open" />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+    </DataTemplate>
+</ResourceDictionary>

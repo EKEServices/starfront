@@ -20,8 +20,10 @@ person's login should never be able to drive a mount.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import re
 import secrets
 import sys
 import time
@@ -29,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -1307,6 +1309,57 @@ def override_verdict(row_id: str, accepted: bool = Query(...),
 
 
 # ---------------------------------------------------------------------------
+# The N.I.N.A. plugin, served from here
+# ---------------------------------------------------------------------------
+
+#: Where the N.I.N.A. plugin's releases sit: the manifests N.I.N.A.'s plugin
+#: manager reads, and the zips they point at. N.I.N.A. lets anyone add a
+#: *plugin repository* by URL (Options > General > Plugin Repositories) and
+#: fetches `<url>/plugins/manifests` from it, so this server is one: people
+#: given `https://<host>/nina` see the plugin in their plugin manager and
+#: install and update it there, and nobody else sees it at all - which is
+#: what a closed test wants, and what the central manifest repository, with
+#: its review and its public listing, is not.
+NINA_DIR = Path(os.environ.get("ASTROCOLLAB_NINA_DIR")
+                or Path(__file__).resolve().parent / "nina_plugin")
+
+_NINA_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.zip$")
+
+
+def _nina_manifests() -> list[dict[str, Any]]:
+    """Every manifest in the folder, newest version of each plugin last."""
+    found: list[dict[str, Any]] = []
+    if not NINA_DIR.is_dir():
+        return found
+    for path in sorted(NINA_DIR.glob("*.manifest.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("Name") and data.get("Identifier"):
+            found.append(data)
+    return found
+
+
+@app.get("/nina/plugins/manifests")
+def nina_manifests() -> list[dict[str, Any]]:
+    """What N.I.N.A.'s plugin manager asks a plugin repository for: a list
+    of manifests, each saying where its zip is and what its checksum is."""
+    return _nina_manifests()
+
+
+@app.get("/nina/download/{name}")
+def nina_download(name: str):
+    """A plugin release, by the file name its manifest gives."""
+    if not _NINA_FILE.match(name):
+        raise HTTPException(status_code=404, detail="no such file")
+    path = NINA_DIR / name
+    if not path.is_file() or path.resolve().parent != NINA_DIR.resolve():
+        raise HTTPException(status_code=404, detail="no such file")
+    return FileResponse(path, media_type="application/zip", filename=name)
+
+
+# ---------------------------------------------------------------------------
 # Everything else
 # ---------------------------------------------------------------------------
 
@@ -1317,7 +1370,11 @@ def health() -> dict[str, Any]:
             "version": astrocontrol.__version__,
             "adminConfigured": bool(ADMIN_TOKEN),
             "discord": DISCORD.configured(),
-            "roleRequired": bool(DISCORD.role)}
+            "roleRequired": bool(DISCORD.role),
+            # The N.I.N.A. plugin releases this server offers, so a deploy
+            # can be checked from outside.
+            "ninaPlugins": [f'{m.get("Name")} {".".join(str(m["Version"][k]) for k in ("Major", "Minor", "Patch", "Build"))}'
+                            for m in _nina_manifests() if isinstance(m.get("Version"), dict)]}
 
 
 @app.exception_handler(Exception)

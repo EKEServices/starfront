@@ -35,6 +35,17 @@ Joining the collaboration
 Collab tab -> Join with Discord. One button: it signs you in with Discord and
 enrols this telescope. You need to be a member of the Discord server.
 
+Staying on N.I.N.A.?
+--------------------
+There is a plugin instead. In N.I.N.A., Options -> General -> Plugin
+Repositories, press + and enter
+   https://starfront-bray.duckdns.org/nina
+then install "Starfront Collaboration" from the Plugins tab and restart.
+Sign in with Discord on its options page, fill in your exposures, join a
+collaboration from the Starfront panel on the Imaging tab, and put the
+"Starfront collaboration" container in your Advanced Sequence where a target
+would go. It needs N.I.N.A. 3.2 or later.
+
 You will also want
 ------------------
 - The ASCOM Platform (ascom-standards.org) and your drivers - as for N.I.N.A.

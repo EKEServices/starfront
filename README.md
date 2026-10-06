@@ -1924,6 +1924,26 @@ covers the tiling arithmetic and the credential boundary in both directions.
 Still to come, and written down rather than implied: the depth map rasterised
 from the solved footprints already being stored.
 
+### From N.I.N.A.
+
+A telescope does not have to run Starfront to take part.  `nina/` holds a
+plugin for N.I.N.A. 3.2 that speaks the same protocol: sign in with Discord
+from its options page, fill in the seconds you shoot each filter at, join a
+collaboration from the **Starfront** panel on the Imaging tab, and put the
+**Starfront collaboration** container in the Advanced Sequence where a target
+would go.  When the sequence reaches it, it reads tonight's deal once and builds
+a panel per dealt cell out of N.I.N.A.'s own instructions — is it up, slew and
+centre (and rotate), switch filter, take the frames — so the triggers around it
+fire around every frame as they would around a target.  Every light is credited
+to its panel and reported on the next check-in.
+
+The server is also the plugin's **repository**: N.I.N.A. users add
+`https://<host>/nina` under *Options → General → Plugin Repositories* and the
+plugin appears in their plugin manager, installed and updated from there.
+Releases live in `server/nina_plugin/`; `nina/README.md` says how one is made.
+Nobody who was not given the address sees it, which is what a closed test
+wants.
+
 ## Layout
 
 ```
