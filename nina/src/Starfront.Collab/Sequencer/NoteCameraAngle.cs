@@ -58,6 +58,10 @@ namespace Starfront.Collab.Sequencer {
                     settings.CameraAngle = Math.Round(angle, 2);
                     Logger.Info($"Starfront: camera sits at {angle:0.0}°" + (double.IsNaN(was) ? "" : $" (was {was:0.0}°)"));
                 }
+                var laidFor = panel.Plan.Cell.Rotation;
+                if (RigProfile.HalfTurnDifference(angle, laidFor) > 2.0) {
+                    Logger.Warning($"Starfront: this panel was laid for a camera at {laidFor:0.0}° and the camera sits at {angle:0.0}°; the server lays the panels again from the next check-in, and tomorrow's deal uses them");
+                }
             }
             var context = reporter.Lookup(panel.Plan.TargetName);
             if (context != null && result.Coordinates != null) {
@@ -66,6 +70,8 @@ namespace Starfront.Collab.Sequencer {
                     TargetName = context.TargetName, ProjectId = context.ProjectId, ProjectName = context.ProjectName,
                     TaskId = context.TaskId, PanelNumber = context.PanelNumber, Filter = context.Filter,
                     Scale = context.Scale, FocalLength = context.FocalLength, Colour = context.Colour, Bandpass = context.Bandpass,
+                    // Where the frame really landed and how it really sits: the
+                    // solved centre and angle, with the camera's own field.
                     Footprint = new Region {
                         Ra = Math.Round(solved.RADegrees, 5), Dec = Math.Round(solved.Dec, 5),
                         Width = context.Footprint?.Width ?? panel.Plan.Cell.Width,

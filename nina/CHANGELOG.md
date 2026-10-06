@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.6
+
+- A camera without a rotator is plate-solved once at the first panel when its angle is unknown or differs from the angle the panels were laid for; the server then lays the panels again before the night starts, instead of a night being shot on a grid the camera cannot cover.
+- Reported footprints carry the camera's own field size at the solved angle.
+
 ## 1.0.0.5
 
 - Every collaboration on the Starfront panel shows its sky (DSS2 colour) with the region outlined and, once joined, your own panels drawn on it with tonight's share filled; cutouts are kept on disk.

@@ -208,6 +208,21 @@ namespace Starfront.Collab.Sequencer {
                 return;
             }
             Order(plans);
+            // A camera that cannot turn shoots at whatever angle it sits, and the
+            // server lays its panels along that angle - as last reported. Before
+            // the first panel, make sure the angle is the real one, and if the
+            // panels were laid for another, have them laid again now rather than
+            // shoot a night on a grid the camera cannot cover.
+            if (await ReconcileCameraAngleAsync(plans, settings, progress, token)) {
+                deals = session.DealTonight(ProjectId);
+                plans = PlanPanels(deals, settings);
+                if (plans.Count == 0) {
+                    Summary = "Nothing dealt to this telescope tonight after the panels were laid again";
+                    Logger.Info($"Starfront: {Summary}");
+                    return;
+                }
+                Order(plans);
+            }
             foreach (var plan in plans) Add(BuildPanel(plan, settings, reporter));
             WatchPanels();
             PublishPlan();
@@ -245,6 +260,82 @@ namespace Starfront.Collab.Sequencer {
                 Logger.Info($"Starfront: {Summary}");
                 try { await session.ReportPendingAsync(token); } catch (Exception ex) { StarfrontClient.Log("reporting the night", ex); }
             }
+        }
+
+        /// <summary>
+        /// For a camera without a rotator: learn its angle from one plate solve
+        /// at the first panel if it is not known or the panels were laid for a
+        /// different one, tell the server, and re-read the deal. True when the
+        /// deal was re-read and the plans must be built again.
+        /// </summary>
+        private async Task<bool> ReconcileCameraAngleAsync(List<PanelPlan> plans, Settings.StarfrontSettings settings,
+                                                            IProgress<ApplicationStatus> progress, CancellationToken token) {
+            if (RigProfile.HasRotator(Runtime.Host)) return false;
+            var laidFor = plans[0].Cell.Rotation;
+            var known = settings.CameraAngle;
+            if (!double.IsNaN(known) && RigProfile.HalfTurnDifference(known, laidFor) <= 2.0) return false;
+
+            var first = plans.FirstOrDefault(p => p.HoursUntilUp is 0.0) ?? plans[0];
+            Logger.Info($"Starfront: the panels were laid for a camera at {laidFor:0.0}° and the camera's angle is "
+                        + (double.IsNaN(known) ? "not measured yet" : $"{known:0.0}°") + "; solving once at the first panel to be sure");
+            progress?.Report(new ApplicationStatus { Status = "Starfront: measuring the camera's angle" });
+            if (telescopeMediator.GetInfo().AtPark) throw new SequenceEntityFailedException("Starfront: the mount is parked");
+
+            double measured;
+            var stoppedGuiding = false;
+            try {
+                stoppedGuiding = await guiderMediator.StopGuiding(token);
+                await telescopeMediator.SlewToCoordinatesAsync(first.Coordinates, token);
+                var plateSolveSettings = profileService.ActiveProfile.PlateSolveSettings;
+                var solver = plateSolverFactory.GetCaptureSolver(plateSolverFactory.GetPlateSolver(plateSolveSettings),
+                                                                 plateSolverFactory.GetBlindSolver(plateSolveSettings),
+                                                                 imagingMediator, filterWheelMediator);
+                var parameter = new NINA.PlateSolving.CaptureSolverParameter {
+                    Attempts = plateSolveSettings.NumberOfAttempts,
+                    Binning = plateSolveSettings.Binning,
+                    Coordinates = telescopeMediator.GetCurrentPosition(),
+                    DownSampleFactor = plateSolveSettings.DownSampleFactor,
+                    FocalLength = profileService.ActiveProfile.TelescopeSettings.FocalLength,
+                    MaxObjects = plateSolveSettings.MaxObjects,
+                    PixelSize = profileService.ActiveProfile.CameraSettings.PixelSize,
+                    ReattemptDelay = TimeSpan.FromMinutes(plateSolveSettings.ReattemptDelay),
+                    Regions = plateSolveSettings.Regions,
+                    SearchRadius = plateSolveSettings.SearchRadius,
+                    BlindFailoverEnabled = plateSolveSettings.BlindFailoverEnabled,
+                };
+                var sequence = new NINA.Equipment.Model.CaptureSequence(plateSolveSettings.ExposureTime, "SNAPSHOT", plateSolveSettings.Filter,
+                                                                         new BinningMode(plateSolveSettings.Binning, plateSolveSettings.Binning), 1) {
+                    Gain = plateSolveSettings.Gain,
+                };
+                var result = await solver.Solve(sequence, parameter, null, progress, token);
+                if (result == null || !result.Success) {
+                    Logger.Warning("Starfront: the angle solve failed; shooting the panels as laid and learning the angle from the first centring");
+                    return false;
+                }
+                measured = result.PositionAngle;
+            } finally {
+                if (stoppedGuiding) {
+                    try { await guiderMediator.StartGuiding(false, progress, token); } catch (Exception ex) { Logger.Warning($"Starfront: guiding did not resume - {ex.Message}"); }
+                }
+            }
+
+            settings.CameraAngle = Math.Round(measured, 2);
+            if (RigProfile.HalfTurnDifference(measured, laidFor) <= 2.0) {
+                Logger.Info($"Starfront: camera sits at {measured:0.0}°, as the panels were laid; carrying on");
+                return false;
+            }
+            Logger.Info($"Starfront: camera sits at {measured:0.0}°, not {laidFor:0.0}°; asking the server to lay the panels again before starting");
+            progress?.Report(new ApplicationStatus { Status = "Starfront: the panels are being laid again for the camera's real angle" });
+            try {
+                await Runtime.Session.PollAsync(token);
+            } catch (ServerException ex) {
+                Logger.Warning($"Starfront: {ex.Message}; shooting the panels as laid");
+                return false;
+            }
+            var again = Runtime.Session.DealTonight(ProjectId);
+            var relaid = again.Any(d => d.Cells.Count > 0 && RigProfile.HalfTurnDifference(d.Cells[0].Rotation, measured) <= 2.0);
+            if (!relaid) Logger.Warning("Starfront: the server kept the panels as they were; shooting them as laid");
+            return relaid;
         }
 
         private bool IsUpNow(PanelPlan plan) {
@@ -408,10 +499,19 @@ namespace Starfront.Collab.Sequencer {
             var panel = new StarfrontPanel(profileService, nighttimeCalculator, plan);
             var scale = RigProfile.Scale(Runtime.Host, settings);
             var focal = profileService.ActiveProfile.TelescopeSettings.FocalLength;
+            // The frame's footprint is the camera's own field at the angle it is
+            // shot, which is what the depth map is built from; the cell's size is
+            // a bounding box and would be credited twice over at an angle.
+            var field = RigProfile.Field(Runtime.Host, settings);
+            var angle = RigProfile.HasRotator(Runtime.Host) || double.IsNaN(settings.CameraAngle) ? plan.Cell.Rotation : settings.CameraAngle;
             reporter.Register(new PanelContext {
                 TargetName = plan.TargetName, ProjectId = plan.Deal.Project, ProjectName = plan.Deal.ProjectName,
                 TaskId = plan.Deal.Id, PanelNumber = plan.PanelNumber, Filter = plan.Filters.First().Filter,
-                Footprint = new Region { Ra = plan.Cell.Ra, Dec = plan.Cell.Dec, Width = plan.Cell.Width, Height = plan.Cell.Height, Rotation = plan.Cell.Rotation },
+                Footprint = new Region {
+                    Ra = plan.Cell.Ra, Dec = plan.Cell.Dec,
+                    Width = field?.width ?? plan.Cell.Width, Height = field?.height ?? plan.Cell.Height,
+                    Rotation = angle,
+                },
                 Scale = scale, FocalLength = focal > 0 ? focal : null, Colour = settings.Colour,
                 Bandpass = Filters.Bandpass(plan.Filters.First().WheelName ?? ""),
             });

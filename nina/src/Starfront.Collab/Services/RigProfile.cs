@@ -22,6 +22,21 @@ namespace Starfront.Collab.Services {
             return 206.265 * pixel * Math.Max(1, (int)settings.Binning) / focal;
         }
 
+        /// <summary>The camera's field on the sky in degrees, width by height, or null until the sensor is known.</summary>
+        public static (double width, double height)? Field(HostServices host, StarfrontSettings settings) {
+            var scale = Scale(host, settings);
+            if (scale == null || settings.SensorWidth <= 0 || settings.SensorHeight <= 0) return null;
+            var binning = Math.Max(1, (int)settings.Binning);
+            return (scale.Value * (settings.SensorWidth / (double)binning) / 3600.0,
+                    scale.Value * (settings.SensorHeight / (double)binning) / 3600.0);
+        }
+
+        /// <summary>How far two camera angles differ, half a turn counting as the same angle (the same rectangle on the sky).</summary>
+        public static double HalfTurnDifference(double a, double b) {
+            var d = ((a - b + 90.0) % 180.0 + 180.0) % 180.0 - 90.0;
+            return Math.Abs(d);
+        }
+
         /// <summary>Remember what a connected camera says about itself, so the afternoon knows it too.</summary>
         public static void RememberCamera(HostServices host, StarfrontSettings settings) {
             var camera = host.Camera.GetInfo();
