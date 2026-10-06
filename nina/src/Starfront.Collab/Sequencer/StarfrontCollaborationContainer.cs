@@ -45,7 +45,7 @@ namespace Starfront.Collab.Sequencer {
     /// would around a target, and every light is credited to its panel.
     /// </summary>
     [ExportMetadata("Name", "Starfront collaboration")]
-    [ExportMetadata("Description", "Shoots the panels and filter the Starfront server dealt this telescope tonight, at your own exposures.")]
+    [ExportMetadata("Description", "Shoots what the Starfront server dealt this telescope tonight - the field, or its panels of a mosaic, and the filter - at your own exposures.")]
     [ExportMetadata("Icon", "Starfront_CollabSVG")]
     [ExportMetadata("Category", "Starfront")]
     [Export(typeof(ISequenceItem))]
@@ -213,7 +213,7 @@ namespace Starfront.Collab.Sequencer {
             Summary = $"{string.Join(" · ", deals.Select(d => $"{d.ProjectName}: {StarfrontSession.Describe(d)}"))} · about {totalHours:0.0} h";
             RaisePropertyChanged(nameof(TonightText));
             Logger.Info($"Starfront: tonight - {Summary}");
-            foreach (var plan in plans) Logger.Info($"Starfront:   panel {plan.PanelNumber} of {plan.Deal.ProjectName}: {plan.FramesText}"
+            foreach (var plan in plans) Logger.Info($"Starfront:   {plan.TargetName}: {plan.FramesText}"
                                                     + (plan.HoursUntilUp is double wait && wait > 0 ? $" (up in {wait:0.0} h)" : ""));
 
             session.Run.Running = true;
@@ -226,7 +226,7 @@ namespace Starfront.Collab.Sequencer {
                     token.ThrowIfCancellationRequested();
                     var again = Items.OfType<StarfrontPanel>().Where(p => p.SkippedForAltitude && IsUpNow(p.Plan)).ToList();
                     if (again.Count == 0) break;
-                    Logger.Info($"Starfront: coming back to {again.Count} panel(s) that have risen");
+                    Logger.Info($"Starfront: coming back to {again.Count} field(s) that have risen");
                     foreach (var panel in again) panel.ResetAll();
                     await base.Execute(progress, token);
                 }
@@ -236,7 +236,9 @@ namespace Starfront.Collab.Sequencer {
                 session.Run.ProjectId = null;
                 var done = Items.OfType<StarfrontPanel>().Count(p => p.Status == SequenceEntityStatus.FINISHED && !p.SkippedForAltitude);
                 var skipped = Items.OfType<StarfrontPanel>().Count(p => p.SkippedForAltitude);
-                Summary = $"{done} of {plans.Count} panels shot" + (skipped > 0 ? $", {skipped} never rose above the floor" : "");
+                var unit = plans.All(p => p.SingleField) ? (plans.Count == 1 ? "field" : "fields") : "panels";
+                Summary = plans.Count == 1 && done == 1 ? $"the {unit} was shot"
+                        : $"{done} of {plans.Count} {unit} shot" + (skipped > 0 ? $", {skipped} never rose above the floor" : "");
                 Logger.Info($"Starfront: {Summary}");
                 try { await session.ReportPendingAsync(token); } catch (Exception ex) { StarfrontClient.Log("reporting the night", ex); }
             }
@@ -270,12 +272,12 @@ namespace Starfront.Collab.Sequencer {
                     var exposure = deal.ExposureFor(name);
                     if (exposure <= 0) exposure = settings.ExposureFor(name) ?? 0.0;
                     if (exposure <= 0) {
-                        Logger.Warning($"Starfront: no exposure known for {Filters.Label(canonical)} on {deal.ProjectName}; set one in the exposure table");
+                        Logger.Warning($"Starfront: no exposure known for {settings.FilterName(name)} on {deal.ProjectName}; set one in the exposure table");
                         continue;
                     }
                     var wheelName = wheel.FirstOrDefault(w => Filters.Same(w, name));
                     if (wheel.Count > 0 && wheelName == null && !settings.Colour) {
-                        Logger.Warning($"Starfront: this profile's filter wheel has no {Filters.Label(canonical)}; {deal.ProjectName} dealt it anyway and it is skipped");
+                        Logger.Warning($"Starfront: this profile's filter wheel has no filter matching '{name}'; {deal.ProjectName} dealt it anyway and it is skipped");
                         continue;
                     }
                     filters.Add(new FilterFrames(canonical, wheelName, count, exposure));
@@ -324,7 +326,7 @@ namespace Starfront.Collab.Sequencer {
             }
             var never = plans.Where(p => p.HoursUntilUp == null).ToList();
             foreach (var plan in never) {
-                Logger.Warning($"Starfront: panel {plan.PanelNumber} of {plan.Deal.ProjectName} does not rise above its floor in the next twelve hours and is left out tonight");
+                Logger.Warning($"Starfront: {plan.TargetName} does not rise above its floor in the next twelve hours and is left out tonight");
                 plans.Remove(plan);
             }
             var ordered = plans.OrderBy(p => p.HoursUntilUp > 0 ? 1 : 0)

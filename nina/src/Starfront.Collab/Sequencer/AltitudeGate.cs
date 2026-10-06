@@ -26,9 +26,9 @@ namespace Starfront.Collab.Sequencer {
             this.panel = panel;
             this.profileService = profileService;
             this.run = run;
-            Name = "Starfront: is the panel up?";
+            Name = panel.Plan.SingleField ? "Starfront: is the field up?" : "Starfront: is the panel up?";
             Category = "Starfront";
-            Description = "Skips the panel for now if it is below the project's floor, the horizon, or too near the Moon.";
+            Description = "Skips this field for now if it is below the project's floor, the horizon, or too near the Moon.";
             Icon = Icons.Find("WaitForAltitudeSVG");
             Detail = panel.Plan.MinAltitude > 0 ? $"floor {panel.Plan.MinAltitude:0}°" : "above the horizon";
         }

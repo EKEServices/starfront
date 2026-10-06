@@ -24,7 +24,10 @@ namespace Starfront.Collab.Sequencer {
         /// <summary>Seconds the panel takes, exposures only.</summary>
         public double Seconds => Filters.Sum(f => f.Frames * f.Exposure);
 
-        public string FramesText => string.Join(", ", Filters.Select(f => $"{f.Frames} × {Sky.Filters.Label(f.Filter)} {f.Exposure:0.#}s"));
+        /// <summary>"12 × Ha 300s", with the filter as the wheel spells it.</summary>
+        public string FramesText => string.Join(", ", Filters.Select(f => $"{f.Frames} × {f.WheelName ?? f.Filter} {f.Exposure:0.#}s"));
+
+        public bool SingleField => Deal?.Kind == "single";
 
         /// <summary>Hours from now until the panel drops below the floor, or null if it never rises above it in the next twelve.</summary>
         public double? HoursAbove { get; set; }

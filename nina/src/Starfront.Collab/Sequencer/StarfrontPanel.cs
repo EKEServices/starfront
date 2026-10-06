@@ -43,7 +43,7 @@ namespace Starfront.Collab.Sequencer {
             try { NighttimeData = nighttimeCalculator.Calculate(); } catch (Exception ex) { Logger.Debug($"Starfront: night data - {ex.Message}"); }
             Name = plan.Deal.Kind == "single" ? plan.Deal.ProjectName : $"{plan.Deal.ProjectName} · panel {plan.PanelNumber}";
             Category = "Starfront";
-            Description = "A panel dealt to this telescope tonight";
+            Description = plan.SingleField ? "The field dealt to this telescope tonight" : "A panel dealt to this telescope tonight";
             Icon = Icons.Find("TelescopeSVG");
             IsExpanded = false;
         }

@@ -17,7 +17,7 @@
                 <TextBlock
                     Margin="0,4,0,0"
                     Opacity="0.8"
-                    Text="Several telescopes, one mosaic. Sign in with Discord, join a collaboration on the Starfront panel of the Imaging tab, and put the Starfront collaboration container in your sequence where a target would go."
+                    Text="Several telescopes on one target - a single field or a mosaic. Sign in with Discord, join a collaboration on the Starfront panel of the Imaging tab, and put the Starfront collaboration container in your sequence where a target would go."
                     TextWrapping="Wrap" />
 
                 <!--  Sign in  -->
@@ -85,14 +85,9 @@
                             Header="Filter"
                             IsReadOnly="True" />
                         <DataGridTextColumn
-                            Width="120"
+                            Width="*"
                             Binding="{Binding Seconds, ValidatesOnExceptions=True}"
                             Header="Seconds per sub" />
-                        <DataGridTextColumn
-                            Width="*"
-                            Binding="{Binding CountsAs, Mode=OneWay}"
-                            Header=""
-                            IsReadOnly="True" />
                     </DataGrid.Columns>
                 </DataGrid>
                 <TextBlock
@@ -137,7 +132,7 @@
 
                     <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Camera angle (no rotator)" />
                     <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" Text="{Binding Settings.CameraAngleText}" />
-                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="read from the first plate solve of each panel; the server lays your panels along the camera's axes" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="read from the first plate solve of each field; on a mosaic the server lays your panels along the camera's axes" TextWrapping="Wrap" />
                 </Grid>
 
                 <!--  Telescope  -->

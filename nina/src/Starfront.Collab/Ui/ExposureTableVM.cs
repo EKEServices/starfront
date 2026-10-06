@@ -20,15 +20,6 @@ namespace Starfront.Collab.Ui {
 
         public string Name { get; }
 
-        /// <summary>What the server will call it: "Ha 3nm" counts as Ha.</summary>
-        public string CountsAs {
-            get {
-                var canonical = Filters.Canonical(Name);
-                var label = Filters.Label(canonical);
-                return string.Equals(label, Name, StringComparison.OrdinalIgnoreCase) ? "" : $"counts as {label}";
-            }
-        }
-
         /// <summary>Text, so that a half-typed number is not coerced into something else; blank means unset.</summary>
         public string Seconds {
             get => seconds;
@@ -67,7 +58,7 @@ namespace Starfront.Collab.Ui {
 
         public string Hint => Rows.Count == 0
             ? "No filters are set up in this profile yet."
-            : "The length you normally shoot each filter at. Your share of a collaboration is dealt at these, so every light calibrates against your own darks.";
+            : "The length you normally shoot each filter at, by the names in your filter wheel. Your share of a collaboration is dealt at these, so every light calibrates against your own darks.";
 
         private void OnProfileChanged(object sender, EventArgs e) => Dispatch.OnUi(Rebuild);
 

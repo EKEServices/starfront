@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.3
+
+- Filters are shown everywhere as your own wheel names them; the server does the matching to its standard names.
+- Wording covers single-field collaborations as well as mosaics.
+
 ## 1.0.0.2
 
 - The server lives at collab.starfront.space; the old address, if typed in, is pointed at the new one.

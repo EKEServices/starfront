@@ -96,7 +96,8 @@ namespace Starfront.Collab.Services {
 
                 ledger.Credit(night, context.ProjectId, context.TaskId, context.PanelNumber.ToString(), filter, seconds,
                               hfr, rms, context.Footprint, context.Scale, context.FocalLength, context.Colour, context.Bandpass);
-                Logger.Info($"Starfront: {context.ProjectName} panel {context.PanelNumber} {Filters.Label(filter)} +{seconds:0}s"
+                var shown = string.IsNullOrWhiteSpace(args.Filter) ? filter : args.Filter.Trim();
+                Logger.Info($"Starfront: {context.TargetName} {shown} +{seconds:0}s"
                             + (hfr.HasValue ? $", HFR {hfr:0.00}\"" : "") + (rms.HasValue ? $", guiding {rms:0.00}\"" : ""));
             } catch (Exception ex) {
                 Logger.Error("Starfront: a saved frame could not be credited", ex);

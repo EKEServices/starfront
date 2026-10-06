@@ -197,7 +197,8 @@ namespace Starfront.Collab.Services {
                     if (recorded?.Id == null) continue;
                     ledger.MarkReported(row.Key);
                     sent++;
-                    var line = $"{row.Night} panel {row.Panel} {Filters.Label(row.Filter)}: {(recorded.Accepted ? "accepted" : "rejected")}"
+                    var where = Tasks.FirstOrDefault(t => t.Id == row.Task)?.Kind == "single" ? "the field" : $"panel {row.Panel}";
+                    var line = $"{row.Night} {where} {settings.FilterName(row.Filter)}: {(recorded.Accepted ? "accepted" : "rejected")}"
                                + (string.IsNullOrEmpty(recorded.Summary) ? "" : $" - {recorded.Summary}");
                     verdicts.Add(line);
                     if (recorded.Accepted) Logger.Info("Starfront: " + line);
@@ -366,7 +367,7 @@ namespace Starfront.Collab.Services {
                 var names = wants.Filters?.Keys.ToList() ?? new List<string>();
                 if (names.Count == 0) names = listing.Goals?.Keys.ToList() ?? new List<string>();
                 foreach (var filterName in names) {
-                    var label = Filters.Label(Filters.Canonical(filterName));
+                    var label = settings.FilterName(filterName);
                     var seconds = settings.ExposureFor(filterName);
                     if (seconds == null && settings.Colour) seconds = settings.ExposureFor("RGB");
                     if (seconds == null) {
@@ -430,15 +431,16 @@ namespace Starfront.Collab.Services {
         public Task<JObject> DepthAsync(string projectId, CancellationToken token) =>
             client.DepthAsync(settings.AgentToken, projectId, token);
 
-        /// <summary>"4 panels × 12 frames of OIII" for a dealt task.</summary>
+        /// <summary>"4 panels, 12 × OIII each" or "the field, 12 × OIII" for a dealt task, filters as this wheel spells them.</summary>
         public static string Describe(DealTask task) {
             if (task?.Visit == null || task.Share.Count == 0) return "nothing dealt tonight";
+            var settings = Runtime.Ready ? Runtime.Settings : null;
             var parts = task.Visit.Frames.Where(kv => kv.Value > 0)
-                .Select(kv => $"{kv.Value} × {Filters.Label(Filters.Canonical(kv.Key))}");
+                .Select(kv => $"{kv.Value} × {(settings != null ? settings.FilterName(kv.Key) : kv.Key)}");
             var frames = string.Join(", ", parts);
             if (frames.Length == 0) frames = "no frames";
-            var panels = task.Kind == "single" ? "the object" : $"{task.Share.Count} panel{(task.Share.Count == 1 ? "" : "s")}";
-            return $"{panels}, {frames} each";
+            if (task.Kind == "single") return $"the field, {frames}";
+            return $"{task.Share.Count} panel{(task.Share.Count == 1 ? "" : "s")}, {frames} each";
         }
     }
 }

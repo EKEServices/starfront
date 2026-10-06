@@ -1,7 +1,7 @@
 # Starfront Collaboration for N.I.N.A.
 
-The N.I.N.A. side of a Starfront collaboration: several telescopes, one
-mosaic. A plugin for N.I.N.A. 3.2 or later on .NET 8, built the way the
+The N.I.N.A. side of a Starfront collaboration: several telescopes on one
+target, a single field or a mosaic. A plugin for N.I.N.A. 3.2 or later on .NET 8, built the way the
 [N.I.N.A. plugin template](https://github.com/isbeorn/nina.plugin.template)
 builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
 
@@ -23,10 +23,12 @@ builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
    Discord server. Coming back, the page says who you are and that this
    telescope is enrolled under your account.
 
-3. **Your exposures.** On the same page, fill in the seconds per sub you
-   normally shoot each filter at. Your share of every collaboration is dealt
-   at these lengths, so every light calibrates against your own darks. Gain,
-   offset and binning are there too; -1 means the camera's default.
+3. **Your exposures.** On the same page, the filters of your own wheel are
+   listed by their own names; fill in the seconds per sub you normally shoot
+   each at. The server works out which of its filters yours are. Your share
+   of every collaboration is dealt at these lengths, so every light
+   calibrates against your own darks. Gain, offset and binning are there
+   too; -1 means the camera's default.
 
 4. **Join a collaboration.** On the Imaging tab, open the **Starfront** panel
    (it is a dock panel like Image History). Each open collaboration says what
@@ -43,17 +45,18 @@ builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
 
 When the sequence reaches the container it asks the server what this
 telescope was dealt tonight - once; a night's deal holds for the whole night -
-and builds a panel for each dealt cell: *is it up?*, slew and centre (and
-rotate, with a rotator), switch filter, take the frames. Panels below the
-project's altitude floor, below your horizon or too near a Moon that is up are
+and builds a target for it: the field of a single-field collaboration, or one
+per dealt panel of a mosaic. Each goes *is it up?*, slew and centre (and
+rotate, with a rotator), switch filter, take the frames. A field below the
+project's altitude floor, below your horizon or too near a Moon that is up is
 skipped for now and tried again once the others are done. Every light is
-credited to its panel with its star size and guiding error, kept on disk, and
-sent to the server on the next check-in. Frames shot while the server was
-down go the next time it answers.
+credited to the sky it covered with its star size and guiding error, kept on
+disk, and sent to the server on the next check-in. Frames shot while the
+server was down go the next time it answers.
 
-The target name in your file pattern is `<project> panel <n>`, so your files
-sort by panel, and each FITS header carries `STARFRNT` (the project) and
-`SFPANEL`.
+The target name in your file pattern is the project's name, with `panel <n>`
+added on a mosaic, so your files sort by project and panel, and each FITS
+header carries `STARFRNT` (the project) and `SFPANEL`.
 
 ## For people building it
 

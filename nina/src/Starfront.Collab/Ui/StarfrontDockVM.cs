@@ -41,9 +41,10 @@ namespace Starfront.Collab.Ui {
             get {
                 var region = Listing.Region;
                 var size = region == null ? "" : $"{region.Width:0.0}° × {region.Height:0.0}°";
-                var kind = Listing.Kind == "single" ? "single target" : "mosaic";
+                var kind = Listing.Kind == "single" ? "single field" : "mosaic";
+                var settings = Runtime.Ready ? Runtime.Settings : null;
                 var goals = string.Join(" · ", (Listing.Goals ?? new Dictionary<string, double>())
-                    .Select(kv => $"{Filters.Label(Filters.Canonical(kv.Key))} {kv.Value:0.#} h"));
+                    .Select(kv => $"{(settings != null ? settings.FilterName(kv.Key) : kv.Key)} {kv.Value:0.#} h"));
                 return string.Join(" · ", new[] { kind, size, goals }.Where(s => s.Length > 0));
             }
         }

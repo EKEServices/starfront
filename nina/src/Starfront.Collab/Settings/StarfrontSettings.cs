@@ -275,6 +275,24 @@ namespace Starfront.Collab.Settings {
             set { options.SetValueInt16(nameof(Binning), (short)Math.Max(1, Math.Min(4, (int)value))); RaisePropertyChanged(); }
         }
 
+        /// <summary>
+        /// A filter as this telescope's wheel spells it. The server speaks of
+        /// filters in its own standard names and a project in whatever its
+        /// coordinator typed; what the person sees here is their own wheel's
+        /// name for the same filter, or the name as given when the wheel has
+        /// no such filter.
+        /// </summary>
+        public string FilterName(string name) {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            foreach (var own in ProfileFilterNames()) {
+                if (Sky.Filters.Same(own, name)) return own;
+            }
+            foreach (var own in Exposures.Keys) {
+                if (Sky.Filters.Same(own, name)) return own;
+            }
+            return name.Trim();
+        }
+
         /// <summary>The filters the profile knows, as the wheel spells them.</summary>
         public List<string> ProfileFilterNames() {
             var names = profiles.ActiveProfile?.FilterWheelSettings?.FilterWheelFilters?
