@@ -1,5 +1,6 @@
 @echo off
-rem  Starts the collaboration server and leaves this window open showing it.
+rem  Starts the collaboration server on this PC and leaves this window open
+rem  showing it. For trying things out; the real one runs on the VPS.
 rem
 rem  There is no token in this file on purpose. The server keeps its own beside
 rem  its database, outside the program folder, because this folder goes to

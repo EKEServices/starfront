@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.2
+
+- The server lives at collab.starfront.space; the old address, if typed in, is pointed at the new one.
+
 ## 1.0.0.1
 
 - The container follows the server only while it sits in a sequence.

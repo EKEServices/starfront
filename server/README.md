@@ -13,7 +13,7 @@ rules the coordinator set.
 python server/run.py
 ```
 
-Or double-click `Start the collab server.cmd`. That is the whole thing: it
+Or double-click `Start the Starfront server.cmd`. That is the whole thing: it
 makes up a coordinator token on the first run, keeps it beside the database and
 prints it, so there is nothing to configure and nothing to remember. Paste it
 into Starfront under **Collab → Running a collaboration**.
@@ -29,9 +29,12 @@ somebody might share.
 
 | | |
 |---|---|
-| `ASTROCOLLAB_DATA` | where the database and the token live (default: the `collab` folder beside your settings) |
-| `ASTROCOLLAB_ADMIN_TOKEN` | overrides the token file, for a service definition or a password manager |
+| `STARFRONT_DATA` | where the database and the token live (default: the `collab` folder beside your settings) |
+| `STARFRONT_ADMIN_TOKEN` | overrides the token file, for a service definition or a password manager |
 | `--show-token` | print the token and exit |
+
+The settings were called `ASTROCOLLAB_…` before the server was named; those
+names are still read, so nothing written under them has to change.
 
 ## Putting it on a VPS, with Discord sign-in
 
@@ -40,13 +43,13 @@ Discord will only send people back to an `https://` address. A small Linux
 VPS (Ubuntu or Debian, the cheapest tier) and a hostname pointed at it is all
 it takes; `server/deploy/install.sh` does the rest.
 
-1. **Point a hostname at the VPS.** An `A` record, e.g. `collab.example.org`
+1. **Point a hostname at the VPS.** An `A` record, e.g. `collab.starfront.space`
    → the VPS's IP. Caddy fetches the certificate itself once that resolves.
 
 2. **Create the Discord application** at
    <https://discord.com/developers/applications> → *New Application* →
    *OAuth2*. Note the **Client ID**, generate a **Client Secret**, and add
-   the redirect `https://collab.example.org/auth/discord/callback`. No bot is
+   the redirect `https://collab.starfront.space/auth/discord/callback`. No bot is
    needed and no scopes beyond `identify` and `guilds.members.read`, which
    the server asks for by itself. Get your **server (guild) id** from Server
    Settings → Widget, and, if only some people should be able to *start*
@@ -56,20 +59,23 @@ it takes; `server/deploy/install.sh` does the rest.
    or cloned there:
 
    ```bash
-   sudo bash server/deploy/install.sh collab.example.org
+   sudo bash server/deploy/install.sh collab.starfront.space
    ```
 
-   It installs Python and Caddy, copies the server to `/opt/astrocollab`,
-   makes a venv, creates the `astrocollab` system user with its data in
-   `/var/lib/astrocollab`, installs and starts the systemd service on
+   It installs Python and Caddy, copies the server to `/opt/starfront`,
+   makes a venv, creates the `starfront` system user with its data in
+   `/var/lib/starfront`, installs and starts the systemd service on
    loopback, and puts Caddy in front of it on your hostname. It prints the
    owner token at the end. Run it again after pulling a newer version; it
-   leaves the data alone.
+   leaves the data alone. A server first set up under the old name
+   (`astrocollab`) is carried over the first time it runs. While telescopes
+   still point at an older address, `STARFRONT_LEGACY_HOST=old.example.org`
+   in front of the command keeps that address answering as well.
 
-4. **Fill in Discord.** Edit `/var/lib/astrocollab/discord.env` — the values
+4. **Fill in Discord.** Edit `/var/lib/starfront/discord.env` — the values
    from step 2, plus your own Discord user id under
-   `ASTROCOLLAB_DISCORD_OWNERS` so that you are an owner when you sign in —
-   and `sudo systemctl restart astrocollab`. The startup line says
+   `STARFRONT_DISCORD_OWNERS` so that you are an owner when you sign in —
+   and `sudo systemctl restart starfront`. The startup line says
    `discord   sign-in on, guild …` when it has taken.
 
 5. **In Starfront**, everybody presses *Join with Discord*. The server's
@@ -80,10 +86,11 @@ it takes; `server/deploy/install.sh` does the rest.
 
 | | |
 |---|---|
-| `journalctl -u astrocollab -f` | the server's log |
-| `sudo systemctl restart astrocollab` | after changing `discord.env` |
-| `/var/lib/astrocollab/collab.sqlite` | the database — back it up by copying it |
-| `curl https://collab.example.org/api/v1/health` | `"discord": true` when sign-in is on |
+| `journalctl -u starfront -f` | the server's log |
+| `sudo systemctl restart starfront` | after changing `discord.env` |
+| `/var/lib/starfront/collab.sqlite` | the database — back it up by copying it |
+| `curl https://collab.starfront.space/api/v1/health` | `"discord": true` when sign-in is on |
+| `https://collab.starfront.space/nina` | the N.I.N.A. plugin repository people add in N.I.N.A. |
 
 **How sign-in works.** The device-code flow, because Starfront is a desktop
 program: it asks the server for a login code (`POST /api/v1/auth/login`) and

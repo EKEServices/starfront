@@ -94,20 +94,29 @@ def load_env_file(folder: Path) -> None:
             os.environ[key] = value
 
 
+def setting(name: str, default: str = "") -> str:
+    """A server setting from the environment: `STARFRONT_<name>`, or the
+    `ASTROCOLLAB_<name>` it was called before the server was named, so a
+    service file or discord.env written under the old name still works."""
+    for prefix in ("STARFRONT_", "ASTROCOLLAB_"):
+        value = os.environ.get(prefix + name)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
+
+
 def settings_from_env() -> DiscordSettings:
-    env = os.environ
     return DiscordSettings(
-        client_id=env.get("ASTROCOLLAB_DISCORD_CLIENT_ID", "").strip(),
-        client_secret=env.get("ASTROCOLLAB_DISCORD_CLIENT_SECRET", "").strip(),
-        guild=env.get("ASTROCOLLAB_DISCORD_GUILD", "").strip(),
-        role=env.get("ASTROCOLLAB_DISCORD_ROLE", "").strip(),
+        client_id=setting("DISCORD_CLIENT_ID"),
+        client_secret=setting("DISCORD_CLIENT_SECRET"),
+        guild=setting("DISCORD_GUILD"),
+        role=setting("DISCORD_ROLE"),
         owners=[part.strip() for part in
-                env.get("ASTROCOLLAB_DISCORD_OWNERS", "").replace(";", ",").split(",")
+                setting("DISCORD_OWNERS").replace(";", ",").split(",")
                 if part.strip()],
-        public_url=env.get("ASTROCOLLAB_PUBLIC_URL", "").strip(),
-        api=env.get("ASTROCOLLAB_DISCORD_API", "https://discord.com/api/v10").rstrip("/"),
-        authorize=env.get("ASTROCOLLAB_DISCORD_AUTHORIZE",
-                          "https://discord.com/oauth2/authorize"),
+        public_url=setting("PUBLIC_URL"),
+        api=setting("DISCORD_API", "https://discord.com/api/v10").rstrip("/"),
+        authorize=setting("DISCORD_AUTHORIZE", "https://discord.com/oauth2/authorize"),
     )
 
 

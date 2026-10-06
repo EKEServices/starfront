@@ -5,18 +5,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=astrocollab
-Group=astrocollab
-WorkingDirectory=/opt/astrocollab
-Environment=ASTROCOLLAB_DATA=/var/lib/astrocollab
+User=starfront
+Group=starfront
+WorkingDirectory=/opt/starfront
+Environment=STARFRONT_DATA=/var/lib/starfront
 # Loopback only: Caddy in front of it does TLS and is what the world talks to.
-ExecStart=/opt/astrocollab/venv/bin/python server/run.py --host 127.0.0.1 --port 8800
+ExecStart=/opt/starfront/venv/bin/python server/run.py --host 127.0.0.1 --port 8800
 Restart=always
 RestartSec=3
-# The admin token and the Discord secret live in /var/lib/astrocollab and
+# The admin token and the Discord secret live in /var/lib/starfront and
 # nowhere else; the program folder is read-only to the service.
 ProtectSystem=strict
-ReadWritePaths=/var/lib/astrocollab
+ReadWritePaths=/var/lib/starfront
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true

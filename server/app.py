@@ -47,12 +47,12 @@ app = FastAPI(title="Starfront collaboration server", version="0.1.0")
 # Beside everything else the rig keeps, and through the same function, so a
 # machine that still has its folder under the old name is not left with its
 # telescope's data in one place and its collaboration's in another.
-DATA = Path(os.environ.get("ASTROCOLLAB_DATA") or data_root() / "collab")
+DATA = Path(auth.setting("DATA") or data_root() / "collab")
 store = Store(DATA / "collab.sqlite")
 
 #: The server owner's credential. Can do anything, and is meant for the one
 #: person running the server; everybody else signs in with Discord.
-ADMIN_TOKEN = os.environ.get("ASTROCOLLAB_ADMIN_TOKEN", "")
+ADMIN_TOKEN = auth.setting("ADMIN_TOKEN")
 
 #: Discord, if it has been set up. Read once at start, from the environment
 #: or `discord.env` beside the database; a server without it still works for
@@ -132,7 +132,7 @@ def require_admin(authorization: str = Header(default="")) -> str:
             raise HTTPException(
                 status_code=503,
                 detail="no admin token is set on this server "
-                       "(ASTROCOLLAB_ADMIN_TOKEN)")
+                       "(STARFRONT_ADMIN_TOKEN)")
         raise HTTPException(status_code=401, detail="not the server owner")
     return "coordinator"
 
@@ -1320,8 +1320,7 @@ def override_verdict(row_id: str, accepted: bool = Query(...),
 #: install and update it there, and nobody else sees it at all - which is
 #: what a closed test wants, and what the central manifest repository, with
 #: its review and its public listing, is not.
-NINA_DIR = Path(os.environ.get("ASTROCOLLAB_NINA_DIR")
-                or Path(__file__).resolve().parent / "nina_plugin")
+NINA_DIR = Path(auth.setting("NINA_DIR") or Path(__file__).resolve().parent / "nina_plugin")
 
 _NINA_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.zip$")
 

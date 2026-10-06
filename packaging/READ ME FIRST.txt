@@ -39,7 +39,7 @@ Staying on N.I.N.A.?
 --------------------
 There is a plugin instead. In N.I.N.A., Options -> General -> Plugin
 Repositories, press + and enter
-   https://starfront-bray.duckdns.org/nina
+   https://collab.starfront.space/nina
 then install "Starfront Collaboration" from the Plugins tab and restart.
 Sign in with Discord on its options page, fill in your exposures, join a
 collaboration from the Starfront panel on the Imaging tab, and put the

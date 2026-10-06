@@ -5,10 +5,10 @@
                     "Major":  "1",
                     "Minor":  "0",
                     "Patch":  "0",
-                    "Build":  "1"
+                    "Build":  "2"
                 },
     "Author":  "Starfront Observatories",
-    "Homepage":  "https://starfront-bray.duckdns.org",
+    "Homepage":  "https://collab.starfront.space",
     "Repository":  "https://github.com/bray-sfro/starfront",
     "License":  "MPL-2.0",
     "LicenseURL":  "https://www.mozilla.org/en-US/MPL/2.0/",
@@ -35,9 +35,9 @@
                          "AltScreenshotURL":  ""
                      },
     "Installer":  {
-                      "URL":  "https://starfront-bray.duckdns.org/nina/download/Starfront.Collab.1.0.0.1.zip",
+                      "URL":  "https://collab.starfront.space/nina/download/Starfront.Collab.1.0.0.2.zip",
                       "Type":  "ARCHIVE",
-                      "Checksum":  "A271E7FB2BAA09FAB0E11E9B6E7E64F244BAD7B0D828D30E845EEF8C29788248",
+                      "Checksum":  "A04811E1C8C05435620AEC6FFD6F98F49B91139995FD46318A95EBEDFCE6AF74",
                       "ChecksumType":  "SHA256"
                   }
 }

@@ -27,8 +27,8 @@ sys.path.insert(0, str(ROOT))
 
 DATA = Path(tempfile.mkdtemp())
 ADMIN = "test-admin-token"
-os.environ["ASTROCOLLAB_DATA"] = str(DATA)
-os.environ["ASTROCOLLAB_ADMIN_TOKEN"] = ADMIN
+os.environ["STARFRONT_DATA"] = str(DATA)
+os.environ["STARFRONT_ADMIN_TOKEN"] = ADMIN
 os.environ.setdefault("ASTRO_DATA_DIR", tempfile.mkdtemp())
 
 from astrocontrol import collab                                  # noqa: E402
@@ -116,19 +116,21 @@ def fake_discord():
 
 threading.Thread(target=fake_discord, daemon=True).start()
 
-os.environ["ASTROCOLLAB_DISCORD_CLIENT_ID"] = "app-1"
-os.environ["ASTROCOLLAB_DISCORD_CLIENT_SECRET"] = "shh"
-os.environ["ASTROCOLLAB_DISCORD_GUILD"] = GUILD
+os.environ["STARFRONT_DISCORD_CLIENT_ID"] = "app-1"
+os.environ["STARFRONT_DISCORD_CLIENT_SECRET"] = "shh"
+os.environ["STARFRONT_DISCORD_GUILD"] = GUILD
+# Under the name the setting had before the server was called Starfront: a
+# discord.env written then must still be read.
 os.environ["ASTROCOLLAB_DISCORD_ROLE"] = ROLE
-os.environ["ASTROCOLLAB_DISCORD_OWNERS"] = "1001"     # Alice runs the server
-os.environ["ASTROCOLLAB_PUBLIC_URL"] = BASE
-os.environ["ASTROCOLLAB_DISCORD_API"] = DISCORD_BASE
-os.environ["ASTROCOLLAB_DISCORD_AUTHORIZE"] = f"{DISCORD_BASE}/oauth2/authorize"
+os.environ["STARFRONT_DISCORD_OWNERS"] = "1001"     # Alice runs the server
+os.environ["STARFRONT_PUBLIC_URL"] = BASE
+os.environ["STARFRONT_DISCORD_API"] = DISCORD_BASE
+os.environ["STARFRONT_DISCORD_AUTHORIZE"] = f"{DISCORD_BASE}/oauth2/authorize"
 
 # A folder of N.I.N.A. plugin releases for the server to offer: one manifest
 # and the zip it points at, plus a file that is not a release at all.
 NINA_DIR = Path(tempfile.mkdtemp())
-os.environ["ASTROCOLLAB_NINA_DIR"] = str(NINA_DIR)
+os.environ["STARFRONT_NINA_DIR"] = str(NINA_DIR)
 (NINA_DIR / "Starfront.Collab.1.0.0.0.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 18)
 (NINA_DIR / "Starfront.Collab.1.0.0.0.manifest.json").write_text(json.dumps({
     "Name": "Starfront Collaboration", "Identifier": "896B4E28-7CEB-4731-BB97-8BADE7460268",

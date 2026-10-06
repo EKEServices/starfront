@@ -13,11 +13,12 @@ Bound to this machine only unless that flag is given. A telescope on another PC
 needs it; nothing else does, and a service that quietly listened to the network
 on somebody's behalf would be a poor default.
 
-Environment, where any of it needs overriding:
-    ASTROCOLLAB_DATA          where the database and the token live
-    ASTROCOLLAB_ADMIN_TOKEN   the coordinator's credential, if it should come
-                              from somewhere else - a password manager, or a
-                              service definition
+Environment, where any of it needs overriding (the old ASTROCOLLAB_ names
+are still read):
+    STARFRONT_DATA          where the database and the token live
+    STARFRONT_ADMIN_TOKEN   the coordinator's credential, if it should come
+                            from somewhere else - a password manager, or a
+                            service definition
 """
 
 from __future__ import annotations
@@ -40,7 +41,8 @@ TOKEN_FILE = "admin-token.txt"
 
 def data_dir() -> Path:
     """Where the server keeps things. The same answer `server.app` will reach."""
-    override = os.environ.get("ASTROCOLLAB_DATA")
+    from server import auth
+    override = auth.setting("DATA")
     if override:
         return Path(override)
     from astrocontrol.config import data_root
@@ -56,7 +58,8 @@ def admin_token(folder: Path) -> tuple[str, bool]:
     time the server restarted would have to be re-pasted into the Collab tab
     every time, and would be abandoned within a week.
     """
-    from_env = os.environ.get("ASTROCOLLAB_ADMIN_TOKEN", "").strip()
+    from server import auth
+    from_env = auth.setting("ADMIN_TOKEN")
     if from_env:
         return from_env, False
 
@@ -90,7 +93,7 @@ def main() -> None:
 
     folder = data_dir()
     token, fresh = admin_token(folder)
-    os.environ["ASTROCOLLAB_ADMIN_TOKEN"] = token
+    os.environ["STARFRONT_ADMIN_TOKEN"] = token
 
     if args.show_token:
         print(token)

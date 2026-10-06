@@ -58,6 +58,8 @@ def has_rotator(rig: Any) -> bool:
 def server_url(config: Any) -> str:
     """The collaboration server: what was typed in Advanced, else the built-in."""
     url = str(config.get("collab", "serverUrl", "") or "").strip().rstrip("/")
+    if url in collab.LEGACY_SERVERS:
+        url = ""
     return url or collab.DEFAULT_SERVER
 
 

@@ -30,7 +30,7 @@ This plugin is the N.I.N.A. side of that:
 
 Closed test release for the Starfront Observatories community.</PluginLongDescription>
     <RepositoryUrl>https://github.com/bray-sfro/starfront</RepositoryUrl>
-    <PluginHomepage>https://starfront-bray.duckdns.org</PluginHomepage>
+    <PluginHomepage>https://collab.starfront.space</PluginHomepage>
     <PluginTags>Collaboration,Mosaic,Discord,Starfront,Community,Sequencer</PluginTags>
     <MinimumNinaVersion>3.2.0.9001</MinimumNinaVersion>
     <PluginLicense>MPL-2.0</PluginLicense>

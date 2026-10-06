@@ -45,8 +45,8 @@ sys.path.insert(0, str(ROOT))
 DATA = Path(tempfile.mkdtemp(prefix="check-livestack-server-"))
 HOME = Path(tempfile.mkdtemp(prefix="check-livestack-rig-"))
 ADMIN = "test-admin-token"
-os.environ["ASTROCOLLAB_DATA"] = str(DATA)
-os.environ["ASTROCOLLAB_ADMIN_TOKEN"] = ADMIN
+os.environ["STARFRONT_DATA"] = str(DATA)
+os.environ["STARFRONT_ADMIN_TOKEN"] = ADMIN
 os.environ.setdefault("ASTRO_DATA_DIR", str(HOME))
 
 from astrocontrol import calibration, collab, livestack, pipeline   # noqa: E402

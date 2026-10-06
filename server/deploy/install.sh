@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
 # Install the Starfront collaboration server on a fresh Ubuntu/Debian VPS.
 #
-#     sudo bash server/deploy/install.sh collab.example.org
+#     sudo bash server/deploy/install.sh collab.starfront.space
 #
 # What it does, in order:
 #   1. installs python3, a venv, and Caddy (which does HTTPS for you)
-#   2. copies this checkout to /opt/astrocollab and makes a venv there
-#   3. creates a system user and /var/lib/astrocollab for the database,
+#   2. copies this checkout to /opt/starfront and makes a venv there
+#   3. creates a system user and /var/lib/starfront for the database,
 #      the admin token and discord.env
 #   4. installs and starts the systemd service on 127.0.0.1:8800
 #   5. points Caddy at it under your hostname, so https://<host>/ works
 #
 # Run it again after pulling a newer version: it re-copies the code and
 # restarts the service, and leaves the data folder alone.
+#
+# A server set up under the old name (service "astrocollab", /opt/astrocollab,
+# /var/lib/astrocollab) is carried over the first time this runs: the data
+# folder is moved, the old service retired, and nothing is lost.
+#
+#     STARFRONT_LEGACY_HOST=old.example.org sudo -E bash server/deploy/install.sh collab.starfront.space
+#
+# keeps an older address answering alongside the new one while telescopes that
+# still point at it are updated. Blank once they all have.
 set -euo pipefail
 
 HOST="${1:-}"
 if [[ -z "$HOST" ]]; then
     echo "usage: sudo bash server/deploy/install.sh <hostname>" >&2
-    echo "  e.g.  sudo bash server/deploy/install.sh collab.example.org" >&2
+    echo "  e.g.  sudo bash server/deploy/install.sh collab.starfront.space" >&2
     exit 1
 fi
 if [[ $EUID -ne 0 ]]; then
@@ -27,8 +36,14 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-APP=/opt/astrocollab
-DATA=/var/lib/astrocollab
+APP=/opt/starfront
+DATA=/var/lib/starfront
+SERVICE=starfront
+LEGACY_HOST="${STARFRONT_LEGACY_HOST-starfront-bray.duckdns.org}"
+
+OLD_APP=/opt/astrocollab
+OLD_DATA=/var/lib/astrocollab
+OLD_SERVICE=astrocollab
 
 echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -44,10 +59,23 @@ if ! command -v caddy >/dev/null; then
     apt-get install -y -qq caddy >/dev/null
 fi
 
+if [[ -d "$OLD_DATA" && ! -d "$DATA" ]]; then
+    echo "== carrying the server over from its old name"
+    systemctl stop "$OLD_SERVICE" 2>/dev/null || true
+    systemctl disable "$OLD_SERVICE" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$OLD_SERVICE.service"
+    systemctl daemon-reload
+    mv "$OLD_DATA" "$DATA"
+    if [[ -f "$DATA/discord.env" ]]; then
+        sed -i 's/^ASTROCOLLAB_/STARFRONT_/' "$DATA/discord.env"
+    fi
+    echo "   data moved to $DATA; the $OLD_SERVICE service is retired"
+fi
+
 echo "== user and folders"
-id -u astrocollab >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin astrocollab
+id -u "$SERVICE" >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin "$SERVICE"
 mkdir -p "$APP" "$DATA"
-chown astrocollab:astrocollab "$DATA"
+chown -R "$SERVICE:$SERVICE" "$DATA"
 chmod 700 "$DATA"
 
 echo "== code -> $APP"
@@ -64,27 +92,40 @@ fi
 "$APP/venv/bin/pip" install -q "fastapi>=0.110" "uvicorn[standard]>=0.27" "numpy>=1.24"
 chown -R root:root "$APP"
 chmod -R a+rX "$APP"
+if [[ -d "$OLD_APP" ]]; then
+    rm -rf "$OLD_APP"
+fi
 
 echo "== discord.env"
 if [[ ! -f "$DATA/discord.env" ]]; then
-    sed "s#https://collab.example.org#https://$HOST#" \
-        "$HERE/server/deploy/discord.env.example" > "$DATA/discord.env"
-    chown astrocollab:astrocollab "$DATA/discord.env"
+    cp "$HERE/server/deploy/discord.env.example" "$DATA/discord.env"
+    chown "$SERVICE:$SERVICE" "$DATA/discord.env"
     chmod 600 "$DATA/discord.env"
     echo "   written $DATA/discord.env - fill in the Discord values, then:"
-    echo "       sudo systemctl restart astrocollab"
+    echo "       sudo systemctl restart $SERVICE"
 else
     echo "   kept $DATA/discord.env"
 fi
+# The public address is the hostname this was installed under, always: it is
+# what Discord sends people back to, and a stale one is a sign-in that fails.
+if grep -q '^STARFRONT_PUBLIC_URL=' "$DATA/discord.env"; then
+    sed -i "s#^STARFRONT_PUBLIC_URL=.*#STARFRONT_PUBLIC_URL=https://$HOST#" "$DATA/discord.env"
+else
+    echo "STARFRONT_PUBLIC_URL=https://$HOST" >> "$DATA/discord.env"
+fi
 
 echo "== service"
-install -m 644 "$HERE/server/deploy/astrocollab.service" /etc/systemd/system/astrocollab.service
+install -m 644 "$HERE/server/deploy/starfront.service" "/etc/systemd/system/$SERVICE.service"
 systemctl daemon-reload
-systemctl enable --now astrocollab >/dev/null
-systemctl restart astrocollab
+systemctl enable --now "$SERVICE" >/dev/null
+systemctl restart "$SERVICE"
 
-echo "== caddy -> https://$HOST"
-sed "s#COLLAB_HOST#$HOST#" "$HERE/server/deploy/Caddyfile" > /etc/caddy/Caddyfile
+HOSTS="$HOST"
+if [[ -n "$LEGACY_HOST" && "$LEGACY_HOST" != "$HOST" ]]; then
+    HOSTS="$HOST, $LEGACY_HOST"
+fi
+echo "== caddy -> https://$HOST${LEGACY_HOST:+ (and still $LEGACY_HOST)}"
+sed "s#COLLAB_HOSTS#$HOSTS#" "$HERE/server/deploy/Caddyfile" > /etc/caddy/Caddyfile
 systemctl enable --now caddy >/dev/null
 systemctl reload caddy || systemctl restart caddy
 
@@ -94,11 +135,12 @@ echo "== done"
 echo "   health:  $(curl -s http://127.0.0.1:8800/api/v1/health || echo 'not answering yet')"
 echo
 echo "   Owner token, for scripts and emergencies (people sign in with Discord;"
-echo "   owners are the Discord ids in ASTROCOLLAB_DISCORD_OWNERS):"
+echo "   owners are the Discord ids in STARFRONT_DISCORD_OWNERS):"
 echo
-echo "       $(sudo -u astrocollab ASTROCOLLAB_DATA=$DATA $APP/venv/bin/python $APP/server/run.py --show-token)"
+echo "       $(sudo -u "$SERVICE" STARFRONT_DATA=$DATA $APP/venv/bin/python $APP/server/run.py --show-token)"
 echo
 echo "   Server URL (built into Starfront):  https://$HOST"
 echo "   Discord redirect URL:               https://$HOST/auth/discord/callback"
+echo "   N.I.N.A. plugin repository:         https://$HOST/nina"
 echo
-echo "   logs:  journalctl -u astrocollab -f"
+echo "   logs:  journalctl -u $SERVICE -f"

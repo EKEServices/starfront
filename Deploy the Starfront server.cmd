@@ -8,18 +8,22 @@ rem  ssh key does the signing in; no password is typed here.
 rem
 rem  One file rather than three pasted lines, because a long ssh line pasted
 rem  into PowerShell wraps, and the hostname ends up as a command of its own.
+rem
+rem  LEGACY keeps the server's old address answering as well, for telescopes
+rem  that still point at it. Make it empty once they have all been updated.
 
 set VPS=root@137.184.219.128
-set PUBLIC=starfront-bray.duckdns.org
+set PUBLIC=collab.starfront.space
+set LEGACY=starfront-bray.duckdns.org
 
 title Deploying the Starfront collaboration server
 cd /d "%~dp0"
 echo == copying the code to %VPS%
-scp -r server astrocontrol requirements.txt %VPS%:/root/astrocontrol/
+scp -r server astrocontrol requirements.txt %VPS%:/root/starfront/
 if errorlevel 1 goto failed
 echo.
 echo == installing and restarting on the server
-ssh %VPS% "cd /root/astrocontrol && bash server/deploy/install.sh %PUBLIC%"
+ssh %VPS% "cd /root/starfront && STARFRONT_LEGACY_HOST=%LEGACY% bash server/deploy/install.sh %PUBLIC%"
 if errorlevel 1 goto failed
 echo.
 echo == checking what is running now

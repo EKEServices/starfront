@@ -45,7 +45,12 @@ PROTOCOL = 1
 #: The collaboration server everybody uses, baked in so that joining is one
 #: button and nobody types a URL. Overridable in Advanced for anybody running
 #: their own.
-DEFAULT_SERVER = "https://starfront-bray.duckdns.org"
+DEFAULT_SERVER = "https://collab.starfront.space"
+
+#: Addresses the server used to live at. A rig that typed one of these into
+#: Advanced is pointed at the current one rather than left on a name that
+#: will one day stop answering.
+LEGACY_SERVERS = ("https://starfront-bray.duckdns.org",)
 
 #: States a task moves through. `offered` is waiting for the operator to accept
 #: it — an assignment that silently rewrote what somebody's mount did tonight

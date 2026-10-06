@@ -37,8 +37,8 @@ sys.path.insert(0, str(ROOT))
 
 DATA = Path(tempfile.mkdtemp())
 ADMIN = "coordinator-token-for-the-check"
-os.environ["ASTROCOLLAB_DATA"] = str(DATA)
-os.environ["ASTROCOLLAB_ADMIN_TOKEN"] = ADMIN
+os.environ["STARFRONT_DATA"] = str(DATA)
+os.environ["STARFRONT_ADMIN_TOKEN"] = ADMIN
 os.environ.setdefault("ASTRO_DATA_DIR", tempfile.mkdtemp())
 
 from astrocontrol import collab                                   # noqa: E402

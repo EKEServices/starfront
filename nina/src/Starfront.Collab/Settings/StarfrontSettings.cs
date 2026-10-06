@@ -22,7 +22,10 @@ namespace Starfront.Collab.Settings {
     /// second profile for a second camera keeps its own table.
     /// </summary>
     public sealed class StarfrontSettings : BaseINPC {
-        public const string DefaultServer = "https://starfront-bray.duckdns.org";
+        public const string DefaultServer = "https://collab.starfront.space";
+
+        /// <summary>Addresses the server used to live at; one typed in is pointed at the current one.</summary>
+        private static readonly string[] LegacyServers = { "https://starfront-bray.duckdns.org" };
 
         private readonly IProfileService profiles;
         private readonly PluginOptionsAccessor options;
@@ -92,11 +95,12 @@ namespace Starfront.Collab.Settings {
         public string ServerUrl {
             get {
                 var url = (global.ServerUrl ?? "").Trim().TrimEnd('/');
+                if (LegacyServers.Contains(url)) url = "";
                 return url.Length > 0 ? url : DefaultServer;
             }
             set {
                 var url = (value ?? "").Trim().TrimEnd('/');
-                if (url == DefaultServer) url = "";
+                if (url == DefaultServer || LegacyServers.Contains(url)) url = "";
                 global.ServerUrl = url;
                 Save();
                 RaisePropertyChanged();

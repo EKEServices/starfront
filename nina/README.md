@@ -11,7 +11,7 @@ builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
    Plugin Repositories, press `+` and enter
 
    ```
-   https://starfront-bray.duckdns.org/nina
+   https://collab.starfront.space/nina
    ```
 
    Then open the Plugins tab, *Available*, and install **Starfront
@@ -76,12 +76,12 @@ A release is a zip and a manifest, made from the same `Plugin.props` the DLL's
 attributes come from:
 
 ```powershell
-./build/Build-Release.ps1 -Tag v1.0.0.0 -Repository bray-sfro/starfront -InstallerBase https://starfront-bray.duckdns.org/nina/download
+./build/Build-Release.ps1 -Tag v1.0.0.0 -Repository bray-sfro/starfront -InstallerBase https://collab.starfront.space/nina/download
 ```
 
 That leaves `Starfront.Collab.1.0.0.0.zip` and its manifest in
 `artifacts/release`. Copy both into `server/nina_plugin/` and deploy the
-server (`Deploy the collab server.cmd`); the server serves the manifests at
+server (`Deploy the Starfront server.cmd`); the server serves the manifests at
 `/nina/plugins/manifests` and the zips at `/nina/download/<name>`, which is
 the plugin-repository shape N.I.N.A. expects. The checksum in the manifest is
 of the zip's bytes, so the two always travel together.

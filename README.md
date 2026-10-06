@@ -1886,7 +1886,7 @@ no ledger.  Before a night is spent, the tab says whether this rig can satisfy
 the project at all — "your scale is fine, your Ha is too wide" is actionable and
 a rejection the following morning is not.
 
-Running the server is `Start the collab server.cmd`, or:
+Running the server is `Start the Starfront server.cmd`, or:
 
 ```bash
 python server/run.py
