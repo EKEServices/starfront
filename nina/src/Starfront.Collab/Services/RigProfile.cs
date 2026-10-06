@@ -120,16 +120,23 @@ namespace Starfront.Collab.Services {
         private static string Truncate(string text, int length) => text.Length <= length ? text : text.Substring(0, length);
     }
 
+    /// <summary>One field or panel of tonight's run, as the Imaging tab shows it.</summary>
+    public sealed record RunItem(string Name, string Frames, string State, string Detail);
+
     /// <summary>What the sequence container is doing right now, for presence and the dock panel.</summary>
     public sealed class RunState : BaseINPC {
         private bool running;
         private string targetName;
         private string projectId;
         private string summary = "";
+        private IReadOnlyList<RunItem> plan = Array.Empty<RunItem>();
 
         public bool Running { get => running; set { running = value; RaisePropertyChanged(); } }
         public string TargetName { get => targetName; set { targetName = value; RaisePropertyChanged(); } }
         public string ProjectId { get => projectId; set { projectId = value; RaisePropertyChanged(); } }
         public string Summary { get => summary; set { summary = value ?? ""; RaisePropertyChanged(); } }
+
+        /// <summary>Tonight's fields in the order they are shot, each with where it has got to. Kept after the run ends until the next begins.</summary>
+        public IReadOnlyList<RunItem> Plan { get => plan; set { plan = value ?? Array.Empty<RunItem>(); RaisePropertyChanged(); } }
     }
 }

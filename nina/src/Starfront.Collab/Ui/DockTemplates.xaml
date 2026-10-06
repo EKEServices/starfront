@@ -29,14 +29,23 @@
                         Visibility="{Binding Enrolled, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
                 </StackPanel>
                 <TextBlock Margin="0,2,0,0" Opacity="0.7" Text="{Binding OnlineText}" Visibility="{Binding OnlineText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
-                <TextBlock Margin="0,2,0,0" Text="{Binding RunText}" Visibility="{Binding RunText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <TextBlock
                     Margin="0,4,0,0"
                     Text="{Binding Message}"
                     TextWrapping="Wrap"
                     Visibility="{Binding Message, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
 
-                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Tonight" />
+                <!--  The run: every field of tonight's deal with where it has got to, live.  -->
+                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="{Binding RunText}" Visibility="{Binding RunText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                <ItemsControl ItemsSource="{Binding PlanLines}" Visibility="{Binding ShowPlan, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Opacity="0.9" Text="{Binding}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Tonight's deal" />
                 <ItemsControl ItemsSource="{Binding Tonight}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

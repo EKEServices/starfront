@@ -209,6 +209,8 @@ namespace Starfront.Collab.Sequencer {
             }
             Order(plans);
             foreach (var plan in plans) Add(BuildPanel(plan, settings, reporter));
+            WatchPanels();
+            PublishPlan();
             var totalHours = plans.Sum(p => p.Seconds) / 3600.0;
             Summary = $"{string.Join(" · ", deals.Select(d => $"{d.ProjectName}: {StarfrontSession.Describe(d)}"))} · about {totalHours:0.0} h";
             RaisePropertyChanged(nameof(TonightText));
@@ -234,6 +236,7 @@ namespace Starfront.Collab.Sequencer {
                 session.Run.Running = false;
                 session.Run.TargetName = null;
                 session.Run.ProjectId = null;
+                PublishPlan();
                 var done = Items.OfType<StarfrontPanel>().Count(p => p.Status == SequenceEntityStatus.FINISHED && !p.SkippedForAltitude);
                 var skipped = Items.OfType<StarfrontPanel>().Count(p => p.SkippedForAltitude);
                 var unit = plans.All(p => p.SingleField) ? (plans.Count == 1 ? "field" : "fields") : "panels";
@@ -251,11 +254,76 @@ namespace Starfront.Collab.Sequencer {
 
         private void ClearRuntimeChildren() {
             foreach (var item in Items.ToList()) {
-                if (item is StarfrontPanel panel) Runtime.Reporter?.Forget(panel.Plan.TargetName);
+                if (item is StarfrontPanel panel) {
+                    Runtime.Reporter?.Forget(panel.Plan.TargetName);
+                    Unwatch(panel);
+                }
                 item.AttachNewParent(null);
                 Items.Remove(item);
             }
             Summary = "";
+            if (Runtime.Ready) Runtime.Session.Run.Plan = Array.Empty<RunItem>();
+        }
+
+        // -- what the Imaging tab shows while it runs --------------------------------
+
+        private void WatchPanels() {
+            foreach (var panel in Items.OfType<StarfrontPanel>()) {
+                panel.PropertyChanged += OnRunChanged;
+                foreach (var child in panel.GetItemsSnapshot()) {
+                    if (child is System.ComponentModel.INotifyPropertyChanged watched) watched.PropertyChanged += OnRunChanged;
+                    if (child is TakeManyExposures many) many.GetTakeExposure().PropertyChanged += OnRunChanged;
+                }
+            }
+        }
+
+        private void Unwatch(StarfrontPanel panel) {
+            panel.PropertyChanged -= OnRunChanged;
+            foreach (var child in panel.GetItemsSnapshot()) {
+                if (child is System.ComponentModel.INotifyPropertyChanged watched) watched.PropertyChanged -= OnRunChanged;
+                if (child is TakeManyExposures many) many.GetTakeExposure().PropertyChanged -= OnRunChanged;
+            }
+        }
+
+        private void OnRunChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) {
+            if (e.PropertyName == "Status" || e.PropertyName == "ExposureCount" || e.PropertyName == nameof(StarfrontPanel.SkipReason)) PublishPlan();
+        }
+
+        /// <summary>Every field of tonight's run with where it has got to, for the Starfront panel on the Imaging tab.</summary>
+        private void PublishPlan() {
+            if (!Runtime.Ready) return;
+            var rows = new List<RunItem>();
+            foreach (var panel in Items.OfType<StarfrontPanel>()) {
+                var plan = panel.Plan;
+                var total = plan.Filters.Sum(f => f.Frames);
+                var shot = panel.GetItemsSnapshot().OfType<TakeManyExposures>().Sum(m => m.GetTakeExposure().ExposureCount);
+                string state, detail;
+                if (panel.SkippedForAltitude) {
+                    state = "skipped";
+                    detail = panel.SkipReason.Replace("skipped for now: ", "");
+                } else if (panel.Status == SequenceEntityStatus.RUNNING) {
+                    state = "shooting";
+                    var active = panel.GetItemsSnapshot().FirstOrDefault(i => i.Status == SequenceEntityStatus.RUNNING);
+                    detail = active switch {
+                        AltitudeGate => "checking it is up",
+                        Center => "slewing and centring",
+                        SwitchFilter => "changing filter",
+                        TakeManyExposures => $"frame {Math.Min(total, shot + 1)} of {total}",
+                        _ => $"{shot} of {total} frames",
+                    };
+                } else if (panel.Status == SequenceEntityStatus.FINISHED) {
+                    state = "done";
+                    detail = $"{shot} of {total} frames";
+                } else if (panel.Status == SequenceEntityStatus.SKIPPED || panel.Status == SequenceEntityStatus.FAILED) {
+                    state = panel.Status == SequenceEntityStatus.FAILED ? "failed" : "skipped";
+                    detail = shot > 0 ? $"{shot} of {total} frames" : "";
+                } else {
+                    state = "waiting";
+                    detail = plan.HoursUntilUp is double wait && wait > 0 ? $"up in {wait:0.0} h" : "";
+                }
+                rows.Add(new RunItem(panel.Name, plan.FramesText, state, detail));
+            }
+            Runtime.Session.Run.Plan = rows;
         }
 
         /// <summary>Tonight's deal as panels: which cells, which filters, how many frames at which exposure.</summary>

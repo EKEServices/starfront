@@ -104,6 +104,7 @@ namespace Starfront.Collab.Ui {
             SignInCommand = new AsyncRelayCommand(SignInAsync);
             Projects = new ObservableCollection<ProjectRowVM>();
             Tonight = new ObservableCollection<string>();
+            PlanLines = new ObservableCollection<string>();
             Telescopes = new ObservableCollection<string>();
             Verdicts = new ObservableCollection<string>();
             Initialize();
@@ -113,10 +114,29 @@ namespace Starfront.Collab.Ui {
             if (initialized) return;
             initialized = true;
             Runtime.Session.Updated += OnUpdated;
+            Runtime.Session.Run.PropertyChanged += OnRunChanged;
             Runtime.Settings.PropertyChanged += OnSettingsChanged;
             Plugin.ShuttingDown += Dispose;
             Rebuild();
         }
+
+        private void OnRunChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) => Dispatch.OnUi(RebuildPlan);
+
+        /// <summary>Tonight's fields with where each has got to, live while the container runs and kept afterwards.</summary>
+        private void RebuildPlan() {
+            if (!initialized) return;
+            PlanLines.Clear();
+            foreach (var item in Runtime.Session.Run.Plan) {
+                var mark = item.State switch { "done" => "✓", "shooting" => "▶", "skipped" => "↷", "failed" => "✗", _ => "·" };
+                var tail = string.IsNullOrEmpty(item.Detail) ? item.State : $"{item.State}, {item.Detail}";
+                PlanLines.Add($"{mark} {item.Name} — {item.Frames} — {tail}");
+            }
+            RaisePropertyChanged(nameof(RunText));
+            RaisePropertyChanged(nameof(ShowPlan));
+        }
+
+        public ObservableCollection<string> PlanLines { get; }
+        public bool ShowPlan => PlanLines.Count > 0;
 
         public override string ContentId => typeof(StarfrontDockVM).FullName;
 
@@ -137,7 +157,14 @@ namespace Starfront.Collab.Ui {
                 return $"{presence.Online} telescope{(presence.Online == 1 ? "" : "s")} online, {presence.People} {(presence.People == 1 ? "person" : "people")}";
             }
         }
-        public string RunText => Runtime.Ready && Runtime.Session.Run.Running ? $"Shooting now: {Runtime.Session.Run.TargetName}" : "";
+        public string RunText {
+            get {
+                if (!Runtime.Ready) return "";
+                var run = Runtime.Session.Run;
+                if (run.Running) return string.IsNullOrEmpty(run.TargetName) ? "The collaboration container is running" : $"Shooting now: {run.TargetName}";
+                return run.Plan.Count > 0 ? "Last run:" : "";
+            }
+        }
 
         public string Message {
             get => message;
@@ -174,7 +201,7 @@ namespace Starfront.Collab.Ui {
             RaisePropertyChanged(nameof(Enrolled));
             RaisePropertyChanged(nameof(StatusText));
             RaisePropertyChanged(nameof(OnlineText));
-            RaisePropertyChanged(nameof(RunText));
+            RebuildPlan();
         }
 
         private async Task RefreshAsync() {
@@ -223,6 +250,7 @@ namespace Starfront.Collab.Ui {
             initialized = false;
             if (Runtime.Ready) {
                 Runtime.Session.Updated -= OnUpdated;
+                Runtime.Session.Run.PropertyChanged -= OnRunChanged;
                 Runtime.Settings.PropertyChanged -= OnSettingsChanged;
             }
             Plugin.ShuttingDown -= Dispose;

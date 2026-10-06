@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.4
+
+- The Starfront panel on the Imaging tab lists every field of the night's run with where it has got to - done, shooting (frame n of N, or slewing, centring, changing filter), waiting, skipped and why - live, and keeps the last run until the next begins.
+
 ## 1.0.0.3
 
 - Filters are shown everywhere as your own wheel names them; the server does the matching to its standard names.
