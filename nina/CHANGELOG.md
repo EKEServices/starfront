@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.7
+
+- A sequence started again during the night carries on where it left off: frames already shot on a panel tonight are taken off its count, and a finished panel is not shot again.
+- Frame times are no longer shifted when N.I.N.A. stamps them in local time.
+
 ## 1.0.0.6
 
 - A camera without a rotator is plate-solved once at the first panel when its angle is unknown or differs from the angle the panels were laid for; the server then lays the panels again before the night starts, instead of a night being shot on a grid the camera cannot cover.

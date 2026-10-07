@@ -1325,19 +1325,35 @@ NINA_DIR = Path(auth.setting("NINA_DIR") or Path(__file__).resolve().parent / "n
 _NINA_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.zip$")
 
 
+def _manifest_version(data: dict[str, Any]) -> tuple[int, int, int, int]:
+    version = data.get("Version") or {}
+    try:
+        return tuple(int(version.get(k, 0)) for k in ("Major", "Minor", "Patch", "Build"))  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        return (0, 0, 0, 0)
+
+
 def _nina_manifests() -> list[dict[str, Any]]:
-    """Every manifest in the folder, newest version of each plugin last."""
-    found: list[dict[str, Any]] = []
+    """The newest manifest of each plugin in the folder.
+
+    Older releases left in the folder are not offered: N.I.N.A. would pick
+    the newest anyway, and a feed listing six versions of one plugin reads
+    as a mess to anybody who looks at it.
+    """
+    newest: dict[str, dict[str, Any]] = {}
     if not NINA_DIR.is_dir():
-        return found
+        return []
     for path in sorted(NINA_DIR.glob("*.manifest.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             continue
-        if isinstance(data, dict) and data.get("Name") and data.get("Identifier"):
-            found.append(data)
-    return found
+        if not (isinstance(data, dict) and data.get("Name") and data.get("Identifier")):
+            continue
+        key = str(data["Identifier"]).upper()
+        if key not in newest or _manifest_version(data) > _manifest_version(newest[key]):
+            newest[key] = data
+    return sorted(newest.values(), key=lambda m: str(m.get("Name")))
 
 
 @app.get("/nina/plugins/manifests")

@@ -417,10 +417,16 @@ namespace Starfront.Collab.Sequencer {
             Runtime.Session.Run.Plan = rows;
         }
 
-        /// <summary>Tonight's deal as panels: which cells, which filters, how many frames at which exposure.</summary>
+        /// <summary>
+        /// Tonight's deal as panels: which cells, which filters, how many frames
+        /// at which exposure - less whatever this telescope has already shot on
+        /// them tonight, so a sequence started again after a restart or a cloud
+        /// carries on where it left off rather than shooting the deal from the top.
+        /// </summary>
         private List<PanelPlan> PlanPanels(List<DealTask> deals, Settings.StarfrontSettings settings) {
             var plans = new List<PanelPlan>();
             var wheel = settings.ProfileFilterNames();
+            var tonight = Runtime.Ledger.Rows(Runtime.Session.Tonight);
             foreach (var deal in deals) {
                 var wants = Runtime.Session.RequirementsFor(deal.Project);
                 var frames = (deal.Visit?.Frames ?? new Dictionary<string, int>()).Where(kv => kv.Value > 0).ToList();
@@ -445,10 +451,21 @@ namespace Starfront.Collab.Sequencer {
                 foreach (var index in deal.Share.Distinct()) {
                     if (index < 0 || index >= deal.Cells.Count) continue;
                     var cell = deal.Cells[index];
+                    var panelNumber = (index + 1).ToString();
+                    var left = new List<FilterFrames>();
+                    foreach (var block in filters) {
+                        var shot = tonight.Where(r => r.Task == deal.Id && r.Panel == panelNumber && Filters.Same(r.Filter, block.Filter)).Sum(r => r.Frames);
+                        if (shot >= block.Frames) {
+                            Logger.Info($"Starfront: {deal.ProjectName} panel {panelNumber} already has its {block.Frames} × {block.WheelName ?? block.Filter} tonight; not shot again");
+                            continue;
+                        }
+                        left.Add(shot > 0 ? block with { Frames = block.Frames - shot } : block);
+                    }
+                    if (left.Count == 0) continue;
                     var coordinates = new Coordinates(Angle.ByDegree(cell.Ra), Angle.ByDegree(cell.Dec), Epoch.J2000);
                     var targetName = deal.Kind == "single" ? Ascii(deal.ProjectName) : $"{Ascii(deal.ProjectName)} panel {index + 1}";
                     plans.Add(new PanelPlan {
-                        Deal = deal, CellIndex = index, Cell = cell, Coordinates = coordinates, Filters = filters,
+                        Deal = deal, CellIndex = index, Cell = cell, Coordinates = coordinates, Filters = left,
                         MinAltitude = wants?.MinAltitude ?? 0.0, MinMoonSeparation = wants?.MinMoonSeparation,
                         TargetName = targetName,
                     });

@@ -19,6 +19,10 @@ set LEGACY=starfront-bray.duckdns.org
 title Deploying the Starfront collaboration server
 cd /d "%~dp0"
 echo == copying the code to %VPS%
+rem  The staging copy on the VPS is replaced, not added to, so a plugin
+rem  release removed here is removed there too.
+ssh %VPS% "mkdir -p /root/starfront && rm -rf /root/starfront/server /root/starfront/astrocontrol"
+if errorlevel 1 goto failed
 scp -r server astrocontrol requirements.txt %VPS%:/root/starfront/
 if errorlevel 1 goto failed
 echo.

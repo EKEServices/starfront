@@ -81,7 +81,9 @@ namespace Starfront.Collab.Services {
 
                 var filter = Filters.Canonical(string.IsNullOrWhiteSpace(args.Filter) ? context.Filter : args.Filter);
                 if (string.IsNullOrEmpty(filter)) filter = context.Filter;
-                var started = metadata.Image.ExposureStart != DateTime.MinValue ? metadata.Image.ExposureStart.ToLocalTime() : DateTime.Now;
+                var stamp = metadata.Image.ExposureStart;
+                var started = stamp == DateTime.MinValue ? DateTime.Now
+                    : stamp.Kind == DateTimeKind.Utc ? stamp.ToLocalTime() : stamp;
                 var night = SkyMath.NightName(started);
                 var seconds = args.Duration > 0 ? args.Duration : metadata.Image.ExposureTime;
                 if (double.IsNaN(seconds) || seconds <= 0) return;

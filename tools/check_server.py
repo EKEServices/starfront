@@ -142,6 +142,16 @@ os.environ["STARFRONT_NINA_DIR"] = str(NINA_DIR)
     "Installer": {"URL": f"{BASE}/nina/download/Starfront.Collab.1.0.0.0.zip", "Type": "ARCHIVE",
                   "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
 (NINA_DIR / "notes.txt").write_text("not a release", encoding="utf-8")
+# An older release left behind in the folder: the feed offers only the newest.
+(NINA_DIR / "Starfront.Collab.0.9.0.0.manifest.json").write_text(json.dumps({
+    "Name": "Starfront Collaboration", "Identifier": "896B4E28-7CEB-4731-BB97-8BADE7460268",
+    "Version": {"Major": "0", "Minor": "9", "Patch": "0", "Build": "0"},
+    "Author": "test", "Repository": "https://example.org", "License": "MPL-2.0",
+    "LicenseURL": "https://www.mozilla.org/en-US/MPL/2.0/",
+    "MinimumApplicationVersion": {"Major": "3", "Minor": "2", "Patch": "0", "Build": "9001"},
+    "Descriptions": {"ShortDescription": "test"},
+    "Installer": {"URL": f"{BASE}/nina/download/Starfront.Collab.0.9.0.0.zip", "Type": "ARCHIVE",
+                  "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
 
 
 def serve():
@@ -1488,9 +1498,9 @@ print("\n-- the server as a N.I.N.A. plugin repository --")
 # `<url>/nina/plugins/manifests`: a JSON list of manifests, each naming the
 # zip to download. The zip comes from the same server.
 status, feed = call("GET", "/nina/plugins/manifests")
-case("the server offers the plugin manifests as a list",
+case("the server offers the plugin manifests as a list, the newest of each plugin only",
      status == 200 and isinstance(feed, list) and len(feed) == 1
-     and feed[0]["Name"] == "Starfront Collaboration",
+     and feed[0]["Name"] == "Starfront Collaboration" and feed[0]["Version"]["Major"] == "1",
      str(feed)[:120])
 case("...and health says which releases are on offer",
      "Starfront Collaboration 1.0.0.0" in call("GET", "/api/v1/health")[1].get("ninaPlugins", []))
