@@ -213,6 +213,7 @@ class AscomCamera(_AscomDevice, Camera):
         self._open(self._prog_id)
         self._set("Connected", True)
         self._connected = True
+        self._forget_cooler()
         self.sensor_width = int(self._get("CameraXSize", 0) or 0)
         self.sensor_height = int(self._get("CameraYSize", 0) or 0)
         self.pixel_size_um = float(self._get("PixelSizeX", 0.0) or 0.0)
@@ -261,34 +262,100 @@ class AscomCamera(_AscomDevice, Camera):
         array = np.array(raw, dtype=np.int64).T
         return np.clip(array, 0, 65535).astype(np.uint16)
 
+    # -- the cooler, read with some care --------------------------------------
+    #
+    # The sensor temperature, the setpoint, the cooler switch and its power
+    # are asked for together and kept for a couple of seconds, for two
+    # reasons. The status poll asks every second, and seven COM round trips a
+    # second on the camera's own thread sit in front of the exposure traffic
+    # that matters. And some drivers - ZWO's among them - answer a property
+    # read made while the camera is reading out with nonsense: a sensor that
+    # has sat at -2 C all night reported +1 C for a moment between two frames,
+    # cooler still on at full power, which a sensor cannot do. So nothing is
+    # read while the camera reports it is reading out, and a lone reading far
+    # from the last one is held back until the next reading agrees with it.
+
+    _COOLER_TTL = 2.0
+    #: More than this between two readings two seconds apart is not a sensor
+    #: cooling or warming - even flat out, a cooler moves about a degree in
+    #: that time - so it is a driver misreading until said twice.
+    _COOLER_JUMP_C = 1.5
+
+    def _cooler(self) -> dict[str, Any]:
+        now = time.monotonic()
+        cached = getattr(self, "_cooler_cache", None)
+        if cached is not None and now - cached["at"] < self._COOLER_TTL:
+            return cached
+        # 3 is "reading out" in ASCOM's CameraStates; the driver is busiest then.
+        if cached is not None and int(self._get("CameraState", 0) or 0) == 3:
+            return cached
+
+        def number(name: str, digits: int) -> float | None:
+            value = self._get(name)
+            try:
+                return None if value is None else round(float(value), digits)
+            except (TypeError, ValueError):
+                return None
+
+        reading = {
+            "at": now,
+            "temperature": number("CCDTemperature", 2),
+            "setpoint": number("SetCCDTemperature", 2),
+            "coolerOn": bool(self._get("CoolerOn", False)),
+            "coolerPower": number("CoolerPower", 1),
+        }
+        if cached is not None:
+            before = cached.get("temperature")
+            after = reading["temperature"]
+            if before is not None and after is not None and abs(after - before) > self._COOLER_JUMP_C:
+                pending = getattr(self, "_cooler_pending", None)
+                if pending is None or abs(pending - after) > 1.0:
+                    # Not believed yet: keep what we had, remember what was
+                    # said, and believe it if it is said again.
+                    self._cooler_pending = after
+                    reading["temperature"] = before
+                else:
+                    self._cooler_pending = None
+            else:
+                self._cooler_pending = None
+            # A reading the driver would not give keeps the last one it did.
+            for key in ("temperature", "setpoint", "coolerPower"):
+                if reading[key] is None and cached.get(key) is not None:
+                    reading[key] = cached[key]
+        self._cooler_cache = reading
+        return reading
+
+    def _forget_cooler(self) -> None:
+        self._cooler_cache = None
+        self._cooler_pending = None
+
     @property
     def temperature(self) -> float | None:
-        value = self._get("CCDTemperature")
-        return None if value is None else round(float(value), 2)
+        return self._cooler()["temperature"]
 
     @property
     def cooler_on(self) -> bool:
-        return bool(self._get("CoolerOn", False))
+        return bool(self._cooler()["coolerOn"])
 
     def set_cooler(self, on: bool) -> None:
         self._require()
         self._set("CoolerOn", bool(on))
+        self._forget_cooler()
 
     @property
     def setpoint(self) -> float | None:
-        value = self._get("SetCCDTemperature")
-        return None if value is None else round(float(value), 2)
+        return self._cooler()["setpoint"]
 
     def set_setpoint(self, celsius: float) -> None:
         self._require()
         if not self.can_cool:
             raise DeviceError("camera cannot set a temperature setpoint")
         self._set("SetCCDTemperature", float(celsius))
+        self._forget_cooler()
 
     @property
     def cooler_power(self) -> float | None:
-        value = self._get("CoolerPower")
-        return None if value is None else round(float(value), 1)
+        return self._cooler()["coolerPower"]
 
     def set_settings(self, binning: int | None = None, gain: int | None = None,
                      offset: int | None = None) -> None:
@@ -310,16 +377,17 @@ class AscomCamera(_AscomDevice, Camera):
         state = int(self._get("CameraState", 0) or 0)   # 0 idle, 2 exposing, 3 reading
         percent = float(self._get("PercentCompleted", 0) or 0)
         duration = float(self._get("LastExposureDuration", 0) or 0)
+        cooler = self._cooler()
         return {
             "connected": True,
             "exposing": state in (1, 2, 3),
             "imageReady": self.image_ready,
             "elapsed": round(duration * percent / 100.0, 2),
             "duration": round(duration, 2),
-            "temperature": self.temperature,
-            "setpoint": self.setpoint,
-            "coolerOn": self.cooler_on,
-            "coolerPower": self.cooler_power,
+            "temperature": cooler["temperature"],
+            "setpoint": cooler["setpoint"],
+            "coolerOn": cooler["coolerOn"],
+            "coolerPower": cooler["coolerPower"],
             "canCool": self.can_cool,
             "gain": self.gain,
             "offset": self.offset,
