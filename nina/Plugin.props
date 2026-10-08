@@ -29,13 +29,13 @@ This plugin is the N.I.N.A. side of that:
 - **An Imaging-tab panel** shows who is online, which collaborations are open to your telescope, how far each has got, and what you have been dealt tonight.
 
 Closed test release for the Starfront Observatories community.</PluginLongDescription>
-    <RepositoryUrl>https://github.com/bray-sfro/starfront</RepositoryUrl>
+    <RepositoryUrl>https://collab.starfront.space/nina</RepositoryUrl>
     <PluginHomepage>https://collab.starfront.space</PluginHomepage>
     <PluginTags>Collaboration,Mosaic,Deep Sky,Discord,Starfront,Community,Sequencer</PluginTags>
     <MinimumNinaVersion>3.2.0.9001</MinimumNinaVersion>
     <PluginLicense>MPL-2.0</PluginLicense>
     <PluginLicenseUrl>https://www.mozilla.org/en-US/MPL/2.0/</PluginLicenseUrl>
-    <PluginChangelogUrl>https://github.com/bray-sfro/starfront/blob/main/nina/CHANGELOG.md</PluginChangelogUrl>
+    <PluginChangelogUrl>https://collab.starfront.space/nina/changelog</PluginChangelogUrl>
     <PluginFeaturedImageUrl></PluginFeaturedImageUrl>
     <PluginScreenshotUrl></PluginScreenshotUrl>
     <PluginAltScreenshotUrl></PluginAltScreenshotUrl>

@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -1451,6 +1451,142 @@ def nina_download(name: str):
     return FileResponse(path, media_type="application/zip", filename=name)
 
 
+@app.get("/nina/changelog")
+def nina_changelog():
+    """The plugin's change log, which its manifests link to. A copy of
+    nina/CHANGELOG.md staged beside the releases, since the source is not
+    somewhere the public can read it."""
+    path = NINA_DIR / "CHANGELOG.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no change log")
+    return FileResponse(path, media_type="text/plain; charset=utf-8")
+
+
+# ---------------------------------------------------------------------------
+# The download: Starfront itself, for the people the observatory gives it to
+# ---------------------------------------------------------------------------
+#
+# The program's source is private. What people get is the installer, and
+# they get it from here rather than from a code-hosting site that would put
+# the source beside it. The folder holds the installers; the newest version
+# is the download, and the page says only that one. An older build stays
+# where its own link points without being offered.
+
+DOWNLOAD_DIR = Path(auth.setting("DOWNLOAD_DIR") or Path(__file__).resolve().parent / "downloads")
+_SETUP_FILE = re.compile(r"^Starfront-Setup-(\d+)\.(\d+)\.(\d+)\.exe$")
+
+
+def _setups() -> list[dict[str, Any]]:
+    """The installers in the folder, newest version first."""
+    found: list[dict[str, Any]] = []
+    if not DOWNLOAD_DIR.is_dir():
+        return found
+    for path in DOWNLOAD_DIR.glob("Starfront-Setup-*.exe"):
+        match = _SETUP_FILE.match(path.name)
+        if not match or not path.is_file():
+            continue
+        stat = path.stat()
+        found.append({"file": path.name, "version": ".".join(match.groups()),
+                      "key": tuple(int(part) for part in match.groups()),
+                      "size": stat.st_size, "modified": stat.st_mtime})
+    found.sort(key=lambda setup: setup["key"], reverse=True)
+    return found
+
+
+def _latest_setup() -> dict[str, Any] | None:
+    setups = _setups()
+    return setups[0] if setups else None
+
+
+@app.get("/download/latest.json")
+def download_latest() -> dict[str, Any]:
+    """What the newest download is, for a page or for a program that checks."""
+    latest = _latest_setup()
+    if latest is None:
+        return {"version": None, "file": None, "url": None, "size": 0, "published": None}
+    return {"version": latest["version"], "file": latest["file"], "size": latest["size"],
+            "url": f"/download/{latest['file']}",
+            "published": time.strftime("%Y-%m-%d", time.gmtime(latest["modified"]))}
+
+
+@app.get("/download/latest")
+def download_latest_file():
+    """A link that always fetches the newest installer."""
+    latest = _latest_setup()
+    if latest is None:
+        raise HTTPException(status_code=404, detail="nothing to download yet")
+    return RedirectResponse(f"/download/{latest['file']}", status_code=302)
+
+
+@app.get("/download/{name}")
+def download_file(name: str):
+    """One installer, by its file name. Only installers are served."""
+    if not _SETUP_FILE.match(name):
+        raise HTTPException(status_code=404, detail="no such file")
+    path = DOWNLOAD_DIR / name
+    if not path.is_file() or path.resolve().parent != DOWNLOAD_DIR.resolve():
+        raise HTTPException(status_code=404, detail="no such file")
+    return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+
+_DOWNLOAD_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Starfront</title>
+<style>
+  body {{ margin: 0; background: #05070c; color: #dfe5f0; font-family: system-ui, sans-serif; }}
+  main {{ max-width: 640px; margin: 0 auto; padding: 56px 20px; }}
+  h1 {{ font-size: 2rem; margin: 0 0 6px; }}
+  .sub {{ color: #8f9bb3; margin: 0 0 32px; }}
+  .btn {{ display: inline-block; background: #7ee7a5; color: #06130c; font-weight: 600;
+          padding: 14px 26px; border-radius: 10px; text-decoration: none; font-size: 1.1rem; }}
+  .meta {{ color: #8f9bb3; font-size: 0.9rem; margin: 12px 0 40px; }}
+  h2 {{ font-size: 1.05rem; margin: 28px 0 8px; }}
+  p, li {{ line-height: 1.5; }}
+  a {{ color: #9fe4bd; }}
+  code {{ background: #11161f; padding: 2px 6px; border-radius: 4px; }}
+</style>
+</head>
+<body>
+<main>
+  <h1>Starfront</h1>
+  <p class="sub">Telescope control and collaborative imaging for Windows.</p>
+  {button}
+  <h2>Installing</h2>
+  <p>Run the installer. It puts Starfront under your own Programs folder with a
+  Start-menu shortcut and an uninstaller, and asks for no administrator rights.
+  Windows may say it protected your PC the first time: <em>More info &rarr; Run
+  anyway</em>. An upgrade installs over the top and keeps your settings, targets
+  and plan.</p>
+  <h2>Staying on N.I.N.A.?</h2>
+  <p>There is a plugin instead. In N.I.N.A., Options &rarr; General &rarr; Plugin
+  Repositories, press + and enter <code>{host}/nina</code>, then install
+  &ldquo;Starfront Collaboration&rdquo; from the Plugins tab.</p>
+  <p><a href="/sky">Tonight at Starfront</a>: where the observatory's telescopes are pointed right now.</p>
+</main>
+</body>
+</html>
+"""
+
+
+@app.get("/download")
+def download_page(request: Request) -> HTMLResponse:
+    """The page with the one button."""
+    latest = _latest_setup()
+    if latest is None:
+        button = "<p class=\"meta\">There is no download yet.</p>"
+    else:
+        size = latest["size"] / (1024 * 1024)
+        button = (f"<a class=\"btn\" href=\"/download/{latest['file']}\">Download Starfront "
+                  f"{latest['version']} for Windows</a>"
+                  f"<p class=\"meta\">{latest['file']} &middot; {size:.0f} MB &middot; "
+                  f"Windows 10 and 11, 64-bit</p>")
+    host = DISCORD.public_url.rstrip("/") if DISCORD.public_url else f"{request.url.scheme}://{request.url.netloc}"
+    return HTMLResponse(_DOWNLOAD_PAGE.format(button=button, host=host))
+
+
 # ---------------------------------------------------------------------------
 # The sky: where everybody is pointing, for anybody's web page
 # ---------------------------------------------------------------------------
@@ -1547,7 +1683,9 @@ def health() -> dict[str, Any]:
             # The N.I.N.A. plugin releases this server offers, so a deploy
             # can be checked from outside.
             "ninaPlugins": [f'{m.get("Name")} {".".join(str(m["Version"][k]) for k in ("Major", "Minor", "Patch", "Build"))}'
-                            for m in _nina_manifests() if isinstance(m.get("Version"), dict)]}
+                            for m in _nina_manifests() if isinstance(m.get("Version"), dict)],
+            # The Starfront installer on offer at /download, for the same reason.
+            "download": (_latest_setup() or {}).get("version")}
 
 
 @app.exception_handler(Exception)

@@ -142,6 +142,14 @@ os.environ["STARFRONT_NINA_DIR"] = str(NINA_DIR)
     "Installer": {"URL": f"{BASE}/nina/download/Starfront.Collab.1.0.0.0.zip", "Type": "ARCHIVE",
                   "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
 (NINA_DIR / "notes.txt").write_text("not a release", encoding="utf-8")
+(NINA_DIR / "CHANGELOG.md").write_text("# Change log\n\n## 1.0.0.0\n", encoding="utf-8")
+# The installers the server offers at /download: two versions, where the
+# newer one sorts first only by number, and a file that is not an installer.
+DOWNLOAD_DIR = Path(tempfile.mkdtemp())
+os.environ["STARFRONT_DOWNLOAD_DIR"] = str(DOWNLOAD_DIR)
+(DOWNLOAD_DIR / "Starfront-Setup-0.2.9.exe").write_bytes(b"MZ-old" + b"\x00" * 10)
+(DOWNLOAD_DIR / "Starfront-Setup-0.2.35.exe").write_bytes(b"MZ-new" + b"\x00" * 10)
+(DOWNLOAD_DIR / "secrets.txt").write_text("not for anybody", encoding="utf-8")
 # An older release left behind in the folder: the feed offers only the newest.
 (NINA_DIR / "Starfront.Collab.0.9.0.0.manifest.json").write_text(json.dumps({
     "Name": "Starfront Collaboration", "Identifier": "896B4E28-7CEB-4731-BB97-8BADE7460268",
@@ -1600,6 +1608,46 @@ for wrong in ("notes.txt", "..%2Fcollab.sqlite", "nothing.zip", ".zip"):
     if status != 404:
         break
 case("...and anything that is not a release is not served", status == 404)
+request = urllib.request.Request(f"{BASE}/nina/changelog", method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    log = response.read().decode("utf-8")
+case("the plugin's change log is served for the manifests' link", "## 1.0.0.0" in log)
+
+# ---------------------------------------------------- the Starfront download
+print("\n-- the download page --")
+
+# The source is private; the installer is handed out from the server. The
+# newest version is the download, by number and not by spelling, so 0.2.35
+# beats 0.2.9.
+status, latest = call("GET", "/download/latest.json")
+case("latest.json names the newest installer by version number",
+     status == 200 and latest["version"] == "0.2.35" and latest["file"] == "Starfront-Setup-0.2.35.exe"
+     and latest["url"] == "/download/Starfront-Setup-0.2.35.exe" and latest["size"] == 16, str(latest))
+case("...and health says which version is on offer",
+     call("GET", "/api/v1/health")[1].get("download") == "0.2.35")
+request = urllib.request.Request(f"{BASE}/download/latest", method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    fetched = response.read(), response.headers.get("Content-Disposition", ""), response.url
+case("/download/latest fetches that installer, named as a file to save",
+     fetched[0].startswith(b"MZ-new") and "Starfront-Setup-0.2.35.exe" in fetched[1]
+     and fetched[2].endswith("/download/Starfront-Setup-0.2.35.exe"), str(fetched[1:]))
+request = urllib.request.Request(f"{BASE}/download/Starfront-Setup-0.2.9.exe", method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    older = response.read()
+case("an older installer's own link keeps working", older.startswith(b"MZ-old"))
+request = urllib.request.Request(f"{BASE}/download", method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    page = response.read().decode("utf-8"), response.headers.get("Content-Type", "")
+case("the download page offers the newest one, with its size, and says where N.I.N.A. users go",
+     "text/html" in page[1] and 'href="/download/Starfront-Setup-0.2.35.exe"' in page[0]
+     and "Download Starfront 0.2.35 for Windows" in page[0] and f"{BASE}/nina" in page[0]
+     and "0.2.9" not in page[0], page[1])
+for wrong in ("secrets.txt", "..%2Fcollab.sqlite", "Starfront-Setup-9.9.9.exe", "Starfront-Setup-.exe",
+              "Starfront-Setup-0.2.35.exe.bak"):
+    status, _ = call("GET", f"/download/{wrong}")
+    if status != 404:
+        break
+case("...and nothing but installers is served from the folder", status == 404, f"{wrong} -> {status}")
 
 print()
 print(f"{sum(results)}/{len(results)} passed")

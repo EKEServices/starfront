@@ -57,7 +57,11 @@ if ($iscc) {
     $setup = Join-Path $dist "Starfront-Setup-$version.exe"
     $setupSize = [math]::Round((Get-Item $setup).Length / 1MB, 1)
     Write-Host "Built $setup  ($setupSize MB)"
-    Write-Host "Share the installer. People run it; the zip is for anybody who would rather unzip."
+    # Stage it for the collaboration server, which offers it at /download.
+    $downloads = Join-Path $root "server\downloads"
+    New-Item -ItemType Directory -Force $downloads | Out-Null
+    Copy-Item $setup $downloads -Force
+    Write-Host "Copied to server\downloads. Run 'Deploy the Starfront server.cmd' to put it on the download page."
 } else {
     Write-Host "Inno Setup is not installed, so no installer was made: winget install JRSoftware.InnoSetup"
     Write-Host "Share the zip. People unzip it and double-click Starfront.exe."

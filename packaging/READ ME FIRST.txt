@@ -6,7 +6,7 @@ Telescope control and collaborative imaging for Windows.
 Install
 -------
 The easy way is the installer, Starfront-Setup-<version>.exe, from
-   https://github.com/bray-sfro/starfront/releases
+   https://collab.starfront.space/download
 Run it; it puts Starfront under your own Programs folder with a Start-menu
 shortcut and an uninstaller, with no administrator prompt. Windows may say it
 protected your PC the first time: More info -> Run anyway.

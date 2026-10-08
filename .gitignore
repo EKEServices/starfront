@@ -12,10 +12,12 @@ venv/
 .idea/
 .vscode/
 
-# Build output: the folder people run and the zips they download.
+# Build output: the folder people run and the zips they download. The
+# installers staged for the server to offer are not in git either.
 packaging/build/
 packaging/dist/
 *.zip
+server/downloads/*.exe
 
 # Anything an observatory produces or is told: settings, targets, plans,
 # the calibration library, logs, frames. None of it belongs in the code.

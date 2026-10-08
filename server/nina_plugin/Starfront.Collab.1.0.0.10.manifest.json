@@ -9,10 +9,10 @@
                 },
     "Author":  "Starfront Observatories",
     "Homepage":  "https://collab.starfront.space",
-    "Repository":  "https://github.com/bray-sfro/starfront",
+    "Repository":  "https://collab.starfront.space/nina",
     "License":  "MPL-2.0",
     "LicenseURL":  "https://www.mozilla.org/en-US/MPL/2.0/",
-    "ChangelogURL":  "https://github.com/bray-sfro/starfront/blob/main/nina/CHANGELOG.md",
+    "ChangelogURL":  "https://collab.starfront.space/nina/changelog",
     "Tags":  [
                  "Collaboration",
                  "Mosaic",
