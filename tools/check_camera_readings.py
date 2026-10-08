@@ -128,6 +128,52 @@ status = camera.status()
 case("status carries the cooler reading", status["temperature"] == 8.1 and status["coolerPower"] == 55.0
      and status["setpoint"] == -10.0, str({k: status[k] for k in ("temperature", "setpoint", "coolerOn", "coolerPower")}))
 
+# -- a reading that has frozen ------------------------------------------------------
+# Seen after a reconnect on a real night: the driver answered -2.0 C for sixteen
+# minutes with the cooler reported off while the sensor warmed to +3, and
+# started reading again the moment the setpoint was written. A sensor below
+# room temperature with nothing cooling it cannot hold still.
+frozen = ScriptedDriver()
+frozen.values.update({"CCDTemperature": -2.0, "CoolerOn": False, "CoolerPower": 0.0})
+written = []
+stuck = camera_with(frozen)
+stuck._set = lambda name, value: written.append((name, value))
+stuck.temperature
+tick(stuck); stuck.temperature
+case("an identical reading for a few seconds is left alone", not written)
+stuck._cooler_same_since = time.monotonic() - 200.0
+tick(stuck); stuck.temperature
+case("the same reading for three minutes with the cooler off re-sends the setpoint",
+     written == [("SetCCDTemperature", -5.0)], str(written))
+tick(stuck); stuck.temperature
+case("...once, not every two seconds", len(written) == 1)
+frozen.values["CCDTemperature"] = 2.4
+tick(stuck); stuck.temperature
+tick(stuck); frozen.values["CCDTemperature"] = 2.3; stuck.temperature
+stuck._cooler_same_since = time.monotonic() - 200.0
+tick(stuck); stuck.temperature
+case("a reading that moves again is trusted again", stuck.temperature == 2.3 and len(written) == 1)
+
+settled = ScriptedDriver()
+settled.values.update({"CCDTemperature": -5.0, "CoolerOn": True, "CoolerPower": 31.0})
+held = []
+at_setpoint = camera_with(settled)
+at_setpoint._set = lambda name, value: held.append((name, value))
+at_setpoint.temperature
+at_setpoint._cooler_same_since = time.monotonic() - 3600.0
+tick(at_setpoint); at_setpoint.temperature
+case("a cooler holding its setpoint for an hour is not nudged", not held)
+
+warm = ScriptedDriver()
+warm.values.update({"CCDTemperature": 22.0, "CoolerOn": False, "CoolerPower": 0.0})
+touched = []
+off = camera_with(warm)
+off._set = lambda name, value: touched.append((name, value))
+off.temperature
+off._cooler_same_since = time.monotonic() - 3600.0
+tick(off); off.temperature
+case("a warm sensor with the cooler off is not nudged either", not touched)
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

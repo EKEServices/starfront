@@ -280,6 +280,12 @@ class AscomCamera(_AscomDevice, Camera):
     #: cooling or warming - even flat out, a cooler moves about a degree in
     #: that time - so it is a driver misreading until said twice.
     _COOLER_JUMP_C = 1.5
+    #: A reading that has not moved by a hundredth of a degree in this long,
+    #: while the driver says nothing is cooling it, is a driver that has
+    #: stopped asking the camera. Seen after a reconnect: ZWO's answered
+    #: -2.0 C for sixteen minutes while the sensor warmed to +3, and woke up
+    #: the moment the cooler was commanded. So that is what is done.
+    _COOLER_STALE_S = 180.0
 
     def _cooler(self) -> dict[str, Any]:
         now = time.monotonic()
@@ -289,6 +295,7 @@ class AscomCamera(_AscomDevice, Camera):
         # 3 is "reading out" in ASCOM's CameraStates; the driver is busiest then.
         if cached is not None and int(self._get("CameraState", 0) or 0) == 3:
             return cached
+        self._nudge_if_stale(cached, now)
 
         def number(name: str, digits: int) -> float | None:
             value = self._get(name)
@@ -325,9 +332,54 @@ class AscomCamera(_AscomDevice, Camera):
         self._cooler_cache = reading
         return reading
 
+    def _nudge_if_stale(self, cached: dict[str, Any] | None, now: float) -> None:
+        """Re-send the setpoint when the driver's temperature has frozen.
+
+        Only when the reading is identical for minutes *and* the driver says
+        the cooler is off or idle *and* the sensor is below room temperature:
+        a cooler at its setpoint can honestly report the same number for an
+        hour, and that case is left alone. A sensor below fifteen degrees
+        with nothing cooling it cannot hold still, so a driver saying it does
+        has stopped reading - and writing the setpoint back, unchanged, is
+        the one call that was seen to start it reading again.
+        """
+        if cached is None:
+            self._cooler_same_since = now
+            self._cooler_nudged = False
+            return
+        temperature = cached.get("temperature")
+        last = getattr(self, "_cooler_last_seen", None)
+        if temperature is None or temperature != last:
+            self._cooler_last_seen = temperature
+            self._cooler_same_since = now
+            self._cooler_nudged = False
+            return
+        idle = (not cached.get("coolerOn")) or not (cached.get("coolerPower") or 0)
+        if (now - getattr(self, "_cooler_same_since", now) < self._COOLER_STALE_S
+                or not idle or temperature >= 15.0 or getattr(self, "_cooler_nudged", False)):
+            return
+        self._cooler_nudged = True
+        setpoint = cached.get("setpoint")
+        try:
+            if setpoint is not None and self.can_cool:
+                self._set("SetCCDTemperature", float(setpoint))
+            self._log(f"the camera's temperature has read {temperature:g} C for "
+                      f"{self._COOLER_STALE_S / 60:.0f} minutes with the cooler reported "
+                      "off; re-sent the setpoint to wake the driver's reading", "warn")
+        except Exception:                          # noqa: BLE001 - a nudge, not a need
+            pass
+
+    def _log(self, message: str, level: str = "info") -> None:
+        """Into the file log: a device has no line to the event strip."""
+        import logging
+        logging.getLogger("astrocontrol.devices").log(
+            logging.WARNING if level == "warn" else logging.INFO, message)
+
     def _forget_cooler(self) -> None:
         self._cooler_cache = None
         self._cooler_pending = None
+        self._cooler_same_since = time.monotonic()
+        self._cooler_nudged = False
 
     @property
     def temperature(self) -> float | None:
