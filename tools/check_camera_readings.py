@@ -138,13 +138,17 @@ frozen.values.update({"CCDTemperature": -2.0, "CoolerOn": False, "CoolerPower": 
 written = []
 stuck = camera_with(frozen)
 stuck._set = lambda name, value: written.append((name, value))
+stuck.set_setpoint(-7.0)                   # what the program asked for
+frozen.values["SetCCDTemperature"] = -5.0  # what the driver claims, wrongly
+written.clear()
 stuck.temperature
 tick(stuck); stuck.temperature
 case("an identical reading for a few seconds is left alone", not written)
 stuck._cooler_same_since = time.monotonic() - 200.0
 tick(stuck); stuck.temperature
-case("the same reading for three minutes with the cooler off re-sends the setpoint",
-     written == [("SetCCDTemperature", -5.0)], str(written))
+case("the same reading for three minutes with the cooler off re-sends the setpoint "
+     "the program asked for, not the one the driver reports",
+     written == [("SetCCDTemperature", -7.0)], str(written))
 tick(stuck); stuck.temperature
 case("...once, not every two seconds", len(written) == 1)
 frozen.values["CCDTemperature"] = 2.4
@@ -153,6 +157,42 @@ tick(stuck); frozen.values["CCDTemperature"] = 2.3; stuck.temperature
 stuck._cooler_same_since = time.monotonic() - 200.0
 tick(stuck); stuck.temperature
 case("a reading that moves again is trusted again", stuck.temperature == 2.3 and len(written) == 1)
+
+never_set = ScriptedDriver()
+never_set.values.update({"CCDTemperature": -2.0, "CoolerOn": False, "CoolerPower": 0.0})
+blind = []
+unasked = camera_with(never_set)
+unasked._set = lambda name, value: blind.append((name, value))
+unasked.temperature
+unasked._cooler_same_since = time.monotonic() - 200.0
+tick(unasked); unasked.temperature
+case("with no setpoint ever asked for, nothing is written back", not blind)
+
+# -- a driver that has lost the camera ----------------------------------------------
+# ZWO's answers 0 for every number once the USB link drops, cooler still "on".
+# Seen for real: 0.0 C, setpoint 0.0, power 0, while the sensor had just been
+# cooling through -0.4 C. The last real numbers stand and the status says so.
+dropped = ScriptedDriver()
+dropped.values.update({"CCDTemperature": -0.4, "SetCCDTemperature": -5.0,
+                       "CoolerOn": True, "CoolerPower": 87.0})
+lost = camera_with(dropped)
+lost.temperature
+tick(lost)
+dropped.values.update({"CCDTemperature": 0.0, "SetCCDTemperature": 0.0, "CoolerPower": 0.0})
+case("three exact zeros at once are not believed: the last real reading stands",
+     lost.temperature == -0.4 and lost.setpoint == -5.0 and lost.cooler_power == 87.0
+     and lost.reading_stale, f"{lost.temperature} {lost.setpoint} {lost.cooler_power}")
+lost.sensor_width = lost.sensor_height = 100
+lost.pixel_size_um = 3.76
+lost.max_bin = 2
+lost.gain = lost.offset = lost.binning = 1
+lost.gain_min = lost.gain_max = lost.offset_min = lost.offset_max = 0
+dropped.values.update({"PercentCompleted": 0, "LastExposureDuration": 0, "ImageReady": False})
+case("...and the status says the reading is stale", lost.status()["readingStale"] is True)
+tick(lost)
+dropped.values.update({"CCDTemperature": -0.9, "SetCCDTemperature": -5.0, "CoolerPower": 90.0})
+case("real numbers are believed again as soon as they return",
+     lost.temperature == -0.9 and not lost.reading_stale)
 
 settled = ScriptedDriver()
 settled.values.update({"CCDTemperature": -5.0, "CoolerOn": True, "CoolerPower": 31.0})

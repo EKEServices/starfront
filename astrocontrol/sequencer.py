@@ -667,8 +667,34 @@ class Sequencer:
 
         deadline = time.monotonic() + timeout
         announced = False
+        stale_since: float | None = None
+        reconnected = False
         while True:
             self._check()
+            # A driver that has stopped reading - every number zero at once,
+            # which is a dropped USB link - would otherwise be waited on for
+            # the whole twenty minutes. It is given a minute, then the camera
+            # is reconnected, which is what brings the driver back, and its
+            # settings are put back with it. Once; after that the night goes
+            # on at whatever temperature the sensor really is.
+            if getattr(camera, "reading_stale", False):
+                stale_since = stale_since or time.monotonic()
+                if not reconnected and time.monotonic() - stale_since > 60.0:
+                    self._say(f"{label}: the camera's temperature reading has stopped "
+                              "(the driver answers zeros); reconnecting the camera", "warn")
+                    self._reconnect_cameras([rig])
+                    reconnected = True
+                    camera = rig.manager.get("camera")
+                    if camera is None or not camera.connected:
+                        break
+                    stale_since = None
+                    continue
+                if reconnected:
+                    self._say(f"{label}: the camera still gives no temperature after "
+                              "reconnecting; starting anyway - check its USB link", "warn")
+                    break
+            else:
+                stale_since = None
             now = camera.temperature
             if now is not None and abs(now - setpoint) <= tolerance:
                 self._say(f"{label}: camera at {now:.1f} C", "success")

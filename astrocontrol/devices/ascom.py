@@ -310,7 +310,18 @@ class AscomCamera(_AscomDevice, Camera):
             "setpoint": number("SetCCDTemperature", 2),
             "coolerOn": bool(self._get("CoolerOn", False)),
             "coolerPower": number("CoolerPower", 1),
+            "stale": False,
         }
+        # Three exact zeros at once is not a reading, it is a driver that
+        # has lost the camera: ZWO's answers 0 for every number once the USB
+        # link drops, with the cooler still "on". Taken as no reading at all,
+        # so the last real one stands and the status says the link is gone.
+        if (reading["temperature"] == 0.0 and reading["setpoint"] == 0.0
+                and (reading["coolerPower"] or 0.0) == 0.0):
+            reading["temperature"] = None
+            reading["setpoint"] = None
+            reading["coolerPower"] = None
+            reading["stale"] = True
         if cached is not None:
             before = cached.get("temperature")
             after = reading["temperature"]
@@ -359,13 +370,19 @@ class AscomCamera(_AscomDevice, Camera):
                 or not idle or temperature >= 15.0 or getattr(self, "_cooler_nudged", False)):
             return
         self._cooler_nudged = True
-        setpoint = cached.get("setpoint")
+        # The setpoint this program asked for, never the one the driver
+        # reports: a driver that has stopped reading reports nonsense, and
+        # writing its nonsense back as the setpoint set a camera to 0 C once.
+        setpoint = getattr(self, "_wanted_setpoint", None)
+        if setpoint is None:
+            return
         try:
-            if setpoint is not None and self.can_cool:
+            if self.can_cool:
                 self._set("SetCCDTemperature", float(setpoint))
             self._log(f"the camera's temperature has read {temperature:g} C for "
                       f"{self._COOLER_STALE_S / 60:.0f} minutes with the cooler reported "
-                      "off; re-sent the setpoint to wake the driver's reading", "warn")
+                      f"off; re-sent the {setpoint:g} C setpoint to wake the driver's "
+                      "reading", "warn")
         except Exception:                          # noqa: BLE001 - a nudge, not a need
             pass
 
@@ -403,7 +420,19 @@ class AscomCamera(_AscomDevice, Camera):
         if not self.can_cool:
             raise DeviceError("camera cannot set a temperature setpoint")
         self._set("SetCCDTemperature", float(celsius))
+        self._wanted_setpoint = float(celsius)
         self._forget_cooler()
+
+    @property
+    def reading_stale(self) -> bool:
+        """Whether the driver has stopped giving real cooler numbers.
+
+        True while every number it answers is zero at once, which is how
+        ZWO's driver reports a camera whose USB link has dropped, and the
+        values on show are the last real ones. A sequencer waiting for the
+        camera to cool must not wait on these.
+        """
+        return bool(self._cooler().get("stale"))
 
     @property
     def cooler_power(self) -> float | None:
@@ -440,6 +469,8 @@ class AscomCamera(_AscomDevice, Camera):
             "setpoint": cooler["setpoint"],
             "coolerOn": cooler["coolerOn"],
             "coolerPower": cooler["coolerPower"],
+            # The numbers above are the last real ones when this is set.
+            "readingStale": bool(cooler.get("stale")),
             "canCool": self.can_cool,
             "gain": self.gain,
             "offset": self.offset,
