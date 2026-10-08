@@ -2179,6 +2179,17 @@ class Sequencer:
                 self._hfr_over_limit.pop(rig.id, None)
                 self._focus_failures.pop(rig.id, None)
                 self._focus_blocked_until.pop(rig.id, None)
+                # The result, in the log. A failure was always said; a
+                # success lived only on the screen, so a night read back
+                # from its log had a sweep of thirteen frames and no answer.
+                with contextlib.suppress(Exception):
+                    last = (rig.focuser.status() or {}).get("last") or {}
+                    if last.get("bestPosition") is not None:
+                        self._say(
+                            f"{rig.name}: focused at {last['bestPosition']}"
+                            + (f", HFD {last['bestHfd']:.2f}" if last.get("bestHfd") else "")
+                            + (f" (was {last['startHfd']:.2f} at {last.get('startPosition')})"
+                               if last.get("startHfd") else ""), "success")
                 # Focus now stands where this filter wants it, so that is the
                 # offset the next filter change measures its move from.
                 self._filter_offset[rig.id] = self._offset_for(
@@ -3320,6 +3331,17 @@ class Sequencer:
                     self._say(f"{rig.name}: " + "; ".join(outcome["failed"]), "warn")
                 elif outcome["connected"]:
                     self._say(f"{rig.name}: the camera is back", "success")
+                    # A fresh connection is a driver at its defaults. ZWO's
+                    # comes back with the cooler off and the gain wherever it
+                    # was last set from somewhere else, and a night that
+                    # carried on from here warmed the sensor from -4 C to
+                    # -2 C under a "cooling" label before anybody noticed.
+                    try:
+                        self._prepare_camera(rig)
+                    except Exception as exc:      # noqa: BLE001 - reported, not fatal
+                        self._say(f"{rig.name}: could not put the camera's "
+                                  f"settings back after reconnecting — {exc}",
+                                  "warn")
             except Exception as exc:              # noqa: BLE001 - reported, not fatal
                 self._say(f"{rig.name}: could not reconnect the camera — {exc}",
                           "warn")

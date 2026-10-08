@@ -853,6 +853,13 @@ class CaptureService:
         stacker = self.stacker
         if stacker is None or not stacker.enabled:
             return
+        # Only the subs. Autofocus sweeps, centring solves and framing shots
+        # are lights too, and they are never saved - a focus run is nine
+        # frames at nine different focus positions, and stacking those on
+        # top of the night's subs smears every star. The same rule the
+        # viewer's own frame stepping uses: a sub is a saved light.
+        if not record.saved:
+            return
         settings = stacker.settings()
         if not self.frame_context.get("collabProject") and \
                 not settings.get("stackOwnTargets", True):

@@ -374,14 +374,18 @@ camera.gain = 100
 
 # ------------------------------------------------------------- saving off
 print("\n== saving switched off ==")
+# Autofocus sweeps, centring solves and framing shots are unsaved lights. On
+# the first real night the stack took every one of a focus run's thirteen
+# frames, at thirteen focus positions, on top of the subs.
 capture.save_enabled = False
 raw, metadata = expose(0, seed=503)
 record = capture._store(raw, 300.0, "light", camera, metadata)
-status = settled(7)
-case("a frame shot with saving off is still stacked, from memory",
-     not record.saved and status["stacks"][key]["frames"] == 3,
-     f"{status['stacks'][key]['frames']} frames; last: "
-     f"{(status.get('last') or {}).get('error') or (status.get('last') or {}).get('stack', {}).get('detail')}")
+time.sleep(1.0)
+status = stacker.status()
+case("a frame shot with saving off is not a sub and stays out of the stack",
+     not record.saved and status["stacks"][key]["frames"] == 2
+     and status["counts"]["stacked"] == 5,
+     f"{status['stacks'][key]['frames']} frames, {status['counts']['stacked']} stacked")
 capture.save_enabled = True
 
 # -------------------------------------------------------------- a new night
@@ -395,7 +399,7 @@ case("a new night saves what was open and starts a fresh folder",
 stacker.begin_night(capture.night_name())
 case("coming back to tonight finds the stack on disk again",
      stacker.stack("NGC 9999", "L") is not None
-     and stacker.stack("NGC 9999", "L").frames == 3)
+     and stacker.stack("NGC 9999", "L").frames == 2)
 
 server.should_exit = True
 stacker.stop()

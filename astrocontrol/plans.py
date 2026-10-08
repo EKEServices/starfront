@@ -199,6 +199,7 @@ class PlanStore:
                 copied.pop("startAt", None)
                 copied.pop("endAt", None)
                 copied.pop("timesPinned", None)
+                copied.pop("filtersPinned", None)
                 rebuilt.append(copied)
             self._plan["entries"] = rebuilt
             if name:
@@ -475,7 +476,8 @@ class PlanStore:
     def set_filters(self, entry_id: str, filters: list[dict[str, Any]],
                     panels: int, available_seconds: float,
                     overheads: dict[str, float],
-                    rig_id: str | None = None) -> dict[str, Any]:
+                    rig_id: str | None = None,
+                    pinned: bool | None = None) -> dict[str, Any]:
         """Replace a filter allocation, trimmed to what the night allows.
 
         Counts are clamped rather than rejected: the useful answer to "can I
@@ -484,6 +486,13 @@ class PlanStore:
         `rig_id` says which telescope's allocation this is.  None is the
         master's, which is also what any telescope without one of its own
         follows.
+
+        `pinned` records who chose these: True for the operator, False for
+        Auto-arrange, None to leave the record alone. Filters the operator
+        set are theirs, the way pinned times are, and the arranger keeps
+        them rather than swapping a night of OIII for the broadband set it
+        would have picked from the Moon. Clearing every filter by hand
+        unpins the target and hands it back.
         """
         cleaned: list[dict[str, Any]] = []
         for item in filters:
@@ -502,6 +511,11 @@ class PlanStore:
                 if entry["id"] == entry_id:
                     if rig_id is None:
                         entry["filters"] = trimmed["filters"]
+                        if pinned is not None:
+                            if pinned and trimmed["filters"]:
+                                entry["filtersPinned"] = True
+                            else:
+                                entry.pop("filtersPinned", None)
                     else:
                         entry.setdefault("rigFilters", {})[rig_id] = trimmed["filters"]
                     result = json.loads(json.dumps(entry))

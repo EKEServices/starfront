@@ -10,6 +10,7 @@ dependency and nothing else.
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import threading
 import time
@@ -264,6 +265,18 @@ def run(host: str = "127.0.0.1", port: int = 0, debug: bool = False) -> None:
     finally:
         server.stop()
         log.info("server stopped")
+        # And go. The interpreter would otherwise wait for every thread that
+        # is not a daemon - the device apartment threads, a watcher mid-poll -
+        # and a window closed at bedtime left a process behind, every night:
+        # a dozen of them were found on one PC, each still polling the
+        # collaboration server as this telescope, one still holding the flat
+        # panel's serial port so the next launch could not open it, and
+        # between them hours of processor time. The devices have been
+        # disconnected and the stacks saved by the server's own shutdown
+        # above; nothing left is worth waiting for.
+        log.info("exiting")
+        logging.shutdown()
+        os._exit(0)
 
 
 WEBVIEW2_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"

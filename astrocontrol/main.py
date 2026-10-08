@@ -5065,10 +5065,12 @@ def set_plan_filters(entry_id: str, body: PlanFiltersRequest,
     target = _rig(rig)
     rig_id = None if target.is_master else target.id
 
+    # Typed in by the operator, so Auto-arrange keeps it. Clearing every
+    # filter here hands the target back to the arranger.
     result = _guard(plan.set_filters, entry_id,
                     [f.model_dump() for f in body.filters],
                     info["panels"], info["availableSeconds"], _overheads(),
-                    rig_id)
+                    rig_id, pinned=True)
     return {**result, "availableSeconds": info["availableSeconds"],
             "panels": info["panels"], "rig": target.id}
 
@@ -5317,6 +5319,20 @@ def arrange_plan(body: ArrangeRequest | None = None) -> dict[str, Any]:
                                          "filters and frames; only its place in the "
                                          "night was arranged"]})
                 continue
+            # Filters the operator typed in are a decision, not a request.
+            # On a dim-Moon night the arranger used to swap a target's
+            # fourteen OIII subs for the broadband set and say so in a
+            # report that then disagreed with what was shot once they had
+            # been put back by hand.
+            if entry.get("filtersPinned") and any(
+                    int(row.get("count") or 0) > 0
+                    for row in (entry.get("filters") or [])):
+                chosen.append({"id": entry["id"], "name": entry["name"],
+                               "filters": entry.get("filters") or [],
+                               "notes": ["kept the filters you set on it; clear "
+                                         "them (every count to 0) to let "
+                                         "Auto-arrange choose"]})
+                continue
             separation = schedule.dark_overlap(
                 info["window"]["intervals"], moon,
                 astro.normalise_ra_hours(float(target.get("ra") or 0.0)),
@@ -5337,7 +5353,7 @@ def arrange_plan(body: ArrangeRequest | None = None) -> dict[str, Any]:
                 continue
             saved = _guard(plan.set_filters, entry["id"], picked["filters"],
                            info["panels"], info["availableSeconds"], overheads,
-                           None)
+                           None, pinned=False)
             chosen.append({
                 "id": entry["id"],
                 "name": entry["name"],

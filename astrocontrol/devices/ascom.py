@@ -616,7 +616,15 @@ class AscomFocuser(_AscomDevice, Focuser):
     @property
     def temperature(self) -> float | None:
         value = self._get("Temperature")
-        return None if value is None else round(float(value), 2)
+        if value is None:
+            return None
+        # ZWO's focuser driver answers -273 when it cannot reach the probe -
+        # a device that has dropped off its USB hub, as much as one with no
+        # probe fitted. Absolute zero is not a temperature anybody wants a
+        # refocus trigger or a header built on; it is "no reading".
+        if float(value) < -100.0:
+            return None
+        return round(float(value), 2)
 
     def move_to(self, position: int) -> None:
         self._require()

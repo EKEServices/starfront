@@ -599,6 +599,24 @@ def focuser_wanted(board: WarningBoard, ctx: Context) -> None:
     with contextlib.suppress(Exception):
         limit = int(getattr(focuser, "max_step", 0) or 0)
         position = int(focuser.position)
+        # A focuser that found focus at 32922 an hour ago and now says 0 has
+        # not been wound in: its driver has lost the device. ZWO's answers 0
+        # and no temperature once the USB link drops, and "at the end of its
+        # travel" sent somebody looking at the wrong thing on the night it
+        # happened. Say what it is, and what to do about it.
+        found = None
+        with contextlib.suppress(Exception):
+            last = (ctx.rigs.master.focuser.status() or {}).get("last") or {}
+            found = last.get("bestPosition")
+        if (position <= 0 and found and int(found) > 1000
+                and getattr(focuser, "temperature", None) is None):
+            board.raise_("focuser.lost", "critical", "The focuser has stopped answering",
+                         f"It reports position 0 and no temperature, but focus was found "
+                         f"at {int(found)} tonight. Its USB link has most likely dropped; "
+                         "a focus run now would drive it to nonsense.",
+                         "Check the focuser's USB cable and hub, then disconnect and "
+                         "reconnect it under Equipment. Refocus after.")
+            return
         if limit and (position <= 0 or position >= limit):
             board.raise_("focuser.limit", "warning", "The focuser is at the end of its travel",
                          f"Position {position} of 0–{limit}: a focus sweep cannot move "
