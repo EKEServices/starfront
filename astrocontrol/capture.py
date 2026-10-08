@@ -38,9 +38,11 @@ LIGHT_PATH_TYPES = ("light", "flat")      # frame types where the shutter/sky ma
 CALIBRATION_BACKLOG = 24
 
 # How much larger than the camera's field a target's live-stack canvas is made:
-# a fifth again each way, so dithering, drift and a meridian flip all still
-# land inside it rather than being cropped away one sub at a time.
-STACK_MARGIN = 1.2
+# a tenth again each way, so dithering, drift and a meridian flip all still
+# land inside it rather than being cropped away one sub at a time. Dither is
+# arcseconds and a re-centred flip is arcminutes; at the camera's own
+# resolution every extra tenth is a fifth more pixels to hold.
+STACK_MARGIN = 1.1
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._+-]+")
 
@@ -879,10 +881,12 @@ class CaptureService:
                 return
             across, down = solution.field
             ra, dec = solution.centre
+            # A cap of zero is no cap: the canvas is the camera's own
+            # resolution, which is what anybody looking at their stars wants.
             plan = Plan(ra=ra, dec=dec, width=across * STACK_MARGIN,
                         height=down * STACK_MARGIN, scale=solution.scale,
                         rotation=solution.rotation,
-                        maxPixels=int(settings.get("maxPixels") or 3000))
+                        maxPixels=int(settings.get("maxPixels") or 0))
 
         want = self._calibration_want(record, camera)
         library = self.library

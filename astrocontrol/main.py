@@ -787,7 +787,8 @@ class LiveStackSettingsRequest(BaseModel):
     share: bool | None = None
     removeGradient: bool | None = None
     stackUncalibrated: bool | None = None
-    maxPixels: int | None = Field(default=None, ge=512, le=8192)
+    # Zero is the camera's own resolution.
+    maxPixels: int | None = Field(default=None, ge=0, le=16384)
 
 
 class CalibrationSettingsRequest(BaseModel):

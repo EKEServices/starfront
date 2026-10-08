@@ -264,9 +264,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # A frame with no matching master dark or flat still goes in, raw, and
         # the Image tab says so. Off, such frames are left out of the stack.
         "stackUncalibrated": True,
-        # The long side of the canvas. Five accumulators are kept per pixel, so
-        # 3000 is about 180 MB a filter; 4096 is twice that.
-        "maxPixels": 3000,
+        # The long side of the canvas, in pixels. Zero is the camera's own
+        # resolution. A stack over sixteen megapixels lives on disk as
+        # memory-mapped files, thirty bytes a pixel (2.6 GB for a sixty-
+        # megapixel camera), and the rest of the program is not squeezed.
+        "maxPixels": 0,
     },
     "calibration": {
         # Where the master frames live. Blank means a folder beside the data,

@@ -1951,13 +1951,14 @@
     <label class="inline"><input type="checkbox" id="stackGradient"> Remove each frame's sky gradient on the way in</label>
     <label class="inline"><input type="checkbox" id="stackRaw"> Stack frames that have no matching masters, raw</label>
     <label class="inline"><input type="checkbox" id="stackShare"> Send tiles to the collaboration as well</label>
-    <label class="small">Canvas size, pixels on the long side
-      <input type="number" id="stackMaxPixels" min="512" max="8192" step="256">
+    <label class="small">Canvas size, pixels on the long side (0 = the camera's own resolution)
+      <input type="number" id="stackMaxPixels" min="0" max="16384" step="256">
     </label>
     <p class="small muted">
-      The stack is kept at this size whatever the camera's resolution. Five
-      numbers are held per pixel, so 3000 is about 180 MB a filter and 4096
-      about twice that.
+      At the camera's own resolution the stack lives on disk beside your
+      settings, about 2.6 GB a filter for a 60-megapixel camera, and each sub
+      takes a little longer to fold in. Put a number here to keep it smaller:
+      3000 is about 180 MB a filter and fits in memory.
     </p>
     <div class="row gap">
       <button class="btn small" id="btnStackSave">Save live stack settings</button>
