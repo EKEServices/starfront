@@ -1204,7 +1204,7 @@ def _snapshot() -> dict[str, Any]:
         "safety": safety_watcher.status(),
         "notify": notifier.status(),
         "filterOffsets": offsets_run.status(),
-        "collab": collab_client.status(),
+        "collab": {**collab_client.status(), "me": _me_brief()},
         # The run, plus where the library resolved to — the settings form shows
         # the folder a blank field actually means.
         "calibration": {**calibrator.status(), "libraryRoot": str(library.root)},
@@ -1794,6 +1794,10 @@ def collab_login_poll() -> dict[str, Any]:
         config.update("collab", {"userToken": answer["token"],
                                  "user": {"id": user.get("id") or "",
                                           "name": user.get("name") or "",
+                                          # The Discord picture's hash, for
+                                          # this telescope's own mark on the
+                                          # planetarium.
+                                          "avatar": str(user.get("avatar") or ""),
                                           "admin": bool(user.get("admin")),
                                           "canStart": bool(user.get("canStart"))},
                                  "coordinator": user.get("name") or ""})
@@ -2479,6 +2483,19 @@ def _admin_token_known() -> bool:
         return True                                # offline: believe the file
     _admin_check.update({"at": time.time(), "token": token})
     return True
+
+
+def _me_brief() -> dict[str, Any]:
+    """The signed-in person as the planetarium draws them: a name and a
+    picture. From the settings alone, so it costs nothing on the status tick."""
+    user = dict(config.get("collab", "user", {}) or {})
+    user_id = str(user.get("id") or "")
+    avatar = str(user.get("avatar") or "")
+    url = ""
+    if user_id and avatar:
+        kind = "gif" if avatar.startswith("a_") else "png"
+        url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar}.{kind}?size=64"
+    return {"name": str(user.get("name") or ""), "avatar": url}
 
 
 def _person_state() -> dict[str, Any]:
