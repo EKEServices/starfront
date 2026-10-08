@@ -296,6 +296,11 @@ class JogRequest(BaseModel):
     rate: float = Field(default=0.5, gt=0, le=10.0, description="degrees per second")
 
 
+class JogStopRequest(BaseModel):
+    #: The axis to stop, by the direction that was pressed; both when absent.
+    direction: str | None = None
+
+
 class FlatPanelRequest(BaseModel):
     on: bool
     brightness: int | None = Field(default=None, ge=0, le=100000)
@@ -1549,15 +1554,36 @@ def unpark() -> dict[str, Any]:
 
 @app.post("/api/mount/jog")
 def jog(body: JogRequest) -> dict[str, Any]:
+    """Drive the mount by hand.
+
+    A parked mount refuses to move, and a hand on the direction button is
+    the clearest possible statement that the person wants it to: so it is
+    released from park first, said so in the log, and then moved. Nothing
+    else - not the safety monitor having parked it a minute ago - gets to
+    overrule a person at the controls.
+    """
     mount = _guard(manager.require, "mount")
-    _guard(mount.jog, body.direction.lower(), body.rate)
+    if getattr(mount, "at_park", False):
+        _guard(mount.unpark)
+        manager.log("Mount released from park to slew by hand")
+    direction = body.direction.lower()
+    _guard(mount.jog, direction, body.rate)
+    # Said in the log with the rate, as N.I.N.A. logs its moves: when a hand
+    # move "did nothing" the log has to show what was asked for and when.
+    manager.log(f"Moving {direction} by hand at {body.rate:g}°/s")
     return {"ok": True}
 
 
 @app.post("/api/mount/jog/stop")
-def stop_jog() -> dict[str, Any]:
+def stop_jog(body: JogStopRequest | None = None) -> dict[str, Any]:
     mount = _guard(manager.require, "mount")
-    _guard(mount.stop_jog)
+    direction = (body.direction or "").lower() if body else ""
+    try:
+        _guard(mount.stop_jog, direction or None)
+    except TypeError:
+        # A backend whose stop_jog takes no direction stops everything.
+        _guard(mount.stop_jog)
+    manager.log(f"Hand move stopped{f' ({direction})' if direction else ''}")
     return {"ok": True}
 
 

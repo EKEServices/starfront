@@ -12,10 +12,11 @@ If the ASCOM Platform is not installed, importing this module still works;
 from __future__ import annotations
 
 import contextlib
+import itertools
 import threading
 import time
 from concurrent.futures import Future
-from queue import Queue
+from queue import PriorityQueue, Queue
 from typing import Any, Callable
 
 import numpy as np
@@ -32,10 +33,19 @@ except Exception:                       # pragma: no cover
 
 
 class _ComExecutor:
-    """Runs every COM call on a single STA thread."""
+    """Runs every COM call on a single STA thread.
+
+    Two lanes.  Status polling fills the queue continuously — ten property
+    reads a second against a mount on a serial link — and a command that
+    merely joins the back of that queue waits for every read ahead of it.
+    That was a hand-controller press arriving at the mount ten seconds
+    late.  An urgent call goes to the front: a jog, a stop, a park, an
+    abort - the things a person is waiting on with their hand on a button.
+    """
 
     def __init__(self, name: str = "ascom-com") -> None:
-        self._queue: Queue = Queue()
+        self._queue: PriorityQueue = PriorityQueue()
+        self._order = itertools.count()
         self._thread = threading.Thread(target=self._run, daemon=True, name=name)
         self._thread.start()
 
@@ -43,7 +53,7 @@ class _ComExecutor:
         pythoncom.CoInitialize()
         try:
             while True:
-                job, future = self._queue.get()
+                _lane, _seq, job, future = self._queue.get()
                 if job is None:
                     return
                 if future.set_running_or_notify_cancel():
@@ -54,9 +64,10 @@ class _ComExecutor:
         finally:
             pythoncom.CoUninitialize()
 
-    def call(self, job: Callable[[], Any], timeout: float = 180.0) -> Any:
+    def call(self, job: Callable[[], Any], timeout: float = 180.0,
+             urgent: bool = False) -> Any:
         future: Future = Future()
-        self._queue.put((job, future))
+        self._queue.put((0 if urgent else 1, next(self._order), job, future))
         return future.result(timeout=timeout)
 
 
@@ -174,7 +185,12 @@ class _AscomDevice:
     # a wrapper built directly (in a test, say) working.
     _channel: str = "default"
 
+    #: Per-instance in `_open`; the class-level None keeps a wrapper that was
+    #: never opened from sharing one dict with every other.
+    _cache: dict[str, tuple[Any, float]] | None = None
+
     def _open(self, prog_id: str) -> None:
+        self._cache = {}
         self._driver = _com(self._channel).call(
             lambda: win32com.client.Dispatch(prog_id), timeout=60)
 
@@ -196,11 +212,43 @@ class _AscomDevice:
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
 
-    def _invoke(self, name: str, *args: Any) -> Any:
+    def _invoke(self, name: str, *args: Any, urgent: bool = False) -> Any:
         try:
-            return _com(self._channel).call(lambda: getattr(self._driver, name)(*args))
+            return _com(self._channel).call(lambda: getattr(self._driver, name)(*args),
+                                            urgent=urgent)
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
+
+    def _set_urgent(self, name: str, value: Any) -> None:
+        """A property write that jumps the polling queue."""
+        try:
+            _com(self._channel).call(lambda: setattr(self._driver, name, value),
+                                     urgent=True)
+        except Exception as exc:
+            raise DeviceError(f"{name}: {exc}") from exc
+
+    def _get_cached(self, name: str, ttl: float, default: Any = None) -> Any:
+        """A property read answered from the last read while it is fresh.
+
+        For the status panel only — the control loops keep reading live.
+        Every read is a round trip over the mount's serial link, and the
+        panel asked for ten of them twice a second; the ones that change
+        slowly (parked, home, tracking, pier side, sidereal time) are not
+        worth the bandwidth that a jog command then has to queue behind.
+        """
+        if self._cache is None:
+            self._cache = {}
+        now = time.monotonic()
+        hit = self._cache.get(name)
+        if hit is not None and now - hit[1] < ttl:
+            return hit[0]
+        value = self._get(name, default)
+        self._cache[name] = (value, now)
+        return value
+
+    def _forget_cached(self) -> None:
+        if self._cache:
+            self._cache.clear()
 
 
 class AscomCamera(_AscomDevice, Camera):
@@ -488,6 +536,8 @@ class AscomMount(_AscomDevice, Mount):
         Mount.__init__(self, prog_id, name)
         self._prog_id = prog_id
         self._jogging = False
+        #: Axes a hand move is running on; a released button clears its own.
+        self._jog_axes: set[int] = set()
 
     def connect(self) -> None:
         self._open(self._prog_id)
@@ -498,12 +548,51 @@ class AscomMount(_AscomDevice, Mount):
         self.can_sync = bool(self._get("CanSync", False))
         self.can_set_tracking = bool(self._get("CanSetTracking", False))
         self.can_find_home = bool(self._get("CanFindHome", False))
+        self._axis_rates = self._read_axis_rates()
+
+    def _read_axis_rates(self) -> dict[int, list[tuple[float, float]]]:
+        """What the driver says MoveAxis will accept, per axis, in deg/s.
+
+        Asked once at connect, the way N.I.N.A. asks before its manual slew
+        buttons: a rate outside the advertised ranges is refused or, worse,
+        quietly mapped to something else.  Empty when the driver cannot say.
+        """
+        rates: dict[int, list[tuple[float, float]]] = {}
+        for axis in (0, 1):
+            try:
+                def read(axis=axis):
+                    found = []
+                    collection = self._driver.AxisRates(axis)
+                    for index in range(1, int(collection.Count) + 1):
+                        item = collection.Item(index)
+                        found.append((float(item.Minimum), float(item.Maximum)))
+                    return found
+                ranges = _com(self._channel).call(read)
+                if ranges:
+                    rates[axis] = sorted(ranges)
+            except Exception:                     # noqa: BLE001 - optional in ASCOM
+                continue
+        return rates
+
+    def _allowed_rate(self, axis: int, rate: float) -> float:
+        """The nearest rate the driver advertises for this axis."""
+        ranges = self._axis_rates.get(axis) if hasattr(self, "_axis_rates") else None
+        if not ranges:
+            return rate
+        best, distance = rate, None
+        for low, high in ranges:
+            candidate = min(max(rate, low), high)
+            gap = abs(candidate - rate)
+            if distance is None or gap < distance:
+                best, distance = candidate, gap
+        return best
 
     def disconnect(self) -> None:
         try:
             self._set("Connected", False)
         finally:
             self._connected = False
+            self._forget_cached()
 
     @property
     def ra(self) -> float:
@@ -569,19 +658,23 @@ class AscomMount(_AscomDevice, Mount):
     def abort_slew(self) -> None:
         self._require()
         self.stop_jog()
-        self._invoke("AbortSlew")
+        self._invoke("AbortSlew", urgent=True)
+        self._forget_cached()
 
     def set_tracking(self, on: bool) -> None:
         self._require()
-        self._set("Tracking", bool(on))
+        self._set_urgent("Tracking", bool(on))
+        self._forget_cached()
 
     def park(self) -> None:
         self._require()
-        self._invoke("Park")
+        self._invoke("Park", urgent=True)
+        self._forget_cached()
 
     def unpark(self) -> None:
         self._require()
-        self._invoke("Unpark")
+        self._invoke("Unpark", urgent=True)
+        self._forget_cached()
 
     def find_home(self) -> None:
         self._require()
@@ -591,38 +684,57 @@ class AscomMount(_AscomDevice, Mount):
         self._require()
         axis = 0 if direction in ("east", "west") else 1
         # CanMoveAxis is a method, not a property: it is asked per axis.
-        if not bool(self._invoke("CanMoveAxis", axis)):
+        if not bool(self._invoke("CanMoveAxis", axis, urgent=True)):
             raise DeviceError("mount does not support manual slewing on this axis")
         sign = 1.0 if direction in ("north", "east") else -1.0
-        self._invoke("MoveAxis", axis, sign * float(rate_deg_s))
+        rate = self._allowed_rate(axis, float(rate_deg_s))
+        # Urgent: a hand on a button is waiting, and the polling queue is not.
+        self._invoke("MoveAxis", axis, sign * rate, urgent=True)
+        self._jog_axes.add(axis)
         self._jogging = True
+        self._forget_cached()
 
-    def stop_jog(self) -> None:
+    def stop_jog(self, direction: str | None = None) -> None:
+        """End a hand move: MoveAxis with rate 0, as N.I.N.A. does.
+
+        With a direction, only that axis - which is what a released button
+        means; without one, both, which is what Stop means.
+        """
         if not self._connected:
             return
-        for axis in (0, 1):
+        axes = ((0,) if direction in ("east", "west")
+                else (1,) if direction in ("north", "south") else (0, 1))
+        for axis in axes:
             try:
-                self._invoke("MoveAxis", axis, 0.0)
+                self._invoke("MoveAxis", axis, 0.0, urgent=True)
             except DeviceError:
                 pass
-        self._jogging = False
+            self._jog_axes.discard(axis)
+        self._jogging = bool(self._jog_axes)
+        self._forget_cached()
 
     def status(self) -> dict[str, Any]:
         if not self._connected:
             return {"connected": False}
+        # Position and motion live; the slow-changing flags from the last
+        # read for a couple of seconds.  Ten round trips a tick became five,
+        # which is the difference between a serial link with room for a
+        # command and one without.
+        pier = self._get_cached("SideOfPier", 3.0)
+        side = None if pier is None or int(pier) < 0 else ("east" if int(pier) == 0 else "west")
         return {
             "connected": True,
             "ra": round(self.ra, 5),
             "dec": round(self.dec, 4),
             "altitude": self.altitude,
             "azimuth": self.azimuth,
-            "lst": round(float(self._get("SiderealTime", 0.0) or 0.0), 4),
+            "lst": round(float(self._get_cached("SiderealTime", 5.0, 0.0) or 0.0), 4),
             "slewing": self.slewing,
-            "tracking": self.tracking,
-            "atPark": self.at_park,
-            "atHome": self.at_home,
+            "tracking": bool(self._get_cached("Tracking", 2.0, False)),
+            "atPark": bool(self._get_cached("AtPark", 2.0, False)),
+            "atHome": bool(self._get_cached("AtHome", 3.0, False)),
             "canFindHome": self.can_find_home,
-            "sideOfPier": self.side_of_pier,
+            "sideOfPier": side,
         }
 
 

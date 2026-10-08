@@ -1405,8 +1405,24 @@ async function refreshDrivers(force = false) {
       select.appendChild(group);
     }
     if (previous) select.value = previous;
+    select.onchange = () => slotChanged(kind.key, select);
   }
   preselectRemembered();
+}
+
+/** "— none —" chosen: the slot is emptied now, connected or not. */
+async function slotChanged(kind, select) {
+  if (select.value) return;
+  const rig = currentRig();
+  const rigId = (rig && rig.id) || masterRigId();
+  const label = (KINDS.find((k) => k.key === kind) || {}).label || kind;
+  try {
+    await send(`/api/equipment/telescopes/${rigId}/devices/${kind}`, 'DELETE');
+    toast(`${label}: disconnected and forgotten — Connect everything will leave it alone`, 'info');
+    if (kind === 'camera') state.cameraSynced = false;
+    if (kind === 'filterwheel') state.filterNames = null;
+    await loadEquipment();
+  } catch { /* send() said why */ }
 }
 
 async function toggleConnection(kind) {
@@ -1700,7 +1716,16 @@ function updateConnectButtons(devices) {
     const device = devices[kind.key] || {};
     button.textContent = device.connected ? 'Disconnect' : 'Connect';
     button.classList.toggle('danger', !!device.connected);
-    if (select) select.disabled = !!device.connected;
+    // The dropdown stays live while the device is connected, so "— none —"
+    // can be chosen at any time: it disconnects and forgets the slot at once.
+    // It used to lock while connected, which made "get rid of this" a
+    // three-step puzzle nobody could see the steps of.
+    if (select) {
+      select.disabled = false;
+      select.title = device.connected
+        ? 'Connected. Choose — none — to disconnect and forget this slot; to change '
+          + 'driver, Disconnect first.' : '';
+    }
     if (kind.key === 'guider' && $('guiderAddress')) {
       $('guiderAddress').disabled = !!device.connected;
     }
@@ -2019,6 +2044,11 @@ function updateMount(mount) {
   $('btnTracking').textContent = mount.tracking ? 'Tracking on' : 'Tracking off';
   $('btnPark').textContent = mount.atPark ? 'Parked' : 'Park';
   $('btnPark').classList.toggle('active', !!mount.atPark);
+  // The buttons work on a parked mount too: the server releases it from
+  // park before the move. Say so, rather than greying them out.
+  document.querySelectorAll('[data-jog]').forEach((button) => {
+    button.title = mount.atPark ? 'The mount is parked; a press unparks it and moves' : '';
+  });
 }
 
 function updateGuider(guider) {
@@ -5494,18 +5524,46 @@ function bindControls() {
   $('btnPark').addEventListener('click', () => send('/api/mount/park', 'POST'));
   $('btnUnpark').addEventListener('click', () => send('/api/mount/unpark', 'POST'));
 
+  // Press and hold, the way N.I.N.A.'s direction buttons work: the move
+  // starts on the press and ends on the release, and nothing in between.
+  // The pointer is captured by the button for the whole press, so sliding
+  // a millimetre off a small button, or the panel repainting under the
+  // cursor, no longer counts as letting go — which is what was cutting
+  // every press to a third of a second while the trace showed N.I.N.A.'s
+  // lasting as long as the finger did.
   document.querySelectorAll('[data-jog]').forEach((button) => {
+    let active = false;
     const start = (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
       event.preventDefault();
+      if (active) return;
+      active = true;
+      try { button.setPointerCapture(event.pointerId); } catch { /* fine */ }
+      button.classList.add('active');
       send('/api/mount/jog', 'POST',
-        { direction: button.dataset.jog, rate: Number($('jogRate').value) });
+        { direction: button.dataset.jog, rate: Number($('jogRate').value) })
+        .catch(() => { active = false; button.classList.remove('active'); });
     };
-    const stop = () => send('/api/mount/jog/stop', 'POST').catch(() => {});
-    button.addEventListener('mousedown', start);
-    button.addEventListener('mouseup', stop);
-    button.addEventListener('mouseleave', (event) => { if (event.buttons) stop(); });
-    button.addEventListener('touchstart', start, { passive: false });
-    button.addEventListener('touchend', stop);
+    const stop = () => {
+      if (!active) return;
+      active = false;
+      button.classList.remove('active');
+      // The pressed axis only, with rate 0 — exactly what N.I.N.A. sends.
+      send('/api/mount/jog/stop', 'POST', { direction: button.dataset.jog })
+        .catch(() => {});
+    };
+    button.addEventListener('pointerdown', start);
+    button.addEventListener('pointerup', stop);
+    button.addEventListener('pointercancel', stop);
+    button.addEventListener('lostpointercapture', stop);
+    button.addEventListener('contextmenu', (event) => event.preventDefault());
+    button.addEventListener('dragstart', (event) => event.preventDefault());
+  });
+  // A release anywhere is a release: if the capture was lost before the
+  // button saw it, the window's pointerup still stops every axis.
+  window.addEventListener('pointerup', () => {
+    const held = document.querySelector('[data-jog].active');
+    if (held) held.dispatchEvent(new Event('pointerup'));
   });
 
   // Saving
