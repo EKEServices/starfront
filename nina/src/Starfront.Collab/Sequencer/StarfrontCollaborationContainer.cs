@@ -68,6 +68,7 @@ namespace Starfront.Collab.Sequencer {
         private readonly IWindowServiceFactory windowServiceFactory;
         private readonly INighttimeCalculator nighttimeCalculator;
         private readonly IApplicationStatusMediator applicationStatusMediator;
+        private readonly ISafetyMonitorMediator safetyMonitorMediator;
 
         private string projectId = "";
         private string summary = "";
@@ -88,8 +89,10 @@ namespace Starfront.Collab.Sequencer {
                                                IPlateSolverFactory plateSolverFactory,
                                                IWindowServiceFactory windowServiceFactory,
                                                INighttimeCalculator nighttimeCalculator,
-                                               IApplicationStatusMediator applicationStatusMediator) : base(new OnceStrategy()) {
+                                               IApplicationStatusMediator applicationStatusMediator,
+                                               ISafetyMonitorMediator safetyMonitorMediator) : base(new OnceStrategy()) {
             this.applicationStatusMediator = applicationStatusMediator;
+            this.safetyMonitorMediator = safetyMonitorMediator;
             this.profileService = profileService;
             this.cameraMediator = cameraMediator;
             this.telescopeMediator = telescopeMediator;
@@ -625,13 +628,16 @@ namespace Starfront.Collab.Sequencer {
                 panel.Add(many);
             }
 
+            // The two triggers are built through HostItems: N.I.N.A. 3.3 gave
+            // both a safety monitor parameter, and a constructor bound at
+            // compile time against 3.2 is not found there.
             if (settings.DitherEvery > 0) {
-                panel.Add(new DitherAfterExposures(guiderMediator, imageHistoryVM, profileService) {
-                    AfterExposures = settings.DitherEvery,
-                    Name = Icons.Label("Lbl_SequenceTrigger_Guider_DitherAfterExposures_Name", "Dither after exposures"),
-                    Icon = Icons.Find("DitherSVG"),
-                    Category = "Starfront",
-                });
+                var dither = HostItems.Make<DitherAfterExposures>(guiderMediator, imageHistoryVM, profileService, safetyMonitorMediator);
+                dither.AfterExposures = settings.DitherEvery;
+                dither.Name = Icons.Label("Lbl_SequenceTrigger_Guider_DitherAfterExposures_Name", "Dither after exposures");
+                dither.Icon = Icons.Find("DitherSVG");
+                dither.Category = "Starfront";
+                panel.Add(dither);
             }
             // The field's own drift check, on the field's own coordinates. A
             // "Center after drift" trigger a user puts on a container above
@@ -639,15 +645,15 @@ namespace Starfront.Collab.Sequencer {
             // one tester's, on an M33 container around this, measured 889
             // arcminutes of "drift" and slewed to M33 in the middle of M31.
             if (settings.RecentreArcMinutes > 0) {
-                panel.Add(new CenterAfterDriftTrigger(profileService, telescopeMediator, filterWheelMediator, guiderMediator,
-                                                      imagingMediator, cameraMediator, domeMediator, domeFollower,
-                                                      imageSaveMediator, applicationStatusMediator) {
-                    DistanceArcMinutes = settings.RecentreArcMinutes,
-                    AfterExposures = 1,
-                    Name = Icons.Label("Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name", "Center after drift"),
-                    Icon = Icons.Find("PlatesolveSVG"),
-                    Category = "Starfront",
-                });
+                var drift = HostItems.Make<CenterAfterDriftTrigger>(profileService, telescopeMediator, filterWheelMediator, guiderMediator,
+                                                                    imagingMediator, cameraMediator, domeMediator, domeFollower,
+                                                                    imageSaveMediator, applicationStatusMediator, safetyMonitorMediator);
+                drift.DistanceArcMinutes = settings.RecentreArcMinutes;
+                drift.AfterExposures = 1;
+                drift.Name = Icons.Label("Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name", "Center after drift");
+                drift.Icon = Icons.Find("PlatesolveSVG");
+                drift.Category = "Starfront";
+                panel.Add(drift);
             }
             return panel;
         }
@@ -658,7 +664,7 @@ namespace Starfront.Collab.Sequencer {
             var copy = new StarfrontCollaborationContainer(profileService, cameraMediator, telescopeMediator, imagingMediator, imageSaveMediator,
                                                            imageHistoryVM, filterWheelMediator, guiderMediator, rotatorMediator, domeMediator,
                                                            domeFollower, plateSolverFactory, windowServiceFactory, nighttimeCalculator,
-                                                           applicationStatusMediator) {
+                                                           applicationStatusMediator, safetyMonitorMediator) {
                 ProjectId = ProjectId,
             };
             copy.CopyMetaData(this);

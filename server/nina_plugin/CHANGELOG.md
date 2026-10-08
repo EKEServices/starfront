@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.11
+
+- Runs on N.I.N.A. 3.3. The container failed the moment it built a panel there ("Method not found: DitherAfterExposures..ctor"): 3.3 gave the dither and centre-after-drift triggers a safety-monitor parameter, and the plugin was bound to the 3.2 constructors. The host's triggers are now built from whichever constructor the running N.I.N.A. has.
+
 ## 1.0.0.10
 
 - Every collaboration on the Starfront panel shows the target's altitude through tonight: dusk to dawn, the horizon and the project's floor shaded, the usable hours filled, transit marked and "now" drawn, with one line saying when it is up.
