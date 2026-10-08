@@ -70,6 +70,52 @@ _FOCUSER_DLLS = (("EAF_focuser_ASCOM_x64.dll", "EAF_focuser.dll") if _SIXTY_FOUR
 _load_lock = threading.Lock()
 _libraries: dict[str, Any] = {}
 
+#: One lock around every call into either SDK, for the whole process.  Three
+#: cameras and three focusers are driven from six or more threads at once -
+#: captures on each, a focus sweep, the cooler ramps, a listing opening and
+#: closing a body to read its serial - and ZWO's libraries keep shared state
+#: that was not written for that.  A frame download is a few hundred
+#: milliseconds, so three coinciding cost under a second; a corrupted heap
+#: cost the whole program, twenty seconds after the call that did it.
+_sdk_lock = threading.RLock()
+
+
+class _LockedCall:
+    """One SDK function, called under `_sdk_lock`.
+
+    Attribute reads and writes go through to the real function, so
+    `lib.ASIGetNumOfConnectedCameras.restype = ctypes.c_int` still lands.
+    """
+    __slots__ = ("_function",)
+
+    def __init__(self, function) -> None:
+        object.__setattr__(self, "_function", function)
+
+    def __call__(self, *args):
+        with _sdk_lock:
+            return self._function(*args)
+
+    def __getattr__(self, name):
+        return getattr(self._function, name)
+
+    def __setattr__(self, name, value) -> None:
+        setattr(self._function, name, value)
+
+
+class _Serialized:
+    """A loaded SDK whose every function is a `_LockedCall`.
+
+    A symbol the library lacks still raises AttributeError, so the
+    `hasattr(lib, "ASIGetSerialNumber")` checks for older SDKs keep working.
+    """
+    __slots__ = ("_library",)
+
+    def __init__(self, library) -> None:
+        object.__setattr__(self, "_library", library)
+
+    def __getattr__(self, name):
+        return _LockedCall(getattr(self._library, name))
+
 
 def _find(names: tuple[str, ...]) -> str | None:
     for folder in _SEARCH_DIRS:
@@ -92,7 +138,7 @@ def _library(kind: str):
         library = None
         if path:
             with contextlib.suppress(OSError):
-                library = ctypes.CDLL(path)
+                library = _Serialized(ctypes.CDLL(path))
         _libraries[kind] = library
         return library
 

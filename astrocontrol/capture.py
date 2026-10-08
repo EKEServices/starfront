@@ -25,7 +25,9 @@ from . import astro
 from .config import Config, data_root, effective_site
 from .devices.base import DeviceError
 from .devices.manager import DeviceManager
-from .imaging import fits, render
+from .imaging import fits, render, wcs
+from .livestack import Plan, StackError
+from .pipeline import Job
 
 FRAME_TYPES = ("light", "dark", "bias", "flat", "darkflat")
 LIGHT_PATH_TYPES = ("light", "flat")      # frame types where the shutter/sky matters
@@ -34,6 +36,11 @@ LIGHT_PATH_TYPES = ("light", "flat")      # frame types where the shutter/sky ma
 # dropping them.  Calibration runs behind the exposure loop on purpose, so it is
 # allowed to fall behind — but not without end, and not silently.
 CALIBRATION_BACKLOG = 24
+
+# How much larger than the camera's field a target's live-stack canvas is made:
+# a fifth again each way, so dithering, drift and a meridian flip all still
+# land inside it rather than being cropped away one sub at a time.
+STACK_MARGIN = 1.2
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._+-]+")
 
@@ -177,6 +184,10 @@ class CaptureService:
         self._calibration_worker: threading.Thread | None = None
         self._calibration_last: dict[str, Any] = {}
         self._calibration_said_already: dict[str, str] = {}
+        # The live stack every light goes into, calibrated on the way. Set by
+        # the rig; None means frames are taken and nothing is stacked.
+        self.stacker: Any = None
+        self._stack_said_already: str = ""
         self._sequences: dict[str, int] = {}
         self.images: list[ImageRecord] = []
         self._by_id: dict[str, ImageRecord] = {}
@@ -812,7 +823,99 @@ class CaptureService:
             self._remember(record.id, frame)
         if frame_type == "light":
             self._queue_calibration(record, camera, metadata)
+            self._queue_stack(record, frame, header, camera)
         return record
+
+    # -- stacking what was just taken --------------------------------------
+    def _calibration_want(self, record: ImageRecord, camera) -> dict[str, Any]:
+        """What a master has to match to calibrate this frame."""
+        return {
+            "width": record.width, "height": record.height,
+            "binning": record.binning, "gain": record.gain, "offset": record.offset,
+            "temperature": record.ccd_temperature,
+            "filter": record.filter or "",
+            "telescope": self.telescope or "",
+            "camera": getattr(camera, "name", "") or "",
+            "exposure": record.exposure,
+        }
+
+    def _queue_stack(self, record: ImageRecord, frame: np.ndarray,
+                     header: dict[str, Any], camera) -> None:
+        """Hand a fresh light to the live stack.
+
+        One stack per target per filter per night, on a canvas a fifth larger
+        than the camera's field, cut from the first frame's own geometry and
+        then kept. The frame is calibrated as it goes in, with whatever
+        masters the library has for it, whether or not a calibrated copy is
+        wanted on disk; the raw frame is never touched. Nothing here can hold
+        up the next exposure: the work happens on the stacker's own thread.
+        """
+        stacker = self.stacker
+        if stacker is None or not stacker.enabled:
+            return
+        settings = stacker.settings()
+        if not self.frame_context.get("collabProject") and \
+                not settings.get("stackOwnTargets", True):
+            return
+
+        project = (self.object_name or self.target_name or "").strip() or "untitled"
+        filter_name = (record.filter or "").strip() or "none"
+        stacker.begin_night(self.night_name())
+
+        plan = stacker.existing_plan(project, filter_name)
+        if plan is None:
+            try:
+                solution = wcs.from_header(header, record.width, record.height,
+                                           record.binning)
+            except wcs.WcsError as exc:
+                self._stack_say(f"{record.filename} was not stacked — {exc}")
+                return
+            across, down = solution.field
+            ra, dec = solution.centre
+            plan = Plan(ra=ra, dec=dec, width=across * STACK_MARGIN,
+                        height=down * STACK_MARGIN, scale=solution.scale,
+                        rotation=solution.rotation,
+                        maxPixels=int(settings.get("maxPixels") or 3000))
+
+        want = self._calibration_want(record, camera)
+        library = self.library
+        path = Path(record.path) if record.path else None
+        # A frame that was saved is read back when its turn comes; one that
+        # was not is the only copy, so it is held.
+        held = None if path is not None else frame
+        require = not settings.get("stackUncalibrated", True)
+
+        def load() -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+            pixels, cards = (fits.read(path) if path is not None
+                             else (held, header))
+            if library is None:
+                info: dict[str, Any] = {
+                    "calibrated": False, "steps": [],
+                    "reasons": {"library": "there is no calibration library"}}
+            else:
+                pixels, info = library.calibrate_array(pixels, want)
+            if require and not info.get("calibrated"):
+                reasons = "; ".join(str(why) for why in
+                                    (info.get("reasons") or {}).values())
+                raise StackError(f"no matching masters ({reasons})")
+            return pixels, cards, info
+
+        # The tile's identity comes from the file name, so a saved frame is
+        # recognised if it is ever offered twice. An unsaved one has no file,
+        # and its name alone can repeat within a night, so its record id is
+        # what makes it one frame rather than a repeat of the last.
+        job = Job(path or Path(f"{record.filename}#{record.id}"), project, filter_name, plan,
+                  night=self.night_name(), agent="", seconds=record.exposure,
+                  task=str(self.frame_context.get("collabTask") or ""),
+                  telescope=self.telescope or "", loader=load)
+        stacker.submit(job)
+
+    def _stack_say(self, message: str) -> None:
+        """Once per reason: a night of the same complaint is one line."""
+        if self._stack_said_already == message:
+            return
+        self._stack_said_already = message
+        self.manager.log(message, "warn")
 
     # -- calibrating what was just taken -----------------------------------
     def _queue_calibration(self, record: ImageRecord, camera,
@@ -830,15 +933,7 @@ class CaptureService:
         if not library.wanted_for(self.calibration_context):
             return
 
-        want = {
-            "width": record.width, "height": record.height,
-            "binning": record.binning, "gain": record.gain, "offset": record.offset,
-            "temperature": record.ccd_temperature,
-            "filter": record.filter or "",
-            "telescope": self.telescope or "",
-            "camera": getattr(camera, "name", "") or "",
-            "exposure": record.exposure,
-        }
+        want = self._calibration_want(record, camera)
         if self._calibration_queue is None:
             self._calibration_queue = queue.Queue()
             self._calibration_worker = threading.Thread(

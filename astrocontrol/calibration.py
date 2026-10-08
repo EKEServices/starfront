@@ -623,19 +623,21 @@ class Library:
             return context == "survey"
         return False
 
-    def calibrate_file(self, path: Path, want: dict[str, Any]) -> dict[str, Any]:
-        """Calibrate a frame that has just been written, alongside the original.
+    def calibrate_array(self, frame: np.ndarray,
+                        want: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
+        """Calibrate a frame held in memory, writing nothing.
 
-        The raw frame is never touched.  If nothing in the library matches, the
-        reasons come back so the operator finds out during the night rather than
-        while stacking a week later.
+        The live stack's way in: a frame goes onto the stack calibrated whether
+        or not a calibrated copy is wanted on disk. Comes back as the frame
+        itself, untouched, when nothing in the library matches, with the
+        reasons beside it.
         """
         chosen = self.plan_for(want)
         masters = chosen["masters"]
         if not chosen["usable"]:
-            return {"calibrated": False, "reasons": chosen["reasons"]}
+            return frame, {"calibrated": False, "steps": [],
+                           "reasons": chosen["reasons"], "used": {}}
 
-        frame, header = fits.read(path)
         pixels = {kind: (self.frame(master) if master is not None else None)
                   for kind, master in masters.items()}
         for kind, image in pixels.items():
@@ -646,10 +648,33 @@ class Library:
                     f"the master {kind} is {image.shape[1]}x{image.shape[0]} and this "
                     f"frame is {frame.shape[1]}x{frame.shape[0]}")
         if all(image is None for image in pixels.values()):
-            return {"calibrated": False, "reasons": chosen["reasons"]}
+            return frame, {"calibrated": False, "steps": [],
+                           "reasons": chosen["reasons"], "used": {}}
 
         result, steps = apply_masters(frame, pixels["dark"], pixels["flat"],
                                       pixels["bias"])
+        return result, {
+            "calibrated": True,
+            "steps": steps,
+            "reasons": chosen["reasons"],
+            "masters": masters,
+            "used": {kind: (Path(m["path"]).name if m else None)
+                     for kind, m in masters.items()},
+        }
+
+    def calibrate_file(self, path: Path, want: dict[str, Any]) -> dict[str, Any]:
+        """Calibrate a frame that has just been written, alongside the original.
+
+        The raw frame is never touched.  If nothing in the library matches, the
+        reasons come back so the operator finds out during the night rather than
+        while stacking a week later.
+        """
+        frame, header = fits.read(path)
+        result, info = self.calibrate_array(frame, want)
+        if not info["calibrated"]:
+            return {"calibrated": False, "reasons": info["reasons"]}
+        masters = info["masters"]
+        steps = info["steps"]
 
         # Everything the original said, plus what was done to it.  A stacker
         # that reads CALSTAT will not try to calibrate this a second time.
@@ -675,9 +700,8 @@ class Library:
             "calibrated": True,
             "path": str(out),
             "steps": steps,
-            "reasons": chosen["reasons"],
-            "used": {kind: (Path(m["path"]).name if m else None)
-                     for kind, m in masters.items()},
+            "reasons": info["reasons"],
+            "used": info["used"],
         }
 
     # -- bringing one in ---------------------------------------------------

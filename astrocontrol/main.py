@@ -28,7 +28,7 @@ from . import identify
 from . import ninaimport
 from . import warnings
 from .capture import clean_target
-from .config import Config, effective_site
+from .config import Config, data_root, effective_site
 from .coverage import CoverageStore
 from .devices import phd2
 from .devices.base import DeviceError
@@ -46,7 +46,7 @@ WEB_DIR = Path(__file__).parent / "web"
 # Settings sections that describe the observatory rather than one telescope, and
 # so travel with an equipment profile as a single shared block.
 SHARED_SECTIONS = ("site", "capture", "schedule", "guiding", "solver",
-                   "calibration", "recovery")
+                   "calibration", "recovery", "livestack")
 
 # Idempotent, and here as well as in run.py because uvicorn can import this
 # module directly (--reload, or `uvicorn astrocontrol.main:app`).
@@ -81,6 +81,10 @@ offsets_run = filteroffsets.OffsetRun(rigs, config)
 # Which focuser is on which camera, found out by moving them: the one question
 # about a rig of identical bodies that a driver list cannot answer.
 pairing = identify.PairingCheck(rigs)
+# A safety shutdown that aborts every capture must also stop a focuser check
+# that is driving them, or the check carries on exposing into the shutdown
+# and racing the SDK calls that are putting the observatory to bed.
+sequencer.extra_aborts.append(pairing.abort)
 
 # Picking imaging tasks up from a collaboration server. Started either way: it
 # does nothing at all until a server and a token are configured, and it can
@@ -777,6 +781,15 @@ class AllSkySettingsRequest(BaseModel):
     overlap: float | None = Field(default=None, ge=0, le=0.9)
 
 
+class LiveStackSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    stackOwnTargets: bool | None = None
+    share: bool | None = None
+    removeGradient: bool | None = None
+    stackUncalibrated: bool | None = None
+    maxPixels: int | None = Field(default=None, ge=512, le=8192)
+
+
 class CalibrationSettingsRequest(BaseModel):
     libraryDirectory: str | None = Field(default=None, max_length=400)
     applyTo: str | None = Field(default=None, pattern="^(survey|all|off)$")
@@ -1179,6 +1192,7 @@ def _snapshot() -> dict[str, Any]:
         "devices": mine.get("devices", {}),
         "capture": mine.get("capture", {}),
         "solver": mine.get("solver", {}),
+        "livestack": mine.get("livestack", {}),
         "rigs": everything,
         "masterRig": master.id,
         "sequence": {**sequencer.status(), "shutdown": dict(shutdown_task)},
@@ -1351,16 +1365,60 @@ def set_telescope_filters(body: TelescopeFiltersRequest) -> dict[str, Any]:
 
 
 @app.post("/api/camera/cooler")
-def set_cooler(body: CoolerRequest, rig: str | None = None) -> dict[str, Any]:
-    target = _rig(rig)
-    camera = _guard(target.manager.require, "camera")
-    if body.setpoint is not None:
-        _guard(camera.set_setpoint, body.setpoint)
-        target.manager.log(f"Cooler setpoint {body.setpoint:g} C")
-    if body.on is not None:
-        _guard(camera.set_cooler, body.on)
-        target.manager.log(f"Cooler {'on' if body.on else 'off'}")
-    return {"ok": True}
+def set_cooler(body: CoolerRequest, rig: str | None = None,
+               all: bool = False) -> dict[str, Any]:
+    """Cooler on or off, and the setpoint — on one camera, or with `all=true`
+    on every camera that is connected and can cool.
+
+    The cameras on one mount sit in the same air, so one setpoint for all of
+    them is the normal case, and a press of Cooler on that reached one of
+    three is how a night starts with two warm sensors.  A camera that cannot
+    take part is named, not skipped in silence.
+    """
+    # Cooling by hand outranks a warm-down left over from the last sequence,
+    # which would otherwise keep raising the setpoint under this.
+    if body.on or body.setpoint is not None:
+        sequencer.cancel_warming("the cooler was set by hand")
+    if not all:
+        target = _rig(rig)
+        camera = _guard(target.manager.require, "camera")
+        if body.setpoint is not None:
+            _guard(camera.set_setpoint, body.setpoint)
+            target.manager.log(f"Cooler setpoint {body.setpoint:g} C")
+        if body.on is not None:
+            _guard(camera.set_cooler, body.on)
+            target.manager.log(f"Cooler {'on' if body.on else 'off'}")
+        return {"ok": True}
+
+    done: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for telescope in rigs.all:
+        camera = telescope.manager.get("camera")
+        if camera is None or not camera.connected:
+            skipped.append({"rig": telescope.id, "name": telescope.name,
+                            "reason": "no camera connected"})
+            continue
+        if not getattr(camera, "can_cool", True):
+            skipped.append({"rig": telescope.id, "name": telescope.name,
+                            "reason": "this camera has no cooler"})
+            continue
+        try:
+            if body.setpoint is not None:
+                camera.set_setpoint(body.setpoint)
+                telescope.manager.log(f"Cooler setpoint {body.setpoint:g} C")
+            if body.on is not None:
+                camera.set_cooler(body.on)
+                telescope.manager.log(f"Cooler {'on' if body.on else 'off'}")
+            done.append(telescope.name)
+        except DeviceError as exc:
+            skipped.append({"rig": telescope.id, "name": telescope.name,
+                            "reason": str(exc)})
+    if not done:
+        raise HTTPException(
+            status_code=400,
+            detail="; ".join(f"{s['name']}: {s['reason']}" for s in skipped)
+            or "no telescope has a camera connected")
+    return {"ok": True, "telescopes": done, "skipped": skipped}
 
 
 @app.post("/api/camera/settings")
@@ -3330,6 +3388,170 @@ def image_download(image_id: str) -> FileResponse:
         raise HTTPException(status_code=400,
                             detail="this frame was captured with saving switched off")
     return FileResponse(record.path, media_type="application/fits", filename=record.filename)
+
+
+# ---------------------------------------------------------------------------
+# The live stack
+# ---------------------------------------------------------------------------
+#
+# Tonight's lights, calibrated and folded into one picture as they land,
+# shown in the same viewer as a single sub: the same stretch, the same crop
+# at the screen's resolution, the same pan and zoom. A stack is named by the
+# target and the filter, as query parameters rather than path parts, because
+# a target is called whatever the operator typed and that can hold a slash.
+
+def _live_stack(rig: str | None, project: str, filter_name: str):
+    found = _rig(rig).stacker.stack(project, filter_name or "none")
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"there is no live stack of {project!r} through "
+                   f"{filter_name or 'no filter'!r} tonight")
+    return found
+
+
+@app.get("/api/livestack")
+def get_livestack(rig: str | None = None) -> dict[str, Any]:
+    """What this telescope is stacking tonight, and how each stack is doing."""
+    return _rig(rig).stacker.status()
+
+
+@app.post("/api/settings/livestack")
+def set_livestack_settings(body: LiveStackSettingsRequest) -> dict[str, Any]:
+    values = body.model_dump(exclude_none=True)
+    if not values:
+        raise HTTPException(status_code=400, detail="nothing to change")
+    saved = config.update("livestack", values)
+    return {"livestack": saved}
+
+
+@app.get("/api/livestack/stats")
+def livestack_stats(project: str, filter: str = "", rig: str | None = None
+                    ) -> dict[str, Any]:
+    """The stack in the shape the viewer reads a frame in: size, statistics
+    and an auto-stretch, plus what went into it."""
+    stack = _live_stack(rig, project, filter)
+    frame, covered = stack.picture()
+    summary = stack.summary()
+    seen = frame[covered] if covered.any() else frame
+    return {
+        "image": {
+            "id": f"stack:{project}/{filter or 'none'}",
+            "filename": f"Live stack · {project} · {filter or 'no filter'}",
+            "width": int(frame.shape[1]), "height": int(frame.shape[0]),
+            "frame_type": "stack", "saved": True,
+            "object_name": project, "filter": filter or None,
+            "exposure": summary["seconds"],
+        },
+        "stats": render.statistics(frame),
+        "autoStretch": render.auto_stretch(seen.reshape(1, -1)),
+        "summary": summary,
+    }
+
+
+@app.get("/api/livestack/render.png")
+def livestack_render(
+    project: str,
+    filter: str = "",
+    rig: str | None = None,
+    auto: bool = True,
+    black: float = Query(default=0.0, ge=0.0, le=1.0),
+    white: float = Query(default=1.0, ge=0.0, le=1.0),
+    midtone: float = Query(default=0.5, gt=0.0, lt=1.0),
+    invert: bool = False,
+    maxDim: int = Query(default=1600, ge=0, le=8192),
+    region: str | None = None,
+) -> Response:
+    """The stack as a picture, exactly as `image_render` draws a frame."""
+    if not region and maxDim < 64:
+        maxDim = 64
+    stack = _live_stack(rig, project, filter)
+    frame, covered = stack.picture()
+
+    if auto:
+        # From the covered part only: an empty canvas is black, and letting
+        # it into the histogram drags the black point to zero and renders the
+        # finished part invisible.
+        seen = frame[covered] if covered.any() else frame
+        stretch = render.auto_stretch(seen.reshape(1, -1))
+    else:
+        stretch = {"black": black, "white": white, "midtone": midtone}
+    stretch["invert"] = invert
+
+    crop = None
+    if region:
+        try:
+            x, y, w, h = (int(float(part)) for part in region.split(","))
+            crop = (x, y, w, h)
+        except Exception as exc:
+            raise HTTPException(status_code=400,
+                                detail="region must be 'x,y,width,height'") from exc
+
+    array, info = render.render_png_array(frame, stretch, maxDim, crop)
+    body = png.encode(array)
+    return Response(content=body, media_type="image/png", headers={
+        # Different every few minutes and the URL carries the stack's own
+        # update time, so a long cache is safe and a stale one impossible.
+        "Cache-Control": "public, max-age=3600",
+        "X-Render-Factor": str(info["factor"]),
+        "X-Stack-Frames": str(stack.frames),
+    })
+
+
+@app.get("/api/livestack/pixel")
+def livestack_pixel(project: str, x: int = Query(ge=0), y: int = Query(ge=0),
+                    filter: str = "", rig: str | None = None) -> dict[str, Any]:
+    """The stack under the cursor: its display value and how many frames deep."""
+    stack = _live_stack(rig, project, filter)
+    frame, _ = stack.picture()
+    height, width = frame.shape
+    if not (0 <= x < width and 0 <= y < height):
+        raise HTTPException(status_code=400, detail="pixel is outside the stack")
+    box = frame[max(0, y - 2):y + 3, max(0, x - 2):x + 3]
+    return {"x": x, "y": y, "value": int(frame[y, x]),
+            "boxMean": round(float(box.mean()), 1), "boxMax": int(box.max()),
+            "frames": int(stack.coverage()[y, x])}
+
+
+@app.get("/api/livestack/download")
+def livestack_download(project: str, filter: str = "", rig: str | None = None
+                       ) -> FileResponse:
+    """The stack as a 16-bit FITS with its canvas WCS.
+
+    A quick look to keep or share, not the night's data: the values are the
+    stack's mean stretched into sixteen bits for viewing, which the header
+    says. The subs themselves are in the session folder for the real stack.
+    """
+    stack = _live_stack(rig, project, filter)
+    frame, _ = stack.picture()
+    summary = stack.summary()
+    header = {
+        **stack.canvas.header(),
+        "OBJECT": (project, "target"),
+        "FILTER": (filter or None, ""),
+        "IMAGETYP": ("Stack", "a live stack, not a single frame"),
+        "NFRAMES": (stack.frames, "frames in the stack"),
+        "EXPTIME": (float(summary["seconds"]), "total exposure, seconds"),
+        "SFSCALED": (True, "mean scaled to 16 bits for viewing"),
+        "SWCREATE": ("Starfront", ""),
+    }
+    folder = data_root() / "livestacks" / "export"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = clean_target(f"{project}_{filter or 'none'}_livestack") or "livestack"
+    path = fits.write(folder / f"{stem}.fits", frame, header)
+    return FileResponse(str(path), media_type="application/fits",
+                        filename=f"{stem}.fits")
+
+
+@app.post("/api/livestack/reset")
+def livestack_reset(project: str, filter: str = "", rig: str | None = None
+                    ) -> dict[str, Any]:
+    """Throw tonight's stack of this target away; the next frame starts it again."""
+    target = _rig(rig)
+    gone = target.stacker.discard(project, filter or "none")
+    target.manager.log(f"Live stack of {project} ({filter or 'no filter'}) "
+                       + ("started again" if gone else "was already empty"))
+    return {"reset": gone, "livestack": target.stacker.status()}
 
 
 # ---------------------------------------------------------------------------
@@ -6462,6 +6684,9 @@ def _shutdown() -> None:
             rig.solver.abort()
         with contextlib.suppress(Exception):
             rig.capture.abort()
+        # Tonight's stack goes to disk, so a restart carries on where it was.
+        with contextlib.suppress(Exception):
+            rig.stacker.save_all()
     rigs.disconnect_all()
 
 

@@ -1,3 +1,3 @@
 """Starfront - astrophotography equipment control."""
 
-__version__ = "0.2.27"
+__version__ = "0.2.29"

@@ -669,6 +669,13 @@ table.survey-fields tr:hover td { background: var(--panel-2); }
   border-radius: var(--radius);
   color: var(--muted);
 }
+/* What the live stack holds, beside the cursor readout. Amber while frames
+   are going in raw, because that is the one thing worth noticing tonight. */
+.stack-info:empty { display: none; }
+.stack-info.raw { color: var(--warn); }
+.viewer-toolbar select.small {
+  padding: 3px 6px; font-size: 11.5px; max-width: 220px;
+}
 
 /* ---------------------------------------------------------------- analysis */
 #histogram { width: 100%; height: 90px; margin-top: 8px; display: block; }

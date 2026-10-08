@@ -250,6 +250,24 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # run of touching fields, and the depth is built up by coming back.
         "visitMinutes": 10.0,
     },
+    "livestack": {
+        # Fold tonight's light frames into a running stack as they land, and
+        # show it on the Image tab. Each frame is calibrated with whatever
+        # masters match before it goes in; the raw frame on disk is untouched.
+        "enabled": True,
+        # Stack the telescope's own targets as well as collaboration tasks.
+        "stackOwnTargets": True,
+        # Send tiles to the collaboration server as well as stacking locally.
+        "share": True,
+        # Fit and remove a tilted sky plane from each frame on the way in.
+        "removeGradient": True,
+        # A frame with no matching master dark or flat still goes in, raw, and
+        # the Image tab says so. Off, such frames are left out of the stack.
+        "stackUncalibrated": True,
+        # The long side of the canvas. Five accumulators are kept per pixel, so
+        # 3000 is about 180 MB a filter; 4096 is twice that.
+        "maxPixels": 3000,
+    },
     "calibration": {
         # Where the master frames live. Blank means a folder beside the data,
         # but a library is usually worth keeping somewhere it gets backed up:

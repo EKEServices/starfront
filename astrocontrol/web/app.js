@@ -2612,7 +2612,9 @@ function applyStatus(status) {
     // the camera. Somebody stepping back through the night's frames keeps
     // the one they are on; Newest brings them back.
     refreshImages().then(() => {
-      if (mine && !state.browsing) selectImage(latest, true);
+      // While the stack is on view a new sub updates the stack, not the
+      // viewer; `livestack.js` redraws it when the stack says it has grown.
+      if (mine && !state.browsing && !stackView.on) selectImage(latest, true);
       else updateFramePosition();
     });
   }
@@ -4558,6 +4560,40 @@ const viewer = {
   needsFit: false,
 };
 
+/* What the viewer is drawing: a single frame, or tonight's live stack. The
+   stack is served through the same endpoints shape - stats, render.png with a
+   region crop, pixel - so everything from the stretch sliders to the sharp
+   crop at the screen's resolution works on it unchanged; only the base URL
+   differs. `livestack.js` switches this and keeps it fed. */
+const stackView = {
+  on: false,
+  rig: null,          // telescope id, null for the master
+  project: '',
+  filter: '',
+  updated: 0,         // the stack's own update time the picture was drawn from
+};
+
+function stackQuery() {
+  const parts = [`project=${encodeURIComponent(stackView.project)}`,
+    `filter=${encodeURIComponent(stackView.filter)}`];
+  if (stackView.rig && stackView.rig !== masterRigId()) {
+    parts.push(`rig=${encodeURIComponent(stackView.rig)}`);
+  }
+  return parts.join('&');
+}
+
+/** The URL a viewer request starts from, for whatever is on view. */
+function viewUrl(what, extra = '') {
+  if (stackView.on) {
+    return `/api/livestack/${what}?${stackQuery()}&t=${stackView.updated || 0}`
+      + (extra ? `&${extra}` : '');
+  }
+  return `/api/images/${state.currentId}/${what}` + (extra ? `?${extra}` : '');
+}
+
+/** Whether there is anything to draw at all. */
+const hasView = () => (stackView.on ? Boolean(stackView.project) : Boolean(state.currentId));
+
 function initViewer() {
   viewer.canvas = $('view');
   viewer.ctx = viewer.canvas.getContext('2d');
@@ -4720,7 +4756,7 @@ function screenToImage(px, py) {
 
 let pixelTimer = null;
 function updateCursorReadout() {
-  if (!viewer.preview || !viewer.cursor || !state.currentId) return;
+  if (!viewer.preview || !viewer.cursor || !hasView()) return;
   const { x, y } = screenToImage(viewer.cursor.px, viewer.cursor.py);
   if (x < 0 || y < 0 || x >= viewer.width || y >= viewer.height) {
     setText('cursorReadout', '—');
@@ -4730,8 +4766,11 @@ function updateCursorReadout() {
   clearTimeout(pixelTimer);
   pixelTimer = setTimeout(async () => {
     try {
-      const result = await api(`/api/images/${state.currentId}/pixel?x=${x}&y=${y}`);
-      setText('cursorReadout', `x ${x}  y ${y}   ${result.value} ADU   (5×5 mean ${result.boxMean})`);
+      const result = await api(viewUrl('pixel', `x=${x}&y=${y}`));
+      // On the stack the number is a display value and the depth is what
+      // matters: how many subs reached this pixel.
+      const depth = result.frames !== undefined ? `   ${result.frames} frames deep` : '';
+      setText('cursorReadout', `x ${x}  y ${y}   ${result.value} ADU   (5×5 mean ${result.boxMean})${depth}`);
     } catch { /* the pointer moved on; ignore */ }
   }, 110);
 }
@@ -4749,7 +4788,7 @@ function scheduleDetail() {
  * fetched again, cropped and decimated to just fit the screen, and drawn on
  * top; at 1:1 and beyond that is the full-resolution crop it always was. */
 async function loadDetail() {
-  if (!state.currentId || !viewer.preview) return;
+  if (!hasView() || !viewer.preview) return;
   if (viewer.scale * viewer.previewFactor <= 1.02) { viewer.detail = null; draw(); return; }
 
   const wrap = $('canvasWrap');
@@ -4769,8 +4808,7 @@ async function loadDetail() {
   const factor = maxDim === 0 ? 1 : Math.ceil(Math.max(w, h) / maxDim);
 
   const token = ++viewer.detailToken;
-  const url = `/api/images/${state.currentId}/render.png?${stretchQuery()}` +
-    `&region=${x},${y},${w},${h}&maxDim=${maxDim}`;
+  const url = viewUrl('render.png', `${stretchQuery()}&region=${x},${y},${w},${h}&maxDim=${maxDim}`);
   const img = new Image();
   img.onload = () => {
     if (token !== viewer.detailToken) return;
@@ -4835,6 +4873,9 @@ function newestFrame() {
 
 async function selectImage(imageId, keepView = false) {
   if (!imageId) return;
+  // Picking a frame is leaving the stack: the list and the arrow keys mean
+  // "show me that sub", and the stack button brings the stack back.
+  if (stackView.on && window.astro && window.astro.leaveStack) window.astro.leaveStack();
   let payload;
   try {
     payload = await api(`/api/images/${imageId}/stats`);
@@ -4863,12 +4904,48 @@ async function selectImage(imageId, keepView = false) {
   await loadPreview(keepView && sameGeometry);
 }
 
+/** Put tonight's live stack in the viewer. `keepView` holds the pan and zoom
+ *  across refreshes of the same stack, which is every refresh after the first:
+ *  a stack's canvas never changes size during a night. */
+async function selectStack(rigId, project, filterName, keepView = false) {
+  const same = stackView.on && stackView.project === project
+    && stackView.filter === filterName && stackView.rig === rigId;
+  stackView.on = true;
+  stackView.rig = rigId;
+  stackView.project = project;
+  stackView.filter = filterName;
+  let payload;
+  try {
+    payload = await api(`/api/livestack/stats?${stackQuery()}`);
+  } catch (error) {
+    toast(error.message, 'error');
+    return false;
+  }
+  const record = payload.image;
+  stackView.updated = (payload.summary && payload.summary.updated) || 0;
+  const sameGeometry = viewer.width === record.width && viewer.height === record.height;
+  state.currentRecord = record;
+  state.currentStats = payload.stats;
+
+  if ($('chkAuto').checked) setStretchSliders(payload.autoStretch);
+  drawHistogram(payload.stats);
+  document.querySelectorAll('.image-row').forEach((row) => row.classList.remove('active'));
+  const summary = payload.summary || {};
+  setText('viewerTitle', `${record.filename}   ·   ${summary.frames || 0} frames`);
+  const download = $('btnDownload');
+  download.href = `/api/livestack/download?${stackQuery()}`;
+  download.classList.remove('disabled');
+
+  await loadPreview(keepView && same && sameGeometry);
+  return true;
+}
+
 function loadPreview(keepView) {
   return new Promise((resolve) => {
-    if (!state.currentId) { resolve(); return; }
+    if (!hasView()) { resolve(); return; }
     const record = state.currentRecord;
     $('viewerLoading').hidden = false;
-    const url = `/api/images/${state.currentId}/render.png?${stretchQuery()}&maxDim=1600`;
+    const url = viewUrl('render.png', `${stretchQuery()}&maxDim=1600`);
     const img = new Image();
     img.onload = () => {
       viewer.preview = img;
@@ -4899,7 +4976,7 @@ let restretchTimer = null;
 function restretch() {
   clearTimeout(restretchTimer);
   restretchTimer = setTimeout(() => {
-    if (state.currentId) loadPreview(true);
+    if (hasView()) loadPreview(true);
     if (state.currentRecord) drawHistogram(state.currentStats);
   }, 160);
 }
@@ -5508,6 +5585,7 @@ function bindControls() {
     if (event.key === 'ArrowLeft') { event.preventDefault(); stepFrame(1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); stepFrame(-1); }
     if (event.key === 'End') { event.preventDefault(); newestFrame(); }
+    if (event.key === 's') { const button = $('btnLiveStack'); if (button) button.click(); }
     if (event.key === ' ') { event.preventDefault(); $('btnCapture').click(); }
   });
 }
@@ -5552,6 +5630,13 @@ window.astro = {
   /** Re-render everything from the status already held. */
   refresh: () => { if (state.status) applyStatus(state.status); },
   onStatus: (listener) => statusListeners.push(listener),
+  /** The viewer, for the live stack to drive. */
+  stackView,
+  selectStack,
+  selectImage,
+  masterRigId,
+  /** Set by livestack.js: what to do when a frame is picked while the stack is up. */
+  leaveStack: null,
 };
 
 function init() {

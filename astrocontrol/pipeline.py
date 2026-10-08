@@ -67,14 +67,31 @@ SAVE_EVERY = 120.0
 #: costs a second rather than ten.
 ALIGN_STARS = 400
 
+#: Stacks held open at once. Each is five canvas-sized arrays, a few hundred
+#: megabytes at the default canvas, and a night through three filters would
+#: otherwise keep three of them in memory for a picture only one of which is
+#: being looked at. The rest are saved and reopened when their filter is next
+#: shot, which costs a second a filter change.
+MAX_OPEN = 2
+
 
 class Job:
-    """One frame on its way into a stack, and everything needed to place it."""
+    """One frame on its way into a stack, and everything needed to place it.
+
+    `loader` is how the pixels arrive when they are not simply a file to
+    read: the capture service hands over a frame it is still holding and the
+    calibration to apply to it, so a frame shot with saving off can be
+    stacked and a saved one is calibrated once rather than twice. It returns
+    the frame, its header, and a note saying whether it was calibrated.
+    """
 
     def __init__(self, path: Path, project: str, filter_name: str,
                  plan: Plan, night: str = "", agent: str = "",
                  seconds: float = 0.0, task: str = "",
-                 telescope: str = "") -> None:
+                 telescope: str = "",
+                 loader: Callable[[], tuple[np.ndarray, dict[str, Any],
+                                            dict[str, Any]]] | None = None
+                 ) -> None:
         self.path = Path(path)
         self.project = project
         self.filter = filter_name
@@ -84,6 +101,7 @@ class Job:
         self.seconds = seconds
         self.task = task
         self.telescope = telescope
+        self.loader = loader
         self.queued = time.time()
 
     @property
@@ -105,7 +123,11 @@ class StackPipeline:
                  send: Callable[[Tile, Job], bool] | None = None,
                  log: Callable[[str, str], None] | None = None) -> None:
         self.config = config
-        self.root = Path(root) if root else (data_root() / "livestacks")
+        #: Where every night's stacks go; `root` is the folder for the night
+        #: in hand, or the base itself until a night has been named.
+        self.base = Path(root) if root else (data_root() / "livestacks")
+        self.root = self.base
+        self.night = ""
         #: Called with a finished tile; returns whether the server took it.
         #: Left unset on a rig that is not in a collaboration, which then
         #: keeps a local stack and sends nothing.
@@ -118,8 +140,13 @@ class StackPipeline:
         self._lock = threading.RLock()
         self._stacks: dict[str, LiveStack] = {}
         self._saved: dict[str, float] = {}
+        self._used: dict[str, float] = {}
         self._last: dict[str, Any] | None = None
-        self._counts = {"stacked": 0, "refused": 0, "sent": 0, "spooled": 0}
+        #: The stack the newest frame went into, "project/filter": what the
+        #: Image tab shows unless somebody picks another.
+        self._current: str = ""
+        self._counts = {"stacked": 0, "refused": 0, "sent": 0, "spooled": 0,
+                        "calibrated": 0, "raw": 0}
 
     # -- settings ----------------------------------------------------------
     def settings(self) -> dict[str, Any]:
@@ -131,7 +158,47 @@ class StackPipeline:
 
     @property
     def spool(self) -> Path:
-        return self.root / "outbox"
+        return self.base / "outbox"
+
+    # -- which night -------------------------------------------------------
+    def begin_night(self, night: str) -> None:
+        """Put tonight's stacks in a folder of their own.
+
+        A stack is a night's work: a target shot again next week starts a new
+        one rather than quietly adding to last week's, and last week's is
+        still there on disk for anybody who wants it. Changing night saves
+        what is open and lets go of it.
+        """
+        if not night or night == self.night:
+            return
+        with self._lock:
+            self.save_all()
+            self._stacks.clear()
+            self._saved.clear()
+            self._used.clear()
+            self._current = ""
+            self.night = night
+            self.root = self.base / night
+
+    def discard(self, project: str, filter_name: str) -> bool:
+        """Throw one stack away and start it again from the next frame.
+
+        What somebody wants after refocusing, after clouds, or after noticing
+        the first hour went in with the wrong flat.
+        """
+        import shutil
+        key = f"{project}/{filter_name}"
+        with self._lock:
+            self._stacks.pop(key, None)
+            self._saved.pop(key, None)
+            self._used.pop(key, None)
+            if self._current == key:
+                self._current = ""
+            folder = livestack.stack_root(self.root, project, filter_name)
+            if not folder.is_dir():
+                return False
+            shutil.rmtree(folder, ignore_errors=True)
+            return True
 
     # -- lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -180,10 +247,39 @@ class StackPipeline:
         with self._lock:
             found = self._stacks.get(key)
             if found is not None and found.plan.payload() == plan.payload():
+                self._used[key] = time.monotonic()
                 return found
             root = livestack.stack_root(self.root, project, filter_name)
             stack = LiveStack.open(root, plan)
             self._stacks[key] = stack
+            self._used[key] = time.monotonic()
+            # Room for it: the stack least recently added to goes to disk.
+            while len(self._stacks) > MAX_OPEN:
+                oldest = min((name for name in self._stacks if name != key),
+                             key=lambda name: self._used.get(name, 0.0))
+                with contextlib.suppress(OSError):
+                    self._stacks[oldest].save()
+                self._stacks.pop(oldest, None)
+                self._saved.pop(oldest, None)
+                self._used.pop(oldest, None)
+            return stack
+
+    def stack(self, project: str, filter_name: str) -> LiveStack | None:
+        """A stack to look at: the open one, or tonight's from disk, or None."""
+        key = f"{project}/{filter_name}"
+        with self._lock:
+            found = self._stacks.get(key)
+            if found is not None:
+                return found
+            root = livestack.stack_root(self.root, project, filter_name)
+            if livestack.stored_plan(root) is None:
+                return None
+            try:
+                stack = LiveStack.open(root)
+            except StackError:
+                return None
+            self._stacks[key] = stack
+            self._used[key] = time.monotonic()
             return stack
 
     def existing_plan(self, project: str, filter_name: str) -> Plan | None:
@@ -232,8 +328,18 @@ class StackPipeline:
         stack = self.stack_for(job.project, job.filter, job.plan)
         canvas = stack.canvas
 
-        frame, header = fits.read(job.path)
-        guess = wcs.from_header(header, allow_derived=True)
+        if job.loader is not None:
+            frame, header, prepared = job.loader()
+        else:
+            frame, header = fits.read(job.path)
+            # A file handed over by path is taken as already calibrated: that
+            # is what the calibration library writes and what a check hands
+            # in. Whether it really was is in its own header.
+            prepared = {"calibrated": "CALSTAT" in header}
+        # The size from the pixels rather than the header: a header still in
+        # memory has no NAXIS cards, only a file does.
+        guess = wcs.from_header(header, width=int(frame.shape[1]),
+                                height=int(frame.shape[0]), allow_derived=True)
 
         solution, placing = self._place(guess, frame, stack)
 
@@ -242,7 +348,10 @@ class StackPipeline:
             agent=job.agent or job.telescope, filter_name=job.filter,
             night=job.night,
             degree=1 if self.settings().get("removeGradient", True) else 0)
+        tile.note["calibrated"] = bool(prepared.get("calibrated"))
         report = stack.add(tile)
+        with self._lock:
+            self._current = f"{job.project}/{job.filter}"
 
         # Taken out either way: a few hundred star positions are not something
         # to carry into a status payload that the UI polls every second.
@@ -253,6 +362,7 @@ class StackPipeline:
             # definition, not trusted to say where anything is.
             stack.remember_stars(align.star_sky(found, solution))
             self._counts["stacked"] += 1
+            self._counts["calibrated" if prepared.get("calibrated") else "raw"] += 1
 
         self._maybe_save(job, stack)
         sent = self._deliver(tile, job)
@@ -263,13 +373,15 @@ class StackPipeline:
             "filter": job.filter,
             "placing": placing,
             "stack": report,
+            "calibration": prepared,
             "sent": sent,
             "seconds": round(time.monotonic() - started, 2),
             "at": time.time(),
         }
         self._say(f"Live stack: {job.path.name} — {placing['detail']}; "
                   f"{report.get('detail', 'not added')}"
-                  + ("" if sent else "; held to send later"))
+                  + ("" if prepared.get("calibrated") else "; stacked raw")
+                  + ("" if sent or self.send is None else "; held to send later"))
 
     def _place(self, guess: wcs.Wcs, frame: np.ndarray,
                stack: LiveStack) -> tuple[wcs.Wcs, dict[str, Any]]:
@@ -401,20 +513,26 @@ class StackPipeline:
         with contextlib.suppress(Exception):
             self._log(message, level)
 
-    def status(self) -> dict[str, Any]:
+    def status(self, brief: bool = False) -> dict[str, Any]:
+        """What the pipeline is doing. `brief` skips every pass over pixels,
+        for the status that goes out several times a second."""
         held = 0
-        if self.spool.is_dir():
+        if not brief and self.spool.is_dir():
             with contextlib.suppress(OSError):
                 held = sum(1 for _ in self.spool.glob("*.tile"))
+        with self._lock:
+            current = self._current
         return {
             "enabled": self.enabled,
             "running": self.running,
             "root": str(self.root),
+            "night": self.night,
             "pending": self._queue.qsize(),
             "held": held,
             "counts": dict(self._counts),
+            "current": current,
             "last": self._last,
-            "stacks": {key: stack.summary()
+            "stacks": {key: (stack.brief() if brief else stack.summary())
                        for key, stack in self.stacks().items()},
         }
 

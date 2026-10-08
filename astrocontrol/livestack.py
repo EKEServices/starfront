@@ -420,11 +420,64 @@ class LiveStack:
         self.anchored = False
         self.updated = 0.0
         self.rejected_pixels = 0
+        #: The stack as a 16-bit frame for the viewer, kept until the next
+        #: contribution: the viewer asks for a crop of it on every pan and
+        #: zoom, and rebuilding the whole canvas for each would be most of
+        #: what the machine did while somebody looked at their picture.
+        self._picture: tuple[float, np.ndarray, np.ndarray] | None = None
 
     # -- reading it --------------------------------------------------------
     @property
     def frames(self) -> int:
         return len(self.taken)
+
+    def picture(self) -> tuple[np.ndarray, np.ndarray]:
+        """The stack as a 16-bit frame plus a mask of where there is data.
+
+        What the Image tab's viewer renders, through the same stretch and
+        crop code as a single sub, so the stack can be panned, zoomed and
+        stretched exactly as a frame can. The covered pixels' own spread sets
+        the range, as for `preview`, and empty canvas is zero.
+        """
+        with self._lock:
+            cached = self._picture
+            if cached is not None and cached[0] == self.updated:
+                return cached[1], cached[2]
+            data = self.mean()
+            covered = self.count > 0
+            if not covered.any():
+                frame = np.zeros(data.shape, dtype=np.uint16)
+            else:
+                seen = data[covered]
+                low = float(np.percentile(seen, 0.5))
+                high = float(np.percentile(seen, 99.9))
+                if high - low < 1e-9:
+                    high = low + 1.0
+                scaled = np.clip((data - low) / (high - low), 0.0, 1.0) * 65535.0
+                frame = np.where(covered, scaled, 0.0).astype(np.uint16)
+            self._picture = (self.updated, frame, covered)
+            return frame, covered
+
+    def brief(self) -> dict[str, Any]:
+        """The few numbers a status tick wants, with no pass over the pixels.
+
+        `summary` walks the canvas for coverage and depth, which is fine once
+        a minute and not fine several times a second on a status socket.
+        """
+        with self._lock:
+            return {
+                "frames": self.frames,
+                "seconds": round(sum(float(row.get("seconds") or 0.0)
+                                     for row in self.taken.values()), 1),
+                "filters": sorted({row.get("filter", "") for row in self.taken.values()
+                                   if row.get("filter")}),
+                "calibrated": sum(1 for row in self.taken.values()
+                                  if row.get("calibrated")),
+                "width": self.canvas.width,
+                "height": self.canvas.height,
+                "scale": round(self.canvas.scale, 4),
+                "updated": self.updated or None,
+            }
 
     def mean(self) -> np.ndarray:
         """The stack as it stands: the weighted mean where there is data.
@@ -567,6 +620,9 @@ class LiveStack:
                 raise StackError("this tile covers nothing")
 
             report = self._fold(values, weight, covered, here, tile)
+            # Whether the frame was calibrated before it came in travels with
+            # the tile's note, so a stack can say how much of it is raw.
+            report["calibrated"] = bool((tile.note or {}).get("calibrated"))
             self.taken[tile.id] = report
             self.updated = time.time()
             return report

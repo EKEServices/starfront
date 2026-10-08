@@ -383,6 +383,15 @@
         <button class="btn small" id="btnNextFrame" title="Next frame (→)">▶</button>
         <button class="btn small ghost" id="btnNewestFrame" title="Back to the latest frame, and follow new ones" hidden>Newest</button>
         <span class="toolbar-gap"></span>
+        <!-- Tonight's subs calibrated and added up as they land, in this same
+             viewer. One button; the picker only appears once the night has
+             more than one stack going (a second filter, a second target). -->
+        <button class="btn small" id="btnLiveStack"
+                title="Show tonight's calibrated live stack of this target instead of the single frame (s)">Live stack</button>
+        <select id="stackPick" class="small" title="Which stack to show" hidden></select>
+        <button class="btn small ghost" id="btnStackReset"
+                title="Throw this stack away and start it again from the next frame" hidden>Restart</button>
+        <span class="toolbar-gap"></span>
         <button class="btn small" id="btnFit">Fit</button>
         <button class="btn small" id="btnActual">1:1</button>
         <button class="btn small" id="btnZoomOut">−</button>
@@ -408,6 +417,7 @@
       <div class="viewer-status mono small">
         <span id="cursorReadout">—</span>
         <span class="spacer"></span>
+        <span id="stackInfo" class="stack-info"></span>
         <span id="frameInfo"></span>
       </div>
     </div>
@@ -1929,6 +1939,29 @@
       darks is hours of closed-shutter time that cannot be taken again on the
       night they turn out to be missing.
     </p>
+
+    <h3>Live stack</h3>
+    <p class="small muted">
+      Every light is calibrated with the masters that match it and folded
+      into tonight's picture of the target as it lands. The <b>Live stack</b>
+      button on the Image tab shows it. The raw frames are never touched.
+    </p>
+    <label class="inline"><input type="checkbox" id="stackEnabled"> Stack tonight's lights as they are taken</label>
+    <label class="inline"><input type="checkbox" id="stackOwn"> Stack my own targets, not only collaborations</label>
+    <label class="inline"><input type="checkbox" id="stackGradient"> Remove each frame's sky gradient on the way in</label>
+    <label class="inline"><input type="checkbox" id="stackRaw"> Stack frames that have no matching masters, raw</label>
+    <label class="inline"><input type="checkbox" id="stackShare"> Send tiles to the collaboration as well</label>
+    <label class="small">Canvas size, pixels on the long side
+      <input type="number" id="stackMaxPixels" min="512" max="8192" step="256">
+    </label>
+    <p class="small muted">
+      The stack is kept at this size whatever the camera's resolution. Five
+      numbers are held per pixel, so 3000 is about 180 MB a filter and 4096
+      about twice that.
+    </p>
+    <div class="row gap">
+      <button class="btn small" id="btnStackSave">Save live stack settings</button>
+    </div>
     </section>
 
     <section class="pref" data-pref="focus" data-pref-label="Autofocus" hidden>
@@ -3084,7 +3117,8 @@
 
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=64"></script>
+<script src="app.js?v=65"></script>
+<script src="livestack.js?v=65"></script>
 <script src="sky.js?v=62"></script>
 <script src="planner.js?v=62"></script>
 <script src="plan.js?v=62"></script>

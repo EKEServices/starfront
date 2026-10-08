@@ -143,6 +143,9 @@ class Sequencer:
         # Set by whoever builds both; it lays the target out again, and this
         # run then starts the target over on the new panels.
         self.on_camera_angle: Any = None
+        #: Called alongside the camera aborts in a shutdown: anything else
+        #: that drives the cameras (the focuser check) and must stop too.
+        self.extra_aborts: list[Any] = []
 
         self._thread: threading.Thread | None = None
         # The warm-down outlives the run that started it, so it gets its own.
@@ -2954,6 +2957,9 @@ class Sequencer:
                 dome.park()
 
     def _abort_cameras(self) -> None:
+        for stop in list(self.extra_aborts):
+            with contextlib.suppress(Exception):
+                stop()
         for rig in self.rigs.all:
             with contextlib.suppress(Exception):
                 rig.capture.abort()

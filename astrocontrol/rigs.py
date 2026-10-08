@@ -25,12 +25,13 @@ from collections import deque
 from typing import Any
 
 from .capture import CaptureService
-from .config import Config
+from .config import Config, data_root
 from .devices.base import DeviceError
 from .devices.manager import DeviceManager
 from .equipment import (MASTER_DEVICE_KINDS, RIG_DEVICE_KINDS, RIG_SECTIONS,
                         EquipmentStore, safe_name)
 from .focusing import AutoFocuser
+from .pipeline import StackPipeline
 from .solving import Solver
 
 
@@ -114,6 +115,12 @@ class Rig:
         # rather than a guess per scope.
         self.capture.overheads = overheads
         self.overheads = overheads
+        # Tonight's picture, built a sub at a time. One per telescope, in a
+        # folder of its own: two cameras on one mount see two fields.
+        self.stacker = StackPipeline(
+            self.config, root=data_root() / "livestacks" / safe_name(self.id),
+            log=self.manager.log)
+        self.capture.stacker = self.stacker
         self.solver = Solver(self.manager, self.capture, self.config)
         self.focuser = AutoFocuser(self.manager, self.capture, self.config)
         self.focuser.overheads = overheads
@@ -157,9 +164,12 @@ class Rig:
             "capture": self.capture.status(),
             "solver": self.solver.status(),
             "focus": self.focuser.status(),
+            "livestack": self.stacker.status(brief=True),
         }
 
     def close(self) -> None:
+        self.stacker.stop()
+        self.stacker.save_all()
         self.manager.disconnect_all()
 
 
