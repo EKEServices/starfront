@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.8
+
+- The container no longer fails the moment it runs. Its panels were added to the sequence from the sequencer's worker thread, which WPF refuses once the sequence editor is bound to them; N.I.N.A. then carried on with whatever instructions followed, and nothing was reported. Panels are now added and cleared on the window's thread.
+
 ## 1.0.0.7
 
 - A sequence started again during the night carries on where it left off: frames already shot on a panel tonight are taken off its count, and a finished panel is not shot again.

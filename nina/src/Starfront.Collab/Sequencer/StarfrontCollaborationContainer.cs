@@ -133,9 +133,30 @@ namespace Starfront.Collab.Sequencer {
         public void OnDeserializedStarfront(StreamingContext context) {
             // The panels are tonight's, built when the container runs. Ones
             // written into a saved sequence are last night's and are dropped.
-            foreach (var item in Items.ToList()) {
-                item.AttachNewParent(null);
-                Items.Remove(item);
+            OnUiThread(() => {
+                foreach (var item in Items.ToList()) {
+                    item.AttachNewParent(null);
+                    Items.Remove(item);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Run something that changes the item list on the thread that owns
+        /// the window. The sequencer runs a container on a worker thread, and
+        /// the item list is bound to the sequence editor: a change from any
+        /// other thread is refused by WPF outright ("This type of
+        /// CollectionView does not support changes to its SourceCollection
+        /// from a thread different from the Dispatcher thread"), which is how
+        /// the first beta night ended with the container failing before its
+        /// first frame and N.I.N.A. carrying on with the user's own target.
+        /// </summary>
+        private static void OnUiThread(Action action) {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess()) {
+                action();
+            } else {
+                dispatcher.Invoke(action);
             }
         }
 
@@ -223,7 +244,9 @@ namespace Starfront.Collab.Sequencer {
                 }
                 Order(plans);
             }
-            foreach (var plan in plans) Add(BuildPanel(plan, settings, reporter));
+            // Built here, added on the window's thread: see OnUiThread.
+            var panels = plans.Select(plan => BuildPanel(plan, settings, reporter)).ToList();
+            OnUiThread(() => { foreach (var panel in panels) Add(panel); });
             WatchPanels();
             PublishPlan();
             var totalHours = plans.Sum(p => p.Seconds) / 3600.0;
@@ -344,14 +367,19 @@ namespace Starfront.Collab.Sequencer {
         }
 
         private void ClearRuntimeChildren() {
-            foreach (var item in Items.ToList()) {
+            var stale = Items.ToList();
+            foreach (var item in stale) {
                 if (item is StarfrontPanel panel) {
                     Runtime.Reporter?.Forget(panel.Plan.TargetName);
                     Unwatch(panel);
                 }
-                item.AttachNewParent(null);
-                Items.Remove(item);
             }
+            OnUiThread(() => {
+                foreach (var item in stale) {
+                    item.AttachNewParent(null);
+                    Items.Remove(item);
+                }
+            });
             Summary = "";
             if (Runtime.Ready) Runtime.Session.Run.Plan = Array.Empty<RunItem>();
         }
