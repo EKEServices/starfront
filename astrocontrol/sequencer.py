@@ -2926,7 +2926,7 @@ class Sequencer:
         mount = self.manager.get("mount")
         if mount is None or not mount.connected:
             return
-        if mount.at_park:
+        if getattr(mount, "at_park", False):
             return
         self._set("parking", "parking the mount")
         # A slew still in progress - the one the run was in the middle of, or
@@ -2939,26 +2939,46 @@ class Sequencer:
             settle_until = time.monotonic() + min(15.0, timeout)
             while getattr(mount, "slewing", False) and time.monotonic() < settle_until:
                 time.sleep(0.25)
-        mount.park()
+        # Park is asked for until the mount takes it. OnStep refuses Park
+        # with "Mount in motion" for a second or two after guiding stops -
+        # the last guide pulse is still being worked off - and one refusal
+        # used to end the attempt, with the telescope left tracking into the
+        # morning. So: a moment's grace after guiding, then every refusal is
+        # retried a few seconds later until the park timeout runs out.
+        deadline = time.monotonic() + timeout
+        time.sleep(min(2.0, timeout))
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                mount.park()
+                break
+            except Exception as exc:              # noqa: BLE001 - the driver's word
+                if time.monotonic() + 3.0 >= deadline:
+                    raise DeviceError(
+                        f"the mount refused to park {attempts} time(s) in "
+                        f"{timeout:.0f}s — last answer: {exc}") from exc
+                if attempts == 1 or attempts % 5 == 0:
+                    self._say(f"Park refused ({exc}); trying again", "warn")
+                time.sleep(3.0)
         # Waits for `AtPark` to come true, not merely for `Slewing` to go false.
         # Plenty of drivers clear Slewing the moment the command is accepted —
         # the slew code has a settle at the top for exactly that reason — and
         # some set AtPark a beat after the motion stops. Watching only Slewing
         # meant a mount that had parked perfectly well was reported as failing,
         # which is its own kind of bad: an abort that cries wolf gets ignored.
-        deadline = time.monotonic() + timeout
         # How long to keep asking after the mount has stopped moving. A driver
         # that parks instantly answers on the first pass and never reaches this.
         settle = min(5.0, timeout)
         stopped_at: float | None = None
         while True:
-            if mount.at_park:
+            if getattr(mount, "at_park", False):
                 self._say("Mount parked", "success")
                 return
             now = time.monotonic()
             if now >= deadline:
                 break
-            if mount.slewing:
+            if getattr(mount, "slewing", False):
                 stopped_at = None
             else:
                 # Stopped moving but not parked yet. Some drivers set AtPark a
@@ -3121,14 +3141,21 @@ class Sequencer:
             return
         try:
             if park:
-                self._set("parking", "parking the mount")
-                mount.park()
-                self._say("Mount parked", "success")
+                # The same patient, verified park the shutdown uses: asked
+                # for until the mount takes it, then confirmed by AtPark. A
+                # single Park that the mount refused - OnStep says "in
+                # motion" for a moment after guiding stops - once left the
+                # telescope tracking into the morning after a normal night.
+                self._park_and_check()
             elif stop_tracking:
                 mount.set_tracking(False)
                 self._say("Tracking stopped")
         except Exception as exc:                  # noqa: BLE001 - reported, not fatal
             self._say(f"Could not make the mount safe: {exc}", "error")
+            if park:
+                # Somebody not in the room needs to hear this one.
+                self._tell("failure", "The mount did not park at the end of the sequence",
+                           f"{exc}. The telescope may still be pointing at the sky.")
 
     # -- the guide star ----------------------------------------------------
     def _guiding_fault(self) -> str | None:

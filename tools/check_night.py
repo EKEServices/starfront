@@ -296,6 +296,28 @@ mount.park = lambda: order.append("park")
 seq._make_safe(park=True)
 case("parking stops guiding first", order == ["guide", "park"], str(order))
 
+# OnStep answers Park with "Mount in motion" for a moment after the last
+# guide pulse. One refusal used to end the attempt and leave the mount
+# tracking into the morning; the end of a run now asks again until the mount
+# takes it, and confirms AtPark, the same as the shutdown does.
+mount = Mount()
+refusals = {"left": 2}
+real_park = mount.park
+def grumpy_park():
+    if refusals["left"] > 0:
+        refusals["left"] -= 1
+        raise DeviceError("Park failed: Mount in motion")
+    real_park()
+mount.park = grumpy_park
+seq, rig, config = build({"mount": mount})
+config.update("sequencer", {"parkTimeoutSeconds": 30})
+told = []
+seq.notifier = types.SimpleNamespace(send=lambda *a: told.append(a))
+seq._make_safe(park=True)
+case("a park the mount refuses at the end of a run is asked for again until it takes",
+     mount.at_park is True and mount.parks == 1 and refusals["left"] == 0 and not told,
+     f"parks={mount.parks} told={told}")
+
 # ------------------------------------------------- cooling does not block the slew
 camera = Camera(temperature=20.0, step=0.0)
 seq, rig, config = build({"camera": camera})

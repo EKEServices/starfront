@@ -8,7 +8,7 @@
 <!-- The ?v= stamps exist to break a browser cache that has already decided an
      older copy is still fresh. Bump them if a released build ever needs to
      invalidate a client that has not revalidated. -->
-<link rel="stylesheet" href="style.css?v=66">
+<link rel="stylesheet" href="style.css?v=67">
 </head>
 <body>
 
@@ -398,8 +398,25 @@
         <span class="mono small" id="zoomLabel">—</span>
         <button class="btn small" id="btnZoomIn">+</button>
         <label class="inline"><input type="checkbox" id="chkCrosshair"> Crosshair</label>
+        <!-- Every telescope at once, each following its own camera, for
+             lining the tubes up on one star while the exposures loop. -->
+        <button class="btn small" id="btnAllScopes" hidden
+                title="Every telescope's latest frame side by side, updating as they expose">All scopes</button>
+        <select id="allScopesZoom" class="small" hidden
+                title="How much of each frame to show: the whole frame, or a crop around its centre">
+          <option value="1">whole frame</option>
+          <option value="2">centre ½</option>
+          <option value="4">centre ¼</option>
+          <option value="8">centre ⅛</option>
+        </select>
         <a class="btn small ghost" id="btnDownload" download>Save FITS</a>
       </div>
+
+      <!-- Side by side: one tile per telescope, a crosshair on each centre,
+           every tile refreshed as its camera delivers. Lining three tubes up
+           on one star means watching all three move at once, not flicking
+           between them. -->
+      <div class="multi-view" id="multiView" hidden></div>
 
       <div class="canvas-wrap" id="canvasWrap">
         <canvas id="view"></canvas>
@@ -3123,7 +3140,7 @@
 
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=66"></script>
+<script src="app.js?v=67"></script>
 <script src="livestack.js?v=65"></script>
 <script src="sky.js?v=66"></script>
 <script src="planner.js?v=62"></script>

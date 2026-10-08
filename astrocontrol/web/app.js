@@ -2597,6 +2597,7 @@ function applyStatus(status) {
   updateLog(status.events || []);
 
   updateRigViews();
+  updateAllScopes();
 
   // Every telescope's new frame belongs in the session list, but only the
   // selected one's is pulled into the main view — otherwise a slave finishing
@@ -2637,6 +2638,141 @@ function applyStatus(status) {
   }
 }
 
+/* ---------------------------------------------------- all scopes at once */
+
+/* The main view given over to every telescope side by side, each tile
+   following its own camera, a crosshair on each centre and a choice of how
+   much of the frame to show.  This is for lining the tubes up: loop short
+   exposures on every camera, put a star on the crosshair of one, and watch
+   where it sits on the others while the rings are turned - all three moving
+   in front of you rather than one at a time with the others remembered. */
+const allScopes = {
+  on: false,
+  // Remembered across restarts: a rig that is being aligned is aligned over
+  // several evenings, and the view should come back the way it was left.
+  wanted: (() => { try { return localStorage.getItem('starfront.allScopes') === '1'; } catch { return false; } })(),
+  dims: {},       // image id -> {w, h}, for the centre crops
+  keys: {},       // rig id -> what its tile currently shows
+};
+
+function setAllScopes(on) {
+  allScopes.on = !!on && multiTelescope();
+  try { localStorage.setItem('starfront.allScopes', allScopes.on ? '1' : '0'); } catch { /* fine */ }
+  $('btnAllScopes').classList.toggle('active', allScopes.on);
+  $('allScopesZoom').hidden = !allScopes.on;
+  $('multiView').hidden = !allScopes.on;
+  $('canvasWrap').hidden = allScopes.on;
+  const strip = $('rigViews');
+  if (strip) strip.hidden = allScopes.on || rigList().length < 2;
+  if (allScopes.on) updateAllScopes(true);
+  else repaintViewer();
+}
+
+/** A frame's pixel size, fetched once per frame, for cutting out its centre. */
+async function frameDims(imageId) {
+  if (allScopes.dims[imageId]) return allScopes.dims[imageId];
+  try {
+    const payload = await api(`/api/images/${imageId}/stats`);
+    const image = payload.image || {};
+    if (image.width && image.height) {
+      allScopes.dims[imageId] = { w: image.width, h: image.height };
+    }
+  } catch { /* the whole frame is shown instead */ }
+  return allScopes.dims[imageId] || null;
+}
+
+async function updateAllScopes(force = false) {
+  const host = $('multiView');
+  const button = $('btnAllScopes');
+  if (!host || !button) return;
+  const all = rigList();
+  button.hidden = all.length < 2;
+  if (all.length < 2) {
+    if (allScopes.on) setAllScopes(false);
+    return;
+  }
+  if (allScopes.wanted && !allScopes.on) {
+    allScopes.wanted = false;
+    setAllScopes(true);
+    return;
+  }
+  if (!allScopes.on) return;
+
+  // Tiles are rebuilt only when the telescopes change; everything else is
+  // updated in place so nothing flickers once a second.
+  const ids = all.map((rig) => rig.id).join('|');
+  if (host.dataset.rigs !== ids || force) {
+    host.dataset.rigs = ids;
+    host.innerHTML = '';
+    allScopes.keys = {};
+    for (const rig of all) {
+      const tile = document.createElement('div');
+      tile.className = 'multi-tile';
+      tile.dataset.rig = rig.id;
+      tile.innerHTML = '<span class="multi-label"><b></b><span class="state"></span></span>'
+        + '<img alt="" hidden><span class="multi-empty">no frame yet</span>';
+      tile.querySelector('b').textContent = rig.name;
+      tile.title = `Select ${rig.name} (the camera panel follows it)`;
+      tile.addEventListener('click', () => { selectRig(rig.id); updateAllScopes(); });
+      host.appendChild(tile);
+    }
+  }
+
+  const chosen = (currentRig() || {}).id;
+  const zoom = Number($('allScopesZoom').value) || 1;
+  const crosshair = $('chkCrosshair').checked;
+  const stretch = stretchQuery();
+  for (const rig of all) {
+    const tile = host.querySelector(`.multi-tile[data-rig="${rig.id}"]`);
+    if (!tile) continue;
+    tile.classList.toggle('active', rig.id === chosen);
+    tile.classList.toggle('crosshair', crosshair);
+    const shot = rig.capture || {};
+    const camera = (rig.devices || {}).camera || {};
+    const bits = [];
+    if (!camera.connected) bits.push('camera off');
+    else if (shot.busy && shot.remaining !== null && shot.remaining !== undefined) {
+      bits.push(`${shot.state || 'exposing'} ${Math.round(shot.remaining)}s`);
+    } else bits.push(shot.state || 'idle');
+    if (shot.loop) bits.push('loop');
+    tile.querySelector('.state').textContent = bits.join(' · ');
+
+    const latest = shot.latestImageId || '';
+    const key = `${latest}|${stretch}|${zoom}`;
+    if (allScopes.keys[rig.id] === key) continue;
+    allScopes.keys[rig.id] = key;
+    const img = tile.querySelector('img');
+    const empty = tile.querySelector('.multi-empty');
+    if (!latest) {
+      img.hidden = true;
+      img.removeAttribute('src');
+      empty.hidden = false;
+      continue;
+    }
+    empty.hidden = true;
+    let url = `/api/images/${latest}/render.png?${stretch}&maxDim=1400`;
+    if (zoom > 1) {
+      const dims = await frameDims(latest);
+      if (dims) {
+        const w = Math.max(16, Math.round(dims.w / zoom));
+        const h = Math.max(16, Math.round(dims.h / zoom));
+        const x = Math.round((dims.w - w) / 2);
+        const y = Math.round((dims.h - h) / 2);
+        url += `&region=${x},${y},${w},${h}&maxDim=0`;
+      }
+    }
+    // Swapped in only once it has loaded, so a tile never goes blank
+    // between one frame and the next.
+    const next = new Image();
+    next.onload = () => {
+      if (allScopes.keys[rig.id] !== key) return;
+      img.src = next.src;
+      img.hidden = false;
+    };
+    next.src = url;
+  }
+}
+
 /* ------------------------------------------------------- telescope views */
 
 /** A thumbnail per telescope beneath the main view.
@@ -2650,8 +2786,9 @@ function updateRigViews() {
   const host = $('rigViews');
   if (!host) return;
   const all = rigList();
-  host.hidden = all.length < 2;
-  if (host.hidden) {
+  // Redundant while every telescope already fills the main view.
+  host.hidden = all.length < 2 || allScopes.on;
+  if (all.length < 2) {
     host.innerHTML = '';
     host.dataset.rigs = '';
     return;
@@ -4719,7 +4856,9 @@ function initViewer() {
   $('btnActual').addEventListener('click', () => { setZoom(1); });
   $('btnZoomIn').addEventListener('click', () => zoomAt(centreX(), centreY(), 1.35));
   $('btnZoomOut').addEventListener('click', () => zoomAt(centreX(), centreY(), 1 / 1.35));
-  $('chkCrosshair').addEventListener('change', draw);
+  $('chkCrosshair').addEventListener('change', () => { draw(); updateAllScopes(); });
+  $('btnAllScopes').addEventListener('click', () => setAllScopes(!allScopes.on));
+  $('allScopesZoom').addEventListener('change', () => updateAllScopes());
 }
 
 const centreX = () => $('canvasWrap').clientWidth / 2;
