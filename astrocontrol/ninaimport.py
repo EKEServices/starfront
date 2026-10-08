@@ -47,6 +47,55 @@ class NinaError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
+# N.I.N.A.'s own ZWO driver
+# ---------------------------------------------------------------------------
+
+#: How N.I.N.A. identifies a camera opened through its built-in ZWO driver:
+#: the maker, the model and the alias written into the body, joined by
+#: underscores — "ZWOptical_ZWO ASI2600MM Pro_RASA-L".  The alias is the only
+#: part that tells three identical bodies apart, and it is exactly what this
+#: program's ZWO backend can address a camera by.
+_ZWO_NATIVE_PREFIX = "ZWOptical_"
+
+
+def zwo_native_device(kind: str, driver_id: str, name: str
+                      ) -> dict[str, str] | None:
+    """A slot for a camera N.I.N.A. drove through its own ZWO driver, or None.
+
+    Returns a ZWO-direct slot addressed by alias.  The alias is resolved to a
+    serial number when the body can next be opened — which may not be now, if
+    N.I.N.A. is still holding it — so nothing here needs the hardware.
+    """
+    if kind not in ("camera", "piercam") or not driver_id.startswith(_ZWO_NATIVE_PREFIX):
+        return None
+    from .devices.zwo import alias_id
+    rest = driver_id[len(_ZWO_NATIVE_PREFIX):]
+    model, _, alias = rest.rpartition("_")
+    if not model:
+        # No alias in the id at all: nothing distinguishes this body from
+        # another of the same model, so it has to be picked by serial here.
+        return None
+    alias = alias.strip()
+    model = model.strip()
+    if not alias:
+        return None
+    return {"backend": "zwo", "driverId": alias_id(alias),
+            "name": f"{model} ({alias})", "alias": alias, "model": model}
+
+
+def camera_alias(plan: dict[str, Any]) -> str:
+    """The alias of the camera a plan names, or ""."""
+    camera = (plan.get("devices") or {}).get("camera") or {}
+    if camera.get("alias"):
+        return str(camera["alias"])
+    driver = str(camera.get("driverId") or "")
+    from .devices.zwo import ALIAS_PREFIX
+    if driver.startswith(ALIAS_PREFIX):
+        return driver[len(ALIAS_PREFIX):]
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Finding and reading profiles
 # ---------------------------------------------------------------------------
 
@@ -387,9 +436,13 @@ def read(path: Path | str) -> dict[str, Any]:
         name = (_text(node, "p:LastDeviceName") or driver).strip()
         if driver.upper().startswith("ASCOM."):
             devices[kind] = {"backend": "ascom", "driverId": driver, "name": name}
-        else:
-            left_out.append(f"{section.replace('Settings', '')} › {driver}: not an "
-                            "ASCOM driver, so it has to be chosen by hand here")
+            return
+        native = zwo_native_device(kind, driver, name)
+        if native is not None:
+            devices[kind] = native
+            return
+        left_out.append(f"{section.replace('Settings', '')} › {driver}: not an "
+                        "ASCOM driver, so it has to be chosen by hand here")
 
     slot("camera", "CameraSettings")
     slot("filterwheel", "FilterWheelSettings")
@@ -465,3 +518,295 @@ def when(stamp: str) -> str:
         return datetime.fromisoformat(stamp).strftime("%d %b %Y, %H:%M")
     except (TypeError, ValueError):
         return stamp or "never"
+
+
+# ---------------------------------------------------------------------------
+# Several profiles at once: one per telescope
+# ---------------------------------------------------------------------------
+#
+# Somebody running three copies of N.I.N.A. on a triple rig has three
+# profiles, and between them they already answer the question that is nearly
+# impossible to answer by looking at the hardware: which camera is on which
+# telescope.  Each profile names its camera by alias, says whether it carries
+# the mount, and holds that telescope's own gain, offset and focus settings.
+# This turns the lot into one plan — a telescope per profile, the master
+# chosen, every slot resolved as far as it can be — that is shown, edited and
+# then carried out in one go.
+
+#: Sections that belong to one telescope.  Everything else in a profile
+#: describes the observatory and is taken from the master's profile alone, so
+#: three profiles that disagree about the site do not write it three times.
+PER_TELESCOPE_SECTIONS = ("optics", "camera", "sequencer")
+
+
+def _alias_key(text: str) -> str:
+    """"RASA-L", "rasa l" and "RASA_L" are the same name."""
+    return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
+
+
+def _match_focusers(cameras: list[str], focusers: list[dict[str, Any]]
+                    ) -> dict[int, dict[str, Any]]:
+    """Pair ZWO focusers with cameras by alias, as camera index -> focuser.
+
+    Two ways, in order of trust.  A focuser whose alias is the camera's alias
+    is a match a person made on purpose.  After that, if exactly one camera
+    and one focuser are left over, they are offered to each other with the
+    confidence that deserves: it is the only possibility, not a known fact.
+    """
+    chosen: dict[int, dict[str, Any]] = {}
+    taken: set[str] = set()
+    for index, alias in enumerate(cameras):
+        key = _alias_key(alias)
+        if not key:
+            continue
+        for focuser in focusers:
+            if focuser["id"] in taken:
+                continue
+            if _alias_key(focuser.get("alias", "")) == key:
+                chosen[index] = {**focuser, "how": "alias"}
+                taken.add(focuser["id"])
+                break
+    left_cameras = [i for i in range(len(cameras)) if i not in chosen]
+    left_focusers = [f for f in focusers if f["id"] not in taken]
+    if len(left_cameras) == 1 and len(left_focusers) == 1:
+        chosen[left_cameras[0]] = {**left_focusers[0], "how": "leftover"}
+    return chosen
+
+
+def setup_plan(plans: list[dict[str, Any]], rigs: list[dict[str, Any]],
+               zwo_cameras: list[dict[str, Any]] | None = None,
+               zwo_focusers: list[dict[str, Any]] | None = None,
+               camera_serials: dict[str, str] | None = None) -> dict[str, Any]:
+    """One telescope per profile, with every slot resolved as far as it can be.
+
+    `plans` are `read()` results.  `rigs` are the telescopes the program has
+    now (master first).  `zwo_cameras` and `zwo_focusers` are what the ZWO
+    backend can see, each `{id, name, alias}`; `camera_serials` maps a camera
+    alias to a serial already learned, for a body that is not visible right
+    now because another program holds it.  Nothing here touches hardware.
+    """
+    zwo_cameras = zwo_cameras or []
+    zwo_focusers = zwo_focusers or []
+    camera_serials = {_alias_key(k): v for k, v in (camera_serials or {}).items()}
+    notes: list[str] = []
+
+    # -- who is the master -------------------------------------------------
+    def rank(plan: dict[str, Any]) -> tuple[int, int, str]:
+        devices = plan.get("devices") or {}
+        return (0 if "mount" in devices else 1,
+                0 if "guider" in devices else 1,
+                plan["profile"]["name"].lower())
+
+    ordered = sorted(plans, key=rank)
+    if ordered and "mount" not in (ordered[0].get("devices") or {}):
+        notes.append("None of these profiles names a mount, so the first one "
+                     "is made the master; choose another if that is wrong, and "
+                     "connect the mount by hand.")
+    with_mount = [p for p in plans if "mount" in (p.get("devices") or {})]
+    if len(with_mount) > 1:
+        notes.append(f"{len(with_mount)} profiles name a mount; only the master "
+                     "carries it here, and the others ride along with it.")
+
+    # -- cameras -------------------------------------------------------------
+    aliases = [camera_alias(plan) for plan in ordered]
+    visible = {_alias_key(cam.get("alias", "")): cam for cam in zwo_cameras
+               if cam.get("alias")}
+    focusers = _match_focusers(aliases, zwo_focusers)
+
+    # -- the ASCOM focuser shared by every profile ---------------------------
+    ascom_focusers = [((p.get("devices") or {}).get("focuser") or {}).get("driverId")
+                      for p in ordered]
+    shared_progid = {d for d in ascom_focusers if d and ascom_focusers.count(d) > 1}
+
+    telescopes: list[dict[str, Any]] = []
+    for index, plan in enumerate(ordered):
+        devices = dict(plan.get("devices") or {})
+        entry: dict[str, Any] = {
+            "profile": plan["profile"],
+            "name": plan["profile"]["name"],
+            "master": index == 0,
+            "rig": rigs[index]["id"] if index < len(rigs) else None,
+            "rigName": rigs[index]["name"] if index < len(rigs) else None,
+            "devices": {},
+            "settings": {section: sorted(values)
+                         for section, values in (plan.get("settings") or {}).items()},
+            "summary": _summary(plan),
+            "notes": [],
+        }
+
+        # Camera: by alias, resolved to a serial when one is known.
+        camera = devices.get("camera")
+        alias = aliases[index]
+        if camera and camera.get("backend") == "zwo" and alias:
+            key = _alias_key(alias)
+            seen = visible.get(key)
+            serial = (seen or {}).get("id") or camera_serials.get(key, "")
+            if serial and not str(serial).startswith("index:"):
+                entry["devices"]["camera"] = {
+                    "backend": "zwo", "driverId": serial,
+                    "name": camera["name"], "alias": alias, "status": "found",
+                    "note": f"{alias} is plugged in — serial {serial}"}
+            else:
+                entry["devices"]["camera"] = {
+                    **{k: camera[k] for k in ("backend", "driverId", "name")},
+                    "alias": alias, "status": "byAlias",
+                    "note": f"remembered by its name, {alias}; the body is "
+                            "found by that name the first time it can be "
+                            "opened (close N.I.N.A. first)"}
+        elif camera:
+            entry["devices"]["camera"] = {**camera, "status": "driver",
+                                          "note": "the driver N.I.N.A. used"}
+        else:
+            entry["notes"].append("no camera in this profile")
+
+        # Focuser: a ZWO body matched by alias beats a shared ASCOM ProgID.
+        focuser = focusers.get(index)
+        nina_focuser = devices.get("focuser")
+        if focuser is not None:
+            how = focuser.get("how")
+            entry["devices"]["focuser"] = {
+                "backend": "zwo", "driverId": focuser["id"],
+                "name": focuser.get("name") or f"ZWO EAF ({focuser.get('alias', '')})",
+                "alias": focuser.get("alias", ""),
+                "status": "matched" if how == "alias" else "leftover",
+                "note": (f"the EAF named {focuser.get('alias')} matches the camera"
+                         if how == "alias" else
+                         f"the only EAF left unassigned ({focuser.get('alias') or focuser['id']}) "
+                         "— confirm it with Which focuser is which")}
+        elif nina_focuser:
+            shared = nina_focuser.get("driverId") in shared_progid
+            entry["devices"]["focuser"] = {
+                **nina_focuser,
+                "status": "shared" if shared else "driver",
+                "note": ("every profile names this same ASCOM driver, which can "
+                         "only open one focuser at a time here — pick this "
+                         "telescope's EAF by name instead, or run Which focuser "
+                         "is which" if shared else "the driver N.I.N.A. used")}
+
+        # Everything else comes across as it is.
+        for kind, spec in devices.items():
+            if kind in ("camera", "focuser"):
+                continue
+            if kind in ("mount", "guider", "safetymonitor", "dome", "switch",
+                        "piercam") and index != 0:
+                entry["notes"].append(f"{kind} left to the master")
+                continue
+            entry["devices"][kind] = {**spec, "status": "driver",
+                                      "note": "the driver N.I.N.A. used"}
+        telescopes.append(entry)
+
+    if len(rigs) > len(ordered):
+        extra = [r["name"] for r in rigs[len(ordered):]]
+        notes.append(f"{', '.join(extra)} " + ("has" if len(extra) == 1 else "have")
+                     + " no profile here and will be left as "
+                     + ("it is" if len(extra) == 1 else "they are") + ".")
+    if zwo_focusers and len(zwo_focusers) < len(ordered):
+        notes.append(f"Only {len(zwo_focusers)} ZWO focuser(s) can be seen right "
+                     "now; the rest are read when they are free.")
+    return {"telescopes": telescopes, "notes": notes,
+            "perTelescope": list(PER_TELESCOPE_SECTIONS)}
+
+
+def _summary(plan: dict[str, Any]) -> str:
+    """The handful of numbers a person checks a profile by."""
+    settings = plan.get("settings") or {}
+    optics = settings.get("optics") or {}
+    camera = settings.get("camera") or {}
+    bits = []
+    if optics.get("focalLength"):
+        bits.append(f"{optics['focalLength']:g} mm")
+    if optics.get("pixelSize"):
+        bits.append(f"{optics['pixelSize']:g} µm")
+    if camera.get("gain") is not None:
+        bits.append(f"gain {camera['gain']}")
+    if camera.get("offset") is not None:
+        bits.append(f"offset {camera['offset']}")
+    if camera.get("filterNames"):
+        bits.append("filters " + " ".join(camera["filterNames"]))
+    folder = (settings.get("capture") or {}).get("rootDirectory")
+    if folder:
+        bits.append(str(folder))
+    return " · ".join(bits)
+
+
+def apply_setup(telescopes: list[dict[str, Any]], read_plan, config: Any,
+                equipment: Any, rigs: Any, sections: list[str] | None = None,
+                include_devices: bool = True) -> dict[str, Any]:
+    """Carry a setup plan out: telescopes made and named, master set, each
+    profile written onto its telescope, devices remembered.
+
+    `telescopes` is the plan's list as edited by the person: each carries
+    `profile.path`, `name`, `master`, an optional `rig` to reuse and the
+    `devices` to remember.  `read_plan(path)` reads a profile.  Shared
+    sections are written from the master's profile only.
+    """
+    chosen = [t for t in telescopes if t.get("include", True)]
+    if not chosen:
+        raise NinaError("no telescope was chosen")
+    chosen.sort(key=lambda t: 0 if t.get("master") else 1)
+    if not chosen[0].get("master"):
+        chosen[0]["master"] = True
+
+    existing = {rig["id"]: rig for rig in equipment.rigs()}
+    outcome: list[dict[str, Any]] = []
+    assigned: list[tuple[dict[str, Any], str]] = []
+    for entry in chosen:
+        rig_id = entry.get("rig")
+        name = str(entry.get("name") or entry["profile"]["name"]).strip()
+        if rig_id and rig_id in existing:
+            if existing[rig_id]["name"] != name:
+                equipment.rename_rig(rig_id, name)
+        else:
+            rig_id = equipment.add_rig(name)["id"]
+        assigned.append((entry, rig_id))
+
+    master_id = assigned[0][1]
+    if equipment.master_id() != master_id:
+        equipment.set_master(master_id)
+    rigs.sync()
+
+    from .equipment import MASTER_DEVICE_KINDS
+
+    plans = {rig_id: read_plan(entry["profile"]["path"]) for entry, rig_id in assigned}
+    # The mount, the guider and the rest of the observatory's slots go to
+    # whichever telescope is master *now* — the person may have moved it since
+    # the plan was drawn.  Its own profile's choice first, then anybody's.
+    observatory: dict[str, dict[str, Any]] = {}
+    for rig_id in [master_id] + [r for _, r in assigned if r != master_id]:
+        for kind, spec in (plans[rig_id].get("devices") or {}).items():
+            if kind in MASTER_DEVICE_KINDS and kind not in observatory:
+                observatory[kind] = spec
+    for entry, rig_id in assigned:
+        if rig_id == master_id:
+            continue
+        for kind, spec in (entry.get("devices") or {}).items():
+            if kind in MASTER_DEVICE_KINDS and kind not in observatory:
+                observatory[kind] = spec
+
+    for entry, rig_id in assigned:
+        rig = rigs.get(rig_id)
+        plan = plans[rig_id]
+        wanted = list(sections) if sections else list(plan.get("settings") or {})
+        if rig_id != master_id:
+            wanted = [s for s in wanted if s in PER_TELESCOPE_SECTIONS]
+        done = apply(plan, config, rig, equipment, wanted or ["optics"],
+                     include_devices=False)
+        remembered: list[str] = []
+        if include_devices:
+            chosen_devices = {kind: spec for kind, spec in (entry.get("devices") or {}).items()
+                              if kind not in MASTER_DEVICE_KINDS}
+            if rig_id == master_id:
+                chosen_devices.update(observatory)
+            for kind, spec in chosen_devices.items():
+                clean = {k: spec.get(k) for k in ("backend", "driverId", "name")}
+                if not clean["backend"] or not clean["driverId"]:
+                    continue
+                try:
+                    equipment.set_device(rig_id, kind, clean)
+                    remembered.append(kind)
+                except Exception:              # noqa: BLE001 - a slot this rig lacks
+                    continue
+        outcome.append({"rig": rig_id, "name": rig.name, "master": rig_id == master_id,
+                        "profile": plan["profile"]["name"],
+                        "settings": done["settings"], "devices": remembered})
+    return {"telescopes": outcome, "master": master_id}

@@ -16,6 +16,15 @@ hand them out in.  That index changes when a USB hub enumerates in a different
 order, which on a multi-telescope rig means the master silently connecting to a
 slave's camera.  A serial number does not move.
 
+Devices are *named* by their **alias** wherever they have one.  ZWO lets you
+write a short name into a camera or an EAF — "RASA-L", "RASA-R" — with its own
+software, and that is the one thing on a rig of three identical bodies that
+says which is which.  N.I.N.A. shows it, so somebody arriving from there knows
+their cameras by it; a serial number means nothing to anybody.  An alias can
+also be used as the address (`alias:RASA-L`): it is resolved to the serial when
+the device can be opened, which makes an import from N.I.N.A. possible while
+N.I.N.A. is still holding the cameras.
+
 The libraries ship with ZWO's ASCOM drivers, so anyone who has used the
 hardware on this machine already has them; `ASTRO_ZWO_SDK` overrides the
 search if they live somewhere unusual.
@@ -180,6 +189,33 @@ def _serial_text(buffer) -> str:
     return "" if set(text) <= {"0"} else text
 
 
+def _alias_text(buffer) -> str:
+    """The eight-byte name a person wrote into the device, or ""."""
+    raw = bytes(buffer).split(b"\x00", 1)[0]
+    text = raw.decode("utf-8", errors="replace").strip()
+    # A blank alias is all zero bytes or all 0xFF on a body nobody has named.
+    return "" if not text or set(raw) <= {0xFF} else text
+
+
+def focuser_alias(model_name: str) -> str:
+    """The alias inside an EAF's reported name: "EAF(RASA-R)" -> "RASA-R"."""
+    text = (model_name or "").strip()
+    if "(" in text and text.endswith(")"):
+        return text[text.index("(") + 1:-1].strip()
+    return ""
+
+
+ALIAS_PREFIX = "alias:"
+
+
+def is_alias_id(driver_id: str) -> bool:
+    return str(driver_id or "").startswith(ALIAS_PREFIX)
+
+
+def alias_id(alias: str) -> str:
+    return f"{ALIAS_PREFIX}{alias.strip()}"
+
+
 # ---------------------------------------------------------------------------
 # Enumeration
 # ---------------------------------------------------------------------------
@@ -195,8 +231,30 @@ def _serial_text(buffer) -> str:
 # open and the identity would fall back to an index — exactly the thing serial
 # numbers are here to avoid.  Learned once, known thereafter.
 _serials: dict[str, dict[int, str]] = {"camera": {}, "focuser": {}}
+#: serial -> alias, per kind.  Keyed by serial rather than by index for the
+#: same reason the serial exists: the alias belongs to the body, not to the
+#: USB port it came up on.
+_aliases: dict[str, dict[str, str]] = {"camera": {}, "focuser": {}}
 _serial_lock = threading.Lock()
 _serials_loaded = False
+#: Device numbers this process is holding open, per kind.  A listing must not
+#: open and close one of these — closing it would drop a live connection — so
+#: for them the cache is the answer, and it is right, because it was written
+#: from the open body at connect.
+_held: dict[str, set[int]] = {"camera": set(), "focuser": set()}
+
+
+def _hold(kind: str, device_id: int, held: bool) -> None:
+    with _serial_lock:
+        if held:
+            _held[kind].add(device_id)
+        else:
+            _held[kind].discard(device_id)
+
+
+def _is_held(kind: str, device_id: int) -> bool:
+    with _serial_lock:
+        return device_id in _held[kind]
 
 
 def _serial_file():
@@ -218,13 +276,19 @@ def _load_serials() -> None:
         for device_id, serial in (stored.get(kind) or {}).items():
             with contextlib.suppress(ValueError):
                 _serials[kind][int(device_id)] = str(serial)
+        for serial, alias in (stored.get(f"{kind}Alias") or {}).items():
+            if str(serial) and str(alias):
+                _aliases[kind][str(serial)] = str(alias)
 
 
 def _save_serials() -> None:
     import json
     with _serial_lock:
-        snapshot = {kind: {str(k): v for k, v in found.items()}
-                    for kind, found in _serials.items()}
+        snapshot: dict[str, Any] = {kind: {str(k): v for k, v in found.items()}
+                                    for kind, found in _serials.items()}
+        for kind, found in _aliases.items():
+            if found:
+                snapshot[f"{kind}Alias"] = dict(found)
     try:
         path = _serial_file()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,13 +297,37 @@ def _save_serials() -> None:
         pass                               # a read-only home is not fatal
 
 
-def _remember(kind: str, device_id: int, serial: str) -> None:
+def _remember(kind: str, device_id: int, serial: str, alias: str | None = None
+              ) -> None:
     if not serial:
         return
     with _serial_lock:
-        if _serials[kind].get(device_id) == serial:
-            return
+        changed = _serials[kind].get(device_id) != serial
         _serials[kind][device_id] = serial
+        # One body has one serial, so any other device number still carrying
+        # it is from a USB order that no longer exists.  Left in place, that
+        # stale entry puts one camera's name on two bodies and leaves the
+        # third one unfindable.
+        for other, found in list(_serials[kind].items()):
+            if other != device_id and found == serial:
+                del _serials[kind][other]
+                changed = True
+        # None means "not asked"; "" means "asked, and the body has no name".
+        # Both answers are kept, so an unnamed body is not reopened on every
+        # listing just to be asked again.
+        if alias is not None and _aliases[kind].get(serial, None) != alias:
+            _aliases[kind][serial] = alias
+            changed = True
+    if changed:
+        _save_serials()
+
+
+def _forget(kind: str, device_id: int) -> None:
+    """Drop what the cache says about this device number; it was wrong."""
+    with _serial_lock:
+        if device_id not in _serials[kind]:
+            return
+        del _serials[kind][device_id]
     _save_serials()
 
 
@@ -249,49 +337,143 @@ def _known_serial(kind: str, device_id: int) -> str:
         return _serials[kind].get(device_id, "")
 
 
-def _camera_serial(lib, info: _CameraInfo) -> str:
-    """This camera's serial, from the cache or by briefly opening it."""
-    cached = _known_serial("camera", info.CameraID)
-    if cached:
-        return cached
-    if not hasattr(lib, "ASIGetSerialNumber"):
+def _alias_asked(kind: str, serial: str) -> bool:
+    _load_serials()
+    with _serial_lock:
+        return serial in _aliases.get(kind, {})
+
+
+def known_alias(kind: str, serial: str) -> str:
+    """The name written into this body, as far as we have been able to read it."""
+    _load_serials()
+    with _serial_lock:
+        return _aliases.get(kind, {}).get(serial, "")
+
+
+def aliases(kind: str) -> dict[str, str]:
+    """Every alias learned so far for this kind, as serial -> alias."""
+    _load_serials()
+    with _serial_lock:
+        return {serial: alias for serial, alias in _aliases.get(kind, {}).items()
+                if alias}
+
+
+def serial_for_alias(kind: str, alias: str) -> str:
+    """The serial of the body carrying this alias, or "" when none is known.
+
+    Matched without regard to case, because the alias is typed by a person in
+    two different programs.
+    """
+    wanted = (alias or "").strip().lower()
+    if not wanted:
         return ""
+    for serial, found in aliases(kind).items():
+        if found.strip().lower() == wanted:
+            return serial
+    return ""
+
+
+def _camera_id(lib, device_id: int) -> str | None:
+    """The alias of an open camera, or None when the SDK cannot say."""
+    if not hasattr(lib, "ASIGetID"):
+        return None
+    buffer = (ctypes.c_ubyte * 8)()
+    if lib.ASIGetID(device_id, ctypes.byref(buffer)) != 0:
+        return None
+    return _alias_text(buffer)
+
+
+def _camera_serial(lib, info: _CameraInfo) -> tuple[str, bool]:
+    """This camera's serial, read from the body whenever it can be opened.
+
+    Returns the serial and whether it came from the body (True) or from the
+    cache (False).  The cache answers only for a body this program holds open
+    — reading it again would mean closing it — or one that refuses to open
+    because another program has it.  It is never trusted ahead of the body:
+    it is keyed by the SDK's device number, and that number is handed out
+    afresh each time the USB tree comes up, so a cached entry can name the
+    wrong body.  While the camera is open its alias is read too, since that
+    is the one moment both are certainly readable.
+    """
+    cached = _known_serial("camera", info.CameraID)
+    if _is_held("camera", info.CameraID) or not hasattr(lib, "ASIGetSerialNumber"):
+        return cached, False
     buffer = (ctypes.c_ubyte * 8)()
     if lib.ASIOpenCamera(info.CameraID) != 0:
-        return ""                      # in use by something else; not an error
+        return cached, False           # in use by something else; not an error
     try:
         if lib.ASIGetSerialNumber(info.CameraID, ctypes.byref(buffer)) != 0:
-            return ""
+            return cached, False
         serial = _serial_text(buffer)
+        alias = _camera_id(lib, info.CameraID)
     finally:
         with contextlib.suppress(Exception):
             lib.ASICloseCamera(info.CameraID)
-    _remember("camera", info.CameraID, serial)
-    return serial
+    _remember("camera", info.CameraID, serial, alias)
+    return serial, True
 
 
-def _focuser_serial(lib, device_id: int) -> str:
+def _focuser_serial(lib, device_id: int) -> tuple[str, bool]:
+    """As `_camera_serial`, for an EAF."""
     cached = _known_serial("focuser", device_id)
-    if cached:
-        return cached
-    if not hasattr(lib, "EAFGetSerialNumber"):
-        return ""
+    if _is_held("focuser", device_id) or not hasattr(lib, "EAFGetSerialNumber"):
+        return cached, False
     buffer = (ctypes.c_ubyte * 8)()
     if lib.EAFOpen(device_id) != 0:
-        return ""
+        return cached, False
     try:
         if lib.EAFGetSerialNumber(device_id, ctypes.byref(buffer)) != 0:
-            return ""
+            return cached, False
         serial = _serial_text(buffer)
+        # The EAF carries its alias inside its reported name: "EAF(RASA-R)".
+        alias: str | None = None
+        info = _FocuserInfo()
+        if lib.EAFGetProperty(device_id, ctypes.byref(info)) == 0:
+            alias = focuser_alias(_text(info.Name))
     finally:
         with contextlib.suppress(Exception):
             lib.EAFClose(device_id)
-    _remember("focuser", device_id, serial)
-    return serial
+    _remember("focuser", device_id, serial, alias)
+    return serial, True
+
+
+def _settle_duplicates(kind: str, read: list[tuple[int, str, bool]]
+                       ) -> dict[int, str]:
+    """Decide each device number's serial after one listing.
+
+    `read` holds (device number, serial, fresh) for every device seen.  A
+    serial read from a body at one number and merely remembered at another is
+    a stale cache entry at the second: that body has moved, and whatever is
+    at its old number is something else.  The old entry is dropped and the
+    number reported with no serial, so the person sees one unnamed body
+    rather than two bodies with the same name.  Two cached entries sharing a
+    serial with neither readable cannot be told apart and are left as they
+    are.
+    """
+    fresh = {serial for _, serial, is_fresh in read if is_fresh and serial}
+    settled: dict[int, str] = {}
+    for device_id, serial, is_fresh in read:
+        if serial and not is_fresh and serial in fresh:
+            _forget(kind, device_id)
+            serial = ""
+        settled[device_id] = serial
+    return settled
+
+
+def display_name(kind: str, model: str, serial: str, alias: str = "") -> str:
+    """How a ZWO body is named on screen: the model, its alias, its serial.
+
+    The alias leads because it is the only part a person recognises; the whole
+    serial follows because it is the only part that is certainly unique.
+    """
+    alias = alias or (known_alias(kind, serial) if serial else "")
+    head = f"{model} ({alias})" if alias else model
+    tail = f"sn {serial}" if serial else "no serial"
+    return f"{head} — {tail}"
 
 
 def list_devices(kind: str) -> list[dict[str, str]]:
-    """Every connected ZWO device of this kind, as {id, name, device}.
+    """Every connected ZWO device of this kind, as {id, name, device, alias}.
 
     The id is the serial number where the device will give one — it survives a
     reboot and a USB hub that enumerates in a different order, which is the
@@ -316,22 +498,33 @@ def _list_cameras() -> list[dict[str, str]]:
         count = lib.ASIGetNumOfConnectedCameras()
     except Exception:                     # noqa: BLE001 - a missing SDK is not fatal
         return []
+    seen: list[tuple[_CameraInfo, str, str, bool]] = []
     for index in range(count):
         info = _CameraInfo()
         if lib.ASIGetCameraProperty(ctypes.byref(info), index) != 0:
             continue
         model = _text(info.Name) or f"ASI camera {info.CameraID}"
-        serial = _camera_serial(lib, info)
+        serial, fresh = _camera_serial(lib, info)
+        seen.append((info, model, serial, fresh))
+    settled = _settle_duplicates(
+        "camera", [(int(info.CameraID), serial, fresh) for info, _, serial, fresh in seen])
+    for info, model, _, fresh in seen:
+        serial = settled[int(info.CameraID)]
+        alias = known_alias("camera", serial) if serial else ""
         # The whole serial, not a prefix: this is the moment the right body is
         # picked out of three identical ones, and two units of the same model
         # can share the first several characters.
         identity = (f"sn {serial}" if serial
-                    else f"index {info.CameraID} (no serial)")
+                    else f"index {info.CameraID} "
+                         + ("(in use — serial not readable)" if not fresh
+                            else "(no serial)"))
         found.append({
             "id": serial or f"index:{info.CameraID}",
-            "name": f"{model} — {identity}",
-            "device": identity,
+            "name": (display_name("camera", model, serial, alias) if serial
+                     else f"{model} — {identity}"),
+            "device": f"{alias}, {identity}" if alias else identity,
             "model": model,
+            "alias": alias,
         })
     return found
 
@@ -346,20 +539,31 @@ def _list_focusers() -> list[dict[str, str]]:
         count = lib.EAFGetNum()
     except Exception:                     # noqa: BLE001
         return []
+    seen: list[tuple[int, str, bool]] = []
     for index in range(count):
         ident = ctypes.c_int()
         if lib.EAFGetID(index, ctypes.byref(ident)) != 0:
             continue
-        serial = _focuser_serial(lib, ident.value)
+        serial, fresh = _focuser_serial(lib, ident.value)
+        seen.append((int(ident.value), serial, fresh))
+    settled = _settle_duplicates("focuser", seen)
+    for device_id, _, fresh in seen:
+        ident = ctypes.c_int(device_id)
+        serial = settled[device_id]
+        alias = known_alias("focuser", serial) if serial else ""
         # EAFGetProperty needs the device open; the name is "EAF" on every unit
-        # anyway, so the serial is what actually tells them apart.
+        # anyway, so the alias and the serial are what tell them apart.
         identity = (f"sn {serial}" if serial
-                    else f"index {ident.value} (no serial)")
+                    else f"index {ident.value} "
+                         + ("(in use — serial not readable)" if not fresh
+                            else "(no serial)"))
         found.append({
             "id": serial or f"index:{ident.value}",
-            "name": f"ZWO EAF — {identity}",
-            "device": identity,
+            "name": (display_name("focuser", "ZWO EAF", serial, alias) if serial
+                     else f"ZWO EAF — {identity}"),
+            "device": f"{alias}, {identity}" if alias else identity,
             "model": "ZWO EAF",
+            "alias": alias,
         })
     return found
 
@@ -376,6 +580,26 @@ def _resolve(kind: str, driver_id: str) -> int:
     if wanted.startswith("index:"):
         return int(wanted.split(":", 1)[1])
 
+    if is_alias_id(wanted):
+        # Addressed by the name written into the body.  Resolved to a serial
+        # here, at connect, because the alias can be known (from N.I.N.A.) long
+        # before the body can be opened to confirm which serial carries it.
+        alias = wanted[len(ALIAS_PREFIX):].strip()
+        serial = serial_for_alias(kind, alias)
+        if not serial:
+            list_devices(kind)            # opens what it can and learns names
+            serial = serial_for_alias(kind, alias)
+        if not serial:
+            known = sorted(set(aliases(kind).values()))
+            raise DeviceError(
+                f"no ZWO {kind} named {alias!r} could be found"
+                + (f" — the ones seen so far are {', '.join(known)}" if known
+                   else "")
+                + ". Check it is plugged in and powered, and not held open by "
+                  "another program such as N.I.N.A.; its name is read when it "
+                  "can be opened")
+        wanted = serial
+
     # The cache first.  Enumeration cannot read the serial of a device that
     # another program is holding open, so going straight to the list would turn
     # "your camera is in use by NINA" into "your camera is not plugged in".
@@ -391,6 +615,20 @@ def _resolve(kind: str, driver_id: str) -> int:
     raise DeviceError(
         f"no ZWO {kind} with serial {wanted} is connected — check it is "
         "plugged in and powered, and not held open by another program")
+
+
+def _expected_serial(kind: str, driver_id: str) -> str:
+    """The serial a stored id promises, or "" when it promises none.
+
+    A serial is itself; an alias is whatever serial has been learned for it;
+    an index promises nothing, which is exactly why indexes are a last resort.
+    """
+    wanted = str(driver_id or "").strip()
+    if not wanted or wanted.startswith("index:"):
+        return ""
+    if is_alias_id(wanted):
+        return serial_for_alias(kind, wanted[len(ALIAS_PREFIX):])
+    return wanted
 
 
 def _cached_index(kind: str, serial: str) -> int | None:
@@ -445,13 +683,57 @@ class ZwoCamera(Camera):
         return None if code != 0 else int(value.value)
 
     # -- lifecycle --------------------------------------------------------
+    def _open(self) -> int:
+        """Open the right body, and prove it is the right one.
+
+        The SDK's table of cameras is a snapshot.  After a hub reset every
+        body comes back on the bus in whatever order it pleases while the
+        table still describes the old one, so opening a remembered device
+        number fails with "camera removed" — or, worse, opens whichever body
+        now sits at that number.  So: the table is refreshed (a count, which
+        opens nothing) before the first try; the serial of what opened is
+        compared with the one asked for; and on a failure or a mismatch the
+        bodies are listed in full, which rebuilds the table and the cache,
+        and the open is tried once more.
+        """
+        with contextlib.suppress(Exception):
+            self._lib.ASIGetNumOfConnectedCameras()
+        expected = _expected_serial("camera", self.driver_id)
+        last: DeviceError | None = None
+        for attempt in range(2):
+            if attempt:
+                list_devices("camera")
+                expected = _expected_serial("camera", self.driver_id)
+            device_id = _resolve("camera", self.driver_id)
+            try:
+                self._call("ASIOpenCamera", device_id)
+            except DeviceError as exc:
+                last = exc
+                continue
+            if not expected or not hasattr(self._lib, "ASIGetSerialNumber"):
+                return device_id
+            buffer = (ctypes.c_ubyte * 8)()
+            if self._lib.ASIGetSerialNumber(device_id, ctypes.byref(buffer)) != 0:
+                return device_id
+            found = _serial_text(buffer)
+            if not found or found == expected:
+                return device_id
+            # Not the body that was asked for: the table had moved under us.
+            with contextlib.suppress(Exception):
+                self._lib.ASICloseCamera(device_id)
+            _forget("camera", device_id)
+            last = DeviceError(
+                f"camera number {device_id} is sn {found}, not sn {expected} — "
+                "the USB order has changed")
+        raise last or DeviceError("could not open the camera")
+
     def connect(self) -> None:
         if self._lib is None:
             raise DeviceError("the ZWO camera SDK is not installed")
         with self._lock:
-            device_id = _resolve("camera", self.driver_id)
-            self._call("ASIOpenCamera", device_id)
+            device_id = self._open()
             self._id = device_id
+            _hold("camera", device_id, True)
             try:
                 self._call("ASIInitCamera", device_id)
                 info = _CameraInfo()
@@ -465,6 +747,7 @@ class ZwoCamera(Camera):
             except Exception:
                 with contextlib.suppress(Exception):
                     self._lib.ASICloseCamera(device_id)
+                _hold("camera", device_id, False)
                 self._id = None
                 raise
             self._connected = True
@@ -481,13 +764,24 @@ class ZwoCamera(Camera):
         self.bayer_pattern = (_BAYER.get(int(info.BayerPattern))
                               if info.IsColorCam else None)
         self._bit_depth = int(info.BitDepth)
-        # We are holding it open, which is the one moment the serial can always
-        # be read. Learned here, it survives the device later being busy.
+        # We are holding it open, which is the one moment the serial and the
+        # alias can always be read. Learned here, they survive the device
+        # later being busy.
+        serial = ""
         if hasattr(self._lib, "ASIGetSerialNumber"):
             buffer = (ctypes.c_ubyte * 8)()
             if self._lib.ASIGetSerialNumber(int(info.CameraID),
                                             ctypes.byref(buffer)) == 0:
-                _remember("camera", int(info.CameraID), _serial_text(buffer))
+                serial = _serial_text(buffer)
+        alias = _camera_id(self._lib, int(info.CameraID))
+        if serial:
+            _remember("camera", int(info.CameraID), serial, alias)
+        self.serial = serial or _known_serial("camera", int(info.CameraID))
+        self.alias = alias or known_alias("camera", self.serial)
+        # Named the way N.I.N.A. and ZWO's own software name it, so a person
+        # looking at three identical bodies recognises this one.
+        if self.alias:
+            self.name = f"{self.name} ({self.alias})"
 
     def _read_controls(self) -> None:
         count = ctypes.c_int()
@@ -524,6 +818,8 @@ class ZwoCamera(Camera):
                     self._lib.ASIStopExposure(self._id)
                 with contextlib.suppress(Exception):
                     self._lib.ASICloseCamera(self._id)
+            if self._id is not None:
+                _hold("camera", self._id, False)
             self._id = None
             self._connected = False
 
@@ -646,7 +942,8 @@ class ZwoCamera(Camera):
 
     def describe(self) -> dict[str, Any]:
         return {**Camera.describe(self), "backend": "zwo",
-                "serial": self.driver_id,
+                "serial": getattr(self, "serial", "") or self.driver_id,
+                "alias": getattr(self, "alias", ""),
                 "bitDepth": getattr(self, "_bit_depth", 16)}
 
 
@@ -687,30 +984,70 @@ class ZwoFocuser(Focuser):
         if code != 0:
             raise DeviceError(f"{function} failed ({_EAF_ERRORS.get(code, code)})")
 
+    def _open(self) -> int:
+        """As `ZwoCamera._open`: refresh the SDK's table, open, check the
+        serial, and list and retry once if the EAF at that number is not
+        the one asked for."""
+        with contextlib.suppress(Exception):
+            self._lib.EAFGetNum()
+        expected = _expected_serial("focuser", self.driver_id)
+        last: DeviceError | None = None
+        for attempt in range(2):
+            if attempt:
+                list_devices("focuser")
+                expected = _expected_serial("focuser", self.driver_id)
+            device_id = _resolve("focuser", self.driver_id)
+            try:
+                self._call("EAFOpen", device_id)
+            except DeviceError as exc:
+                last = exc
+                continue
+            if not expected or not hasattr(self._lib, "EAFGetSerialNumber"):
+                return device_id
+            buffer = (ctypes.c_ubyte * 8)()
+            if self._lib.EAFGetSerialNumber(device_id, ctypes.byref(buffer)) != 0:
+                return device_id
+            found = _serial_text(buffer)
+            if not found or found == expected:
+                return device_id
+            with contextlib.suppress(Exception):
+                self._lib.EAFClose(device_id)
+            _forget("focuser", device_id)
+            last = DeviceError(
+                f"focuser number {device_id} is sn {found}, not sn {expected} — "
+                "the USB order has changed")
+        raise last or DeviceError("could not open the focuser")
+
     def connect(self) -> None:
         if self._lib is None:
             raise DeviceError("the ZWO focuser SDK is not installed")
         with self._lock:
-            device_id = _resolve("focuser", self.driver_id)
-            self._call("EAFOpen", device_id)
+            device_id = self._open()
             self._id = device_id
+            _hold("focuser", device_id, True)
             try:
                 info = _FocuserInfo()
                 self._call("EAFGetProperty", device_id, ctypes.byref(info))
                 self.max_step = int(info.MaxStep)
+                model = _text(info.Name) or "EAF"
+                # The alias rides inside the reported name: "EAF(RASA-R)".
+                self.alias = focuser_alias(model)
                 # As with the camera: read the serial while we hold it open.
                 if hasattr(self._lib, "EAFGetSerialNumber"):
                     buffer = (ctypes.c_ubyte * 8)()
                     if self._lib.EAFGetSerialNumber(device_id,
                                                     ctypes.byref(buffer)) == 0:
-                        _remember("focuser", device_id, _serial_text(buffer))
-                model = _text(info.Name) or "EAF"
+                        _remember("focuser", device_id, _serial_text(buffer),
+                                  self.alias)
                 serial = _known_serial("focuser", device_id)
-                # Every EAF calls itself "EAF", so the serial is the name.
+                self.serial = serial
+                # Every EAF calls itself "EAF", so the alias is the name and
+                # the serial is the proof.
                 self.name = (f"{model} {serial[:8]}" if serial else model)
             except Exception:
                 with contextlib.suppress(Exception):
                     self._lib.EAFClose(device_id)
+                _hold("focuser", device_id, False)
                 self._id = None
                 raise
             self._connected = True
@@ -722,6 +1059,8 @@ class ZwoFocuser(Focuser):
                     self._lib.EAFStop(self._id)
                 with contextlib.suppress(Exception):
                     self._lib.EAFClose(self._id)
+            if self._id is not None:
+                _hold("focuser", self._id, False)
             self._id = None
             self._connected = False
 
@@ -805,7 +1144,8 @@ class ZwoFocuser(Focuser):
 
     def describe(self) -> dict[str, Any]:
         return {**Focuser.describe(self), "backend": "zwo",
-                "serial": self.driver_id, "maxStep": self.max_step}
+                "serial": getattr(self, "serial", "") or self.driver_id,
+                "alias": getattr(self, "alias", ""), "maxStep": self.max_step}
 
 
 _EAF_ERRORS = {

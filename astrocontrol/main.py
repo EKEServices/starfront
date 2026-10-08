@@ -24,6 +24,7 @@ from . import (allsky, astro, autoplan, calibrating, calibration, catalog,
                piercam, plans, safety, schedule, solarsystem, survey)
 from . import collab
 from . import filters
+from . import identify
 from . import ninaimport
 from . import warnings
 from .capture import clean_target
@@ -76,6 +77,10 @@ pier.start()
 # Measuring how far apart the filters focus, so a filter change can be a move
 # of known size rather than a five-minute sweep.
 offsets_run = filteroffsets.OffsetRun(rigs, config)
+
+# Which focuser is on which camera, found out by moving them: the one question
+# about a rig of identical bodies that a driver list cannot answer.
+pairing = identify.PairingCheck(rigs)
 
 # Picking imaging tasks up from a collaboration server. Started either way: it
 # does nothing at all until a server and a token are configured, and it can
@@ -961,6 +966,35 @@ class ProfileRequest(BaseModel):
     id: str | None = Field(default=None, max_length=32)
 
 
+class SetupDevice(BaseModel):
+    backend: str = Field(min_length=1, max_length=20)
+    driverId: str = Field(min_length=1, max_length=200)
+    name: str | None = Field(default=None, max_length=120)
+
+
+class SetupTelescope(BaseModel):
+    """One telescope of a N.I.N.A. setup: which profile, what to call it."""
+    profile: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=60)
+    master: bool = False
+    include: bool = True
+    # An existing telescope to become this one; None adds a new one.
+    rig: str | None = Field(default=None, max_length=32)
+    devices: dict[str, SetupDevice] = Field(default_factory=dict)
+
+
+class SetupRequest(BaseModel):
+    telescopes: list[SetupTelescope] = Field(min_length=1, max_length=4)
+    sections: list[str] = Field(default_factory=list, max_length=20)
+    devices: bool = True
+
+
+class IdentifyRequest(BaseModel):
+    rigs: list[str] = Field(default_factory=list, max_length=4)
+    steps: int | None = Field(default=None, ge=1, le=100000)
+    exposure: float | None = Field(default=None, gt=0, le=120)
+
+
 class GuideRequest(BaseModel):
     settlePixels: float = Field(default=1.5, gt=0, le=50)
     settleTime: float = Field(default=8.0, ge=0, le=600)
@@ -1194,26 +1228,126 @@ def check_warnings_now() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @app.post("/api/camera/expose")
-def start_exposure(body: ExposeRequest, rig: str | None = None) -> dict[str, Any]:
+def start_exposure(body: ExposeRequest, rig: str | None = None,
+                   all: bool = False) -> dict[str, Any]:
+    """Take a frame — on one telescope, or with `all=true` on every one.
+
+    On a rig of three telescopes a press of Capture means "show me what each
+    scope sees", so every camera that is connected fires together.  The gain
+    and offset typed into the panel belong to the telescope on screen; the
+    others keep their own, because each body has its own settings for a
+    reason.  A telescope that cannot take part is reported, never silently
+    skipped.
+    """
     target = _rig(rig)
     # Deliberately taking a frame outranks a warm-down that is still running
     # from the last sequence.
     sequencer.cancel_warming("an exposure was started")
-    _guard(target.capture.start, body.exposure, body.frameType, body.binning,
-           body.gain, body.offset, body.loop, body.count)
-    return {"started": True}
+    if not all:
+        _guard(target.capture.start, body.exposure, body.frameType, body.binning,
+               body.gain, body.offset, body.loop, body.count)
+        return {"started": True}
+
+    started: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for telescope in rigs.all:
+        camera = telescope.manager.get("camera")
+        if camera is None or not camera.connected:
+            skipped.append({"rig": telescope.id, "name": telescope.name,
+                            "reason": "no camera connected"})
+            continue
+        own = telescope is target
+        try:
+            telescope.capture.start(body.exposure, body.frameType, body.binning,
+                                    body.gain if own else None,
+                                    body.offset if own else None,
+                                    body.loop, body.count)
+            started.append(telescope.name)
+        except DeviceError as exc:
+            skipped.append({"rig": telescope.id, "name": telescope.name,
+                            "reason": str(exc)})
+    if not started:
+        raise HTTPException(
+            status_code=400,
+            detail="; ".join(f"{s['name']}: {s['reason']}" for s in skipped)
+            or "no telescope has a camera connected")
+    return {"started": True, "telescopes": started, "skipped": skipped}
 
 
 @app.post("/api/camera/abort")
-def abort_exposure(rig: str | None = None) -> dict[str, Any]:
-    _guard(_rig(rig).capture.abort)
-    return {"aborted": True}
+def abort_exposure(rig: str | None = None, all: bool = False) -> dict[str, Any]:
+    if not all:
+        _guard(_rig(rig).capture.abort)
+        return {"aborted": True}
+    aborted = []
+    for telescope in rigs.all:
+        if telescope.capture.busy:
+            with contextlib.suppress(Exception):
+                telescope.capture.abort()
+                aborted.append(telescope.name)
+    return {"aborted": True, "telescopes": aborted}
 
 
 @app.post("/api/camera/loop")
-def set_loop(body: TrackingRequest, rig: str | None = None) -> dict[str, Any]:
-    _rig(rig).capture.set_loop(body.on)
+def set_loop(body: TrackingRequest, rig: str | None = None,
+             all: bool = False) -> dict[str, Any]:
+    for telescope in (rigs.all if all else [_rig(rig)]):
+        telescope.capture.set_loop(body.on)
     return {"loop": body.on}
+
+
+# ---------------------------------------------------------------------------
+# What is in each telescope's light path
+# ---------------------------------------------------------------------------
+
+class TelescopeFiltersRequest(BaseModel):
+    #: telescope id -> the name of the filter fitted in it
+    filters: dict[str, str] = Field(default_factory=dict)
+
+
+@app.get("/api/telescopes/filters")
+def telescope_filters() -> dict[str, Any]:
+    """Which filter sits in each telescope, as far as the program knows.
+
+    A telescope with a connected wheel answers for itself; one without — a
+    RASA with a filter in a drawer at prime focus — has only what the
+    operator last said.  The Run button asks again every time, because a
+    drawer is changed by hand in the afternoon and nothing can detect it.
+    """
+    rows = []
+    for telescope in rigs.all:
+        wheel = telescope.manager.get("filterwheel")
+        rows.append({
+            "rig": telescope.id,
+            "name": telescope.name,
+            "role": "master" if telescope.is_master else "slave",
+            "hasWheel": bool(wheel is not None and wheel.connected),
+            "filter": str(telescope.config.get("camera", "fixedFilter", "") or ""),
+        })
+    return {"telescopes": rows}
+
+
+@app.post("/api/telescopes/filters")
+def set_telescope_filters(body: TelescopeFiltersRequest) -> dict[str, Any]:
+    """Record the filter fitted in each telescope named in the body.
+
+    Goes into that telescope's `camera.fixedFilter`, which is the one place
+    the rest of the program reads: the FITS header on every light, flat and
+    dark it takes from now on, the plan's allocation, the calibration library
+    and the warning when a night asks for a filter that is not there.
+    """
+    saved: dict[str, str] = {}
+    for rig_id, name in body.filters.items():
+        telescope = _rig(rig_id)
+        clean = filters.canonical(name)
+        before = str(telescope.config.get("camera", "fixedFilter", "") or "")
+        _guard(telescope.config.update, "camera", {"fixedFilter": clean})
+        saved[telescope.id] = clean
+        # The manager already prefixes a slave's lines with its name.
+        telescope.manager.log(
+            f"{clean or 'No filter'} in the light path"
+            + (f" (was {before})" if before and before != clean else ""))
+    return {"filters": saved}
 
 
 @app.post("/api/camera/cooler")
@@ -5975,6 +6109,155 @@ def nina_import(body: NinaImportRequest, rig: str | None = None) -> dict[str, An
              "success")
     return {**done, "profile": plan["profile"], "leftOut": plan["leftOut"],
             "equipment": _equipment_payload()}
+
+
+def _nina_setup_sources() -> dict[str, Any]:
+    """Everything the multi-profile plan is worked out from.
+
+    The ZWO lists open each body briefly to read its name, which fails
+    harmlessly while another program holds it; whatever was learned on an
+    earlier occasion comes from the alias cache instead.
+    """
+    from .devices import zwo
+    cameras: list[dict[str, Any]] = []
+    focusers: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        cameras = zwo.list_devices("camera")
+    with contextlib.suppress(Exception):
+        focusers = zwo.list_devices("focuser")
+    serials = {alias: serial for serial, alias in zwo.aliases("camera").items()}
+    # A focuser seen before but not visible now is still worth offering: it is
+    # plugged in, just held by somebody else.
+    seen = {f["id"] for f in focusers}
+    for serial, alias in zwo.aliases("focuser").items():
+        if serial not in seen:
+            focusers.append({"id": serial, "alias": alias,
+                             "name": zwo.display_name("focuser", "ZWO EAF", serial, alias)})
+    return {"cameras": cameras, "focusers": focusers, "serials": serials}
+
+
+@app.get("/api/nina/setup")
+def nina_setup_plan() -> dict[str, Any]:
+    """A telescope per N.I.N.A. profile, resolved as far as it can be.
+
+    Every profile on the machine that names a camera is a candidate; the
+    person ticks the ones that are telescopes on this mount.  Nothing is
+    written here.
+    """
+    plans: list[dict[str, Any]] = []
+    for row in ninaimport.profiles():
+        try:
+            plan = ninaimport.read(row["path"])
+        except ninaimport.NinaError:
+            continue
+        if not (plan.get("devices") or {}).get("camera"):
+            continue
+        plans.append(plan)
+    sources = _nina_setup_sources()
+    outcome = ninaimport.setup_plan(plans, equipment.rigs(), sources["cameras"],
+                                    sources["focusers"], sources["serials"])
+    for entry in outcome["telescopes"]:
+        entry["profile"]["lastUsedText"] = ninaimport.when(entry["profile"].get("lastUsed", ""))
+    outcome["folder"] = str(ninaimport.PROFILE_DIR)
+    outcome["found"] = bool(plans)
+    outcome["zwoFocusers"] = sources["focusers"]
+    outcome["telescopesNow"] = [{"id": r["id"], "name": r["name"], "role": r["role"]}
+                                for r in equipment.rigs()]
+    return outcome
+
+
+@app.post("/api/nina/setup")
+def nina_setup(body: SetupRequest) -> dict[str, Any]:
+    """Make the telescopes a set of N.I.N.A. profiles describe, in one go.
+
+    Telescopes are added or renamed to match, the one with the mount is made
+    the master, each profile's settings go onto its own telescope and the
+    observatory's settings come from the master's profile.  Drivers are
+    remembered, not connected; Connect everything brings the rig up.
+    """
+    if sequencer.running:
+        raise HTTPException(status_code=400,
+                            detail="the sequence is running; stop it first")
+    paths = {row["id"]: row["path"] for row in ninaimport.profiles()}
+    telescopes = []
+    for entry in body.telescopes:
+        if entry.profile not in paths:
+            raise HTTPException(status_code=404,
+                                detail=f"no such N.I.N.A. profile: {entry.profile}")
+        telescopes.append({
+            "profile": {"id": entry.profile, "path": paths[entry.profile],
+                        "name": entry.name},
+            "name": entry.name, "master": entry.master, "include": entry.include,
+            "rig": entry.rig,
+            "devices": {kind: spec.model_dump() for kind, spec in entry.devices.items()},
+        })
+    if sum(1 for t in telescopes if t["include"]) == 0:
+        raise HTTPException(status_code=400, detail="tick at least one telescope")
+    rigs.disconnect_all()
+    try:
+        done = ninaimport.apply_setup(telescopes, ninaimport.read, config, equipment,
+                                      rigs, body.sections or None, body.devices)
+    except (ninaimport.NinaError, DeviceError) as exc:
+        rigs.sync()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    rigs.sync()
+    collab_client.start()
+    plan.prune_rigs({rig.id for rig in rigs.all})
+    names = ", ".join(f"{t['name']}{' (master)' if t['master'] else ''}"
+                      for t in done["telescopes"])
+    rigs.log(f"Set up {len(done['telescopes'])} telescope(s) from N.I.N.A.: {names}",
+             "success")
+    return {**done, "equipment": _equipment_payload()}
+
+
+# ---------------------------------------------------------------------------
+# Which focuser is which
+# ---------------------------------------------------------------------------
+
+@app.get("/api/equipment/identify")
+def identify_status() -> dict[str, Any]:
+    return pairing.status()
+
+
+@app.post("/api/equipment/identify")
+def identify_start(body: IdentifyRequest) -> dict[str, Any]:
+    """Move each focuser and watch which camera's stars change.
+
+    Refused while the sequencer owns the cameras; the focusers go back where
+    they started whatever happens.
+    """
+    if sequencer.owns_the_cameras:
+        raise HTTPException(status_code=400,
+                            detail="the sequencer is imaging; pause it first")
+    for rig in rigs.all:
+        if rig.focuser.running:
+            raise HTTPException(status_code=400,
+                                detail=f"{rig.name} is focusing; wait for it to finish")
+    sequencer.cancel_warming("a focuser check was started")
+    started = _guard(pairing.start, body.rigs or None, body.steps, body.exposure,
+                     lambda text: rigs.log(f"Focuser check: {text}"))
+    return {"started": True, **started}
+
+
+@app.post("/api/equipment/identify/abort")
+def identify_abort() -> dict[str, Any]:
+    pairing.abort()
+    return {"aborted": True}
+
+
+@app.post("/api/equipment/identify/apply")
+def identify_apply() -> dict[str, Any]:
+    """Give each focuser to the telescope whose camera it moved."""
+    if sequencer.running:
+        raise HTTPException(status_code=400,
+                            detail="the sequence is running; stop it first")
+    outcome = _guard(pairing.fix, equipment)
+    for text in outcome.get("failed", []):
+        rigs.log(text, "error")
+    if outcome.get("changed"):
+        rigs.log("Focusers moved to the telescopes whose cameras they focus: "
+                 + ", ".join(rigs.get(r).name for r in outcome["changed"]), "success")
+    return {**outcome, "equipment": _equipment_payload()}
 
 
 @app.post("/api/equipment/telescopes")

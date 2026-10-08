@@ -23,6 +23,7 @@
     targets: [],
     plan: null,
     collab: null,
+    pairing: null,
     fetchedAt: 0,
     autoOpened: false,
   };
@@ -32,18 +33,28 @@
   const settings = () => app.state.settings || {};
   const status = () => app.state.status || {};
   const device = (kind) => ((status().devices || {})[kind]) || {};
+  /* Every telescope on the mount, master first; the master alone before the
+     first status arrives. */
+  const telescopes = () => {
+    const all = (app.rigList && app.rigList()) || [];
+    return all.length ? all : [{ id: 'main', name: 'this telescope', role: 'master',
+      devices: status().devices || {} }];
+  };
+  const multiple = () => telescopes().length > 1;
 
   async function refresh(force = false) {
     if (!force && Date.now() - wiz.fetchedAt < 4000) return;
     wiz.fetchedAt = Date.now();
-    const [targets, plan, collab] = await Promise.all([
+    const [targets, plan, collab, pairing] = await Promise.all([
       app.api('/api/targets').then((r) => r.targets || []).catch(() => wiz.targets),
       app.api('/api/plan').catch(() => wiz.plan),
       app.api('/api/collab').catch(() => wiz.collab),
+      app.api('/api/equipment/identify').catch(() => wiz.pairing),
     ]);
     wiz.targets = targets;
     wiz.plan = plan;
     wiz.collab = collab;
+    wiz.pairing = pairing;
   }
 
   /* --------------------------------------------------------------- steps */
@@ -71,20 +82,26 @@
       key: 'nina',
       title: 'Bring your settings over from N.I.N.A.',
       body: [
-        'If you have used N.I.N.A. on this PC, its profile already knows your focal '
+        'If you have used N.I.N.A. on this PC, its profiles already know your focal '
         + 'length, pixel size, filters and their offsets, focus and dither settings, '
-        + 'ASTAP, and which driver is which. Import it and skip an hour of typing.',
-        'Everything is shown before it is written. Coming from somewhere else? Skip '
-        + 'this and fill in Site & Optics on the next step.',
+        + 'ASTAP, and which camera is which. Import them and skip an hour of typing.',
+        'More than one telescope on the mount? One N.I.N.A. profile per telescope is '
+        + 'the one place that already records which camera is on which scope and '
+        + 'which one has the mount — Set up every telescope reads all of them at '
+        + 'once, makes a telescope for each and picks the master. Everything is '
+        + 'shown before it is written. Coming from somewhere else? Skip this and '
+        + 'fill in Site & Optics on the next step.',
       ],
       actions: [
-        ['Import from N.I.N.A.…', () => app.openNinaImport(), true],
+        ['Set up every telescope from N.I.N.A.…', () => app.openNinaSetup(), true],
+        ['Import one profile…', () => app.openNinaImport(), false],
         ['Type them in instead', () => app.openSettings(), false],
       ],
       check: () => {
         const optics = settings().optics || {};
         const camera = settings().camera || {};
         const have = [];
+        if (multiple()) have.push(`${telescopes().length} telescopes: ${telescopes().map((t) => t.name).join(', ')}`);
         if (optics.focalLength) have.push(`${optics.focalLength} mm`);
         if (optics.sensorWidth && optics.sensorHeight) have.push(`${optics.sensorWidth}×${optics.sensorHeight} px`);
         if ((camera.filterNames || []).length) have.push(`filters ${camera.filterNames.join(' ')}`);
@@ -116,21 +133,61 @@
       body: [
         'Each slot — camera, mount, filter wheel, focuser, guider, flat panel — is '
         + 'connected once and remembered, so on later nights one button brings the '
-        + 'whole rig up. If you imported from N.I.N.A., the drivers are already '
-        + 'chosen; press Connect this telescope.',
-        'A camera and a mount are enough to go on with. The rest can wait.',
+        + 'whole rig up. If you set up from N.I.N.A., the drivers are already '
+        + 'chosen; press Connect everything. The Equipment window shows every '
+        + 'telescope on the mount at a glance, with what is connected on each.',
+        'A camera on every telescope and the mount on the master are enough to go '
+        + 'on with. The rest can wait. If N.I.N.A. is still running, close it '
+        + 'first — a camera can only be held by one program.',
       ],
       actions: [['Open Equipment…', () => app.openEquipment(), true]],
       check: () => {
-        const on = ['camera', 'mount', 'filterwheel', 'focuser', 'guider', 'flatpanel', 'rotator']
-          .filter((kind) => device(kind).connected);
-        return device('camera').connected && device('mount').connected
-          ? `connected: ${on.join(', ')}` : '';
+        const lines = telescopes().map((rig) => {
+          const on = ['camera', 'mount', 'filterwheel', 'focuser', 'guider', 'flatpanel', 'rotator']
+            .filter((kind) => ((rig.devices || {})[kind] || {}).connected);
+          return on.length ? `${rig.name}: ${on.join(', ')}` : '';
+        }).filter(Boolean);
+        const cameras = telescopes().every((rig) => ((rig.devices || {}).camera || {}).connected);
+        return cameras && device('mount').connected ? lines.join(' · ') : '';
       },
       partial: () => {
-        const on = ['camera', 'mount', 'filterwheel', 'focuser', 'guider', 'flatpanel', 'rotator']
-          .filter((kind) => device(kind).connected);
-        return on.length ? `so far: ${on.join(', ')}` : '';
+        const lines = telescopes().map((rig) => {
+          const on = ['camera', 'mount', 'filterwheel', 'focuser', 'guider', 'flatpanel', 'rotator']
+            .filter((kind) => ((rig.devices || {})[kind] || {}).connected);
+          return on.length ? `${rig.name}: ${on.join(', ')}` : '';
+        }).filter(Boolean);
+        return lines.length ? `so far — ${lines.join(' · ')}` : '';
+      },
+    },
+    {
+      key: 'focusers',
+      title: 'Which focuser is which',
+      body: [
+        'Three identical focusers cannot be told apart from a driver list, and on a '
+        + 'remote telescope they cannot be told apart by looking either. What can be '
+        + 'seen from anywhere is cause and effect: a focuser only changes the stars of '
+        + 'the camera it is bolted to.',
+        'Point the rig at some stars, then press the button. Each focuser is moved out '
+        + 'and back while every camera takes a frame; the camera whose star size moved '
+        + 'is on the same telescope, and one more click puts each focuser on the '
+        + 'telescope it belongs to. With one telescope there is nothing to tell apart.',
+      ],
+      actions: [['Which focuser is which?…', () => app.openIdentify(), true]],
+      check: () => {
+        if (!multiple()) return 'one telescope — nothing to tell apart';
+        const result = (wiz.pairing || {}).result;
+        if (!result) return '';
+        if (result.applied) return 'each focuser now on the telescope whose stars it moves';
+        if (result.allMatched) return 'every focuser is on its own telescope';
+        return '';
+      },
+      partial: () => {
+        const pairing = wiz.pairing || {};
+        if (pairing.running) return pairing.message || 'checking';
+        const result = pairing.result;
+        if (result && (result.moves || []).length) return 'crossed focusers found — press the button to move them';
+        if (result && result.conflict) return result.conflict;
+        return '';
       },
     },
     {

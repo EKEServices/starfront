@@ -135,6 +135,22 @@ function currentRig() {
     || all[0];
 }
 
+/** More than one telescope on the mount: the camera buttons act on all. */
+const multiTelescope = () => rigList().length > 1;
+
+const anyCameraConnected = () => rigList().some((rig) =>
+  rig.devices && rig.devices.camera && rig.devices.camera.connected);
+
+/** Capture state across every telescope: busy if any is, looping if any is. */
+function anyCapture() {
+  const all = rigList().map((rig) => rig.capture).filter(Boolean);
+  if (!all.length) return (state.status && state.status.capture) || {};
+  return {
+    busy: all.some((capture) => capture.busy),
+    loop: all.some((capture) => capture.loop),
+  };
+}
+
 const isMasterSelected = () => {
   const rig = currentRig();
   return !rig || rig.role === 'master';
@@ -217,6 +233,104 @@ const confirmAction = (message, options = {}) =>
 const askForText = (message, value = '', options = {}) =>
   ask({ message, input: value, confirmLabel: 'Save', ...options });
 
+/* Which filter is in each telescope.  Asked before every run on a rig whose
+   telescopes carry the filter in a drawer: nothing can read a drawer, and a
+   night labelled with last week's answer puts every frame in the wrong
+   stack.  Resolves true once the answers are saved, false if the operator
+   backs out; a rig where every telescope has a wheel is not asked at all. */
+
+let filtersResolve = null;
+
+function closeFilters(value) {
+  const dialog = $('filtersDialog');
+  if (dialog.open) dialog.close();
+  const resolve = filtersResolve;
+  filtersResolve = null;
+  if (resolve) resolve(value);
+}
+
+async function askInstalledFilters() {
+  let info;
+  try { info = await api('/api/telescopes/filters'); } catch (error) {
+    toast(error.message, 'error');
+    return false;
+  }
+  const rows = (info.telescopes || []).filter((t) => !t.hasWheel);
+  if (!rows.length) return true;
+
+  const options = $('filtersOptions');
+  if (options && !options.options.length) {
+    for (const name of FILTER_SUGGESTIONS) options.appendChild(new Option(name));
+  }
+  const host = $('filtersRows');
+  host.innerHTML = '';
+  for (const row of rows) {
+    const label = document.createElement('label');
+    label.className = 'filters-row';
+    label.innerHTML = '<span class="who"></span>'
+      + '<input type="text" list="filtersOptions" spellcheck="false" '
+      + 'placeholder="L, R, G, B, Ha, OIII, SII…" maxlength="24">';
+    const who = label.querySelector('.who');
+    who.textContent = row.name;
+    if (row.role === 'master') {
+      const role = document.createElement('span');
+      role.className = 'role';
+      role.textContent = 'master';
+      who.appendChild(role);
+    }
+    const input = label.querySelector('input');
+    input.dataset.rig = row.rig;
+    input.value = row.filter || '';
+    input.addEventListener('input', () => input.classList.remove('missing'));
+    host.appendChild(label);
+  }
+
+  if (filtersResolve) closeFilters(false);
+  $('filtersDialog').showModal();
+  const first = host.querySelector('input');
+  if (first) { first.focus(); first.select(); }
+  const answers = await new Promise((resolve) => { filtersResolve = resolve; });
+  if (!answers) return false;
+  try {
+    await send('/api/telescopes/filters', 'POST', { filters: answers });
+  } catch { return false; }
+  return true;
+}
+
+function bindFilters() {
+  $('filtersCancel').addEventListener('click', (event) => {
+    event.preventDefault();
+    closeFilters(false);
+  });
+  $('filtersConfirm').addEventListener('click', (event) => {
+    event.preventDefault();
+    const answers = {};
+    let missing = null;
+    for (const input of $('filtersRows').querySelectorAll('input')) {
+      const value = input.value.trim();
+      if (!value) {
+        input.classList.add('missing');
+        if (!missing) missing = input;
+      }
+      answers[input.dataset.rig] = value;
+    }
+    if (missing) {
+      // Every telescope has to be answered for: an unlabelled frame is the
+      // thing this dialog exists to prevent.  "L" or "none" is an answer.
+      missing.focus();
+      toast('Say which filter is in every telescope — L or none if it has no filter', 'error');
+      return;
+    }
+    closeFilters(answers);
+  });
+  $('filtersRows').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); $('filtersConfirm').click(); }
+  });
+  $('filtersDialog').addEventListener('close', () => {
+    if (filtersResolve) closeFilters(false);
+  });
+}
+
 function bindAsk() {
   $('askCancel').addEventListener('click', (event) => {
     event.preventDefault();
@@ -290,7 +404,10 @@ function buildConnectRows() {
                  title="Which device this driver should use">⚙</button>`;
     row.innerHTML =
       `<label>${kind.label}</label>${picker}${setup}` +
-      `<button class="btn" data-connect="${kind.key}">Connect</button>`;
+      `<button class="btn" data-connect="${kind.key}">Connect</button>` +
+      // What the slot remembers, named, so a device that is switched off or
+      // held by another program is still accounted for rather than invisible.
+      `<div class="connect-remembered" data-remembered="${kind.key}"></div>`;
     host.appendChild(row);
   }
   host.querySelectorAll('[data-connect]').forEach((button) => {
@@ -324,11 +441,27 @@ function buildConnectRows() {
 
 /* Show the driver each slot last connected to, so opening the dialog on a rig
    that is switched off still says what it is made of. */
+const ALIAS_PREFIX = 'alias:';
+const isAliasId = (driverId) => String(driverId || '').startsWith(ALIAS_PREFIX);
+const aliasOf = (driverId) => (isAliasId(driverId) ? String(driverId).slice(ALIAS_PREFIX.length) : '');
+const sameAlias = (a, b) => String(a || '').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  === String(b || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
 function preselectRemembered() {
   const telescope = (state.equipment && state.equipment.telescopes
     .find((rig) => rig.id === (state.rig || masterRigId()))) || null;
   if (!telescope) return;
+  document.querySelectorAll('[data-remembered]').forEach((line) => { line.textContent = ''; });
+  const live = currentDevices();
   for (const [kind, spec] of Object.entries(telescope.devices || {})) {
+    const line = document.querySelector(`[data-remembered="${kind}"]`);
+    if (line) {
+      const device = live[kind] || {};
+      line.textContent = device.connected
+        ? `connected: ${device.name || spec.name}`
+        : `remembers ${spec.name || spec.driverId}`
+          + (isAliasId(spec.driverId) ? ` — by its name, found the first time it can be opened` : '');
+    }
     if (kind === 'guider') {
       const field = $('guiderAddress');
       if (field && !field.disabled) field.value = spec.driverId;
@@ -338,11 +471,26 @@ function preselectRemembered() {
     if (!select) continue;
     let wanted = [...select.options].find((option) =>
       option.value.startsWith(`${spec.backend}|${spec.driverId}|`));
+    if (!wanted && isAliasId(spec.driverId)) {
+      // Remembered by the name written into the body. If a listed body
+      // carries that name, that is the one — and connecting it from the list
+      // remembers the serial from then on.
+      const named = (state.drivers[kind] || []).find((driver) =>
+        driver.backend === 'zwo' && driver.alias && sameAlias(driver.alias, aliasOf(spec.driverId)));
+      if (named) {
+        wanted = [...select.options].find((option) =>
+          option.value.startsWith(`${named.backend}|${named.id}|`));
+      }
+    }
     if (!wanted) {
-      // A ProgID set by hand in the device setup dialog, or one whose driver is
-      // not registered on this machine. It is still this telescope's choice, so
-      // it belongs on the list rather than silently falling back to another.
-      wanted = new Option(`${spec.name || spec.driverId}  (set by hand)`,
+      // A ProgID set by hand in the device setup dialog, one whose driver is
+      // not registered on this machine, or a body named but not yet seen. It
+      // is still this telescope's choice, so it belongs on the list rather
+      // than silently falling back to another.
+      const label = isAliasId(spec.driverId)
+        ? `${spec.name || aliasOf(spec.driverId)}  (by name — found when it is free)`
+        : `${spec.name || spec.driverId}  (set by hand)`;
+      wanted = new Option(label,
         `${spec.backend}|${spec.driverId}|${spec.name || spec.driverId}`);
       select.appendChild(wanted);
     }
@@ -369,26 +517,13 @@ function renderEquipment() {
   const telescopes = data.telescopes || [];
   const selected = state.rig || data.masterRig;
 
-  // The tab strip inside the dialog.
-  const tabs = $('rigTabs');
-  tabs.innerHTML = '';
-  for (const rig of telescopes) {
-    const button = document.createElement('button');
-    button.className = `btn small rig-tab${rig.id === selected ? ' active' : ''}`;
-    button.textContent = rig.name;
-    if (rig.role === 'master') button.classList.add('master');
-    button.title = rig.role === 'master'
-      ? 'Master: carries the mount and the guider'
-      : 'Follows the master: same pointing, focuses and exposes in step';
-    button.addEventListener('click', () => { selectRig(rig.id); renderEquipment(); });
-    tabs.appendChild(button);
-  }
-
   const current = telescopes.find((rig) => rig.id === selected) || telescopes[0];
   const isMaster = !current || current.role === 'master';
   $('btnRigMaster').disabled = isMaster;
   $('btnRigRemove').disabled = isMaster;
   $('btnRigAdd').disabled = telescopes.length >= 4;
+  $('btnIdentify').hidden = telescopes.length < 2;
+  setText('rigSetupName', current ? current.name : '—');
   document.querySelectorAll('[data-role="rig-scope"]').forEach((tag) => {
     tag.textContent = current ? current.name : '—';
     tag.hidden = telescopes.length < 2;
@@ -396,18 +531,8 @@ function renderEquipment() {
   $('afScopeNote').hidden = telescopes.length < 2;
   $('btnFocusAll').hidden = telescopes.length < 2;
 
-  // The topbar switcher, which only earns its space once there are two.
-  const strip = $('rigSwitch');
-  strip.hidden = telescopes.length < 2;
-  strip.innerHTML = '';
-  for (const rig of telescopes) {
-    const button = document.createElement('button');
-    button.className = `btn small ghost${rig.id === selected ? ' active' : ''}`;
-    button.textContent = rig.name;
-    button.title = rig.role === 'master' ? 'Master telescope' : 'Follows the master';
-    button.addEventListener('click', () => { selectRig(rig.id); renderEquipment(); });
-    strip.appendChild(button);
-  }
+  renderRigOverview();
+  renderRigSwitch();
 
   const profiles = $('profileSelect');
   const active = (data.activeProfile || {}).id || '';
@@ -422,6 +547,580 @@ function renderEquipment() {
   if (active) profiles.value = active;
   $('btnProfileLoad').disabled = !(data.profiles || []).length;
   $('btnProfileDelete').disabled = !(data.profiles || []).length;
+}
+
+/* ------------------------------------------- the observatory at a glance */
+
+/* Which slots a card shows. The optical train is always listed, because its
+   absence is the news; the rest only once something is remembered in it. The
+   mount and the guider only exist on the master. */
+const CARD_KINDS = ['camera', 'focuser', 'filterwheel', 'rotator', 'flatpanel',
+  'mount', 'guider', 'piercam', 'safetymonitor', 'dome', 'switch'];
+const CARD_ALWAYS = new Set(['camera', 'focuser', 'filterwheel', 'mount', 'guider']);
+const CARD_LABELS = { camera: 'Camera', focuser: 'Focuser', filterwheel: 'Filters',
+  rotator: 'Rotator', flatpanel: 'Flat', mount: 'Mount', guider: 'Guider',
+  piercam: 'Pier cam', safetymonitor: 'Safety', dome: 'Dome', switch: 'Power' };
+
+/** A device name with its alias lit up: "ZWO ASI2600MM Pro (RASA-L)". */
+function nameWithAlias(name, aliasFirst = false) {
+  const text = String(name || '');
+  const span = document.createElement('span');
+  // The last bracketed part that is not just a driver's instance number or
+  // the name of a backend — "On-Step (ASCOM)" has no alias in it.
+  const match = [...text.matchAll(/\(([^()]+)\)/g)].reverse()
+    .find((m) => !/^\d+$/.test(m[1].trim())
+      && !/^(ascom|alpaca|zwo|phd2|indi|indigo|native)$/i.test(m[1].trim()));
+  if (!match) { span.textContent = text; return span; }
+  const [whole, alias] = match;
+  const at = match.index;
+  const lit = document.createElement('span');
+  lit.className = 'alias';
+  if (aliasFirst) {
+    // In a narrow card the alias is the only part that tells three identical
+    // bodies apart, so it leads and the model follows; "RASA-L · ZWO ASI2600MM
+    // Pro" survives truncation where "ZWO ASI2600MM Pro (RA…" does not.
+    lit.textContent = alias.trim();
+    span.appendChild(lit);
+    const rest = (text.slice(0, at) + text.slice(at + whole.length))
+      .replace(/\s*—\s*sn\s+\S+/i, '').replace(/\s+/g, ' ').trim();
+    if (rest) span.appendChild(document.createTextNode(` · ${rest}`));
+    return span;
+  }
+  span.appendChild(document.createTextNode(text.slice(0, at)));
+  lit.textContent = `(${alias})`;
+  span.appendChild(lit);
+  span.appendChild(document.createTextNode(text.slice(at + whole.length)));
+  return span;
+}
+
+/** Live device state for one telescope by id, from the status socket. */
+function liveDevices(rigId) {
+  const rig = rigList().find((one) => one.id === rigId);
+  if (rig) return rig.devices || {};
+  // Before the first status arrives the master's devices are all there is.
+  return (state.status && rigId === masterRigId() && state.status.devices) || {};
+}
+
+function renderRigOverview() {
+  const host = $('rigOverview');
+  if (!host) return;
+  const telescopes = (state.equipment && state.equipment.telescopes) || [];
+  const selected = state.rig || (state.equipment && state.equipment.masterRig);
+  host.innerHTML = '';
+  for (const rig of telescopes) {
+    const card = document.createElement('div');
+    card.className = `rig-card${rig.id === selected ? ' active' : ''}`
+      + (rig.role === 'master' ? ' master' : '');
+    card.dataset.rig = rig.id;
+    card.setAttribute('role', 'button');
+    card.tabIndex = 0;
+    card.title = `Set up ${rig.name}`;
+    card.innerHTML = '<div class="rig-card-head"><b></b><span class="role"></span></div>'
+      + '<div class="rig-slots"></div>'
+      + '<div class="rig-card-foot"><span class="count"></span><span class="spacer"></span>'
+      + '<button class="btn small" data-card-connect type="button">Connect</button></div>';
+    card.querySelector('b').textContent = rig.name;
+    card.querySelector('.role').textContent = rig.role === 'master'
+      ? 'master · mount & guider' : 'follows the master';
+    const choose = () => { selectRig(rig.id); renderEquipment(); };
+    card.addEventListener('click', (event) => {
+      if (event.target.closest('[data-card-connect]')) return;
+      choose();
+    });
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); }
+    });
+    card.querySelector('[data-card-connect]').addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      const was = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Working…';
+      try {
+        await connectTelescope(rig.id, button.dataset.mode !== 'disconnect');
+      } finally {
+        button.disabled = false;
+        button.textContent = was;
+        updateRigOverview();
+      }
+    });
+    host.appendChild(card);
+  }
+  updateRigOverview();
+}
+
+/** Connect or disconnect everything one telescope remembers. */
+async function connectTelescope(rigId, connect) {
+  if (connect) {
+    const result = await send(`/api/equipment/telescopes/${rigId}/connect`, 'POST');
+    const count = (result.connected || []).length;
+    const failed = (result.failed || []).length;
+    toast(count ? `Connected ${result.connected.join(', ')}`
+      + (failed ? ` — ${failed} failed, see the log` : '')
+      : (failed ? `${failed} failed — see the log` : 'Nothing remembered for this telescope yet'),
+    failed ? 'warn' : (count ? 'success' : 'info'));
+  } else {
+    const live = liveDevices(rigId);
+    for (const kind of Object.keys(live)) {
+      if (live[kind] && live[kind].connected) {
+        await send(rigQuery(`/api/devices/${kind}/disconnect`, rigId), 'POST');
+      }
+    }
+  }
+  state.cameraSynced = false;
+  state.filterNames = null;
+  await loadEquipment();
+}
+
+/** Fill every card's slots from the live state. Cheap enough to run per tick. */
+function updateRigOverview() {
+  const host = $('rigOverview');
+  if (!host || !state.equipment) return;
+  const telescopes = state.equipment.telescopes || [];
+  let remembered = 0;
+  let connected = 0;
+  let pendingByName = [];
+  for (const rig of telescopes) {
+    const card = host.querySelector(`.rig-card[data-rig="${rig.id}"]`);
+    if (!card) continue;
+    const live = liveDevices(rig.id);
+    const specs = rig.devices || {};
+    const slots = card.querySelector('.rig-slots');
+    const kinds = CARD_KINDS.filter((kind) =>
+      (MASTER_KINDS.includes(kind) ? rig.role === 'master' : true)
+      && (CARD_ALWAYS.has(kind) || specs[kind] || (live[kind] && live[kind].connected)));
+    let mine = 0;
+    let on = 0;
+    // Rebuilt only when the slot list changes; otherwise updated in place.
+    const key = kinds.join('|');
+    if (slots.dataset.kinds !== key) {
+      slots.dataset.kinds = key;
+      slots.innerHTML = '';
+      for (const kind of kinds) {
+        const row = document.createElement('div');
+        row.className = 'rig-slot';
+        row.dataset.kind = kind;
+        row.innerHTML = '<span class="dot"></span><span class="rig-slot-kind"></span>'
+          + '<span class="rig-slot-name"></span>';
+        row.querySelector('.rig-slot-kind').textContent = CARD_LABELS[kind] || kind;
+        slots.appendChild(row);
+      }
+    }
+    for (const kind of kinds) {
+      const row = slots.querySelector(`.rig-slot[data-kind="${kind}"]`);
+      const device = live[kind] || {};
+      const spec = specs[kind];
+      let cls = 'none';
+      let name = 'none';
+      if (device.connected) {
+        cls = (device.slewing || device.moving || device.exposing) ? 'on busy' : 'on';
+        name = device.name || (spec && spec.name) || 'connected';
+        on += 1;
+        mine += 1;
+      } else if (spec) {
+        cls = 'off';
+        name = spec.name || spec.driverId;
+        mine += 1;
+        if (isAliasId(spec.driverId)) pendingByName.push(`${rig.name}: ${aliasOf(spec.driverId)}`);
+      }
+      const nameNode = row.querySelector('.rig-slot-name');
+      const text = `${cls}|${name}`;
+      if (nameNode.dataset.text !== text) {
+        nameNode.dataset.text = text;
+        row.className = `rig-slot ${cls}`;
+        nameNode.innerHTML = '';
+        nameNode.appendChild(cls === 'none' ? document.createTextNode('none') : nameWithAlias(name, true));
+        nameNode.title = name;
+      }
+    }
+    remembered += mine;
+    connected += on;
+    card.querySelector('.count').textContent = mine
+      ? `${on} of ${mine} connected` : 'nothing remembered yet';
+    const button = card.querySelector('[data-card-connect]');
+    if (!button.disabled) {
+      const disconnect = on > 0 && on >= mine;
+      button.dataset.mode = disconnect ? 'disconnect' : 'connect';
+      button.textContent = disconnect ? 'Disconnect' : 'Connect';
+      button.classList.toggle('danger', disconnect);
+      button.hidden = !mine;
+    }
+  }
+
+  setText('obsSummary', telescopes.length
+    ? `${telescopes.length} on the mount · ${connected} of ${remembered} devices connected` : '');
+  const hint = $('obsHint');
+  if (!hint) return;
+  hint.className = 'small obs-hint';
+  if (!remembered) {
+    hint.classList.add('warn');
+    hint.textContent = 'Nothing is remembered yet. If N.I.N.A. runs on this PC, '
+      + 'Set up every telescope from N.I.N.A. below does the whole job in one go. '
+      + 'Otherwise choose a driver in each row below and press Connect — a slot '
+      + 'remembers its driver from then on.';
+  } else if (connected < remembered) {
+    hint.textContent = `${remembered - connected} remembered device${remembered - connected === 1 ? ' is' : 's are'} `
+      + 'not connected. Connect everything brings them all up at once.'
+      + (pendingByName.length ? ` ${pendingByName.join(', ')} ${pendingByName.length === 1 ? 'is' : 'are'} `
+        + 'remembered by name and found the first time the body can be opened — '
+        + 'close N.I.N.A. if it still holds it.' : '');
+  } else {
+    hint.classList.add('good');
+    hint.textContent = 'Everything remembered is connected.'
+      + (telescopes.length > 1 ? ' Not sure each focuser is on its own telescope? '
+        + 'Which focuser is which? moves each one and watches whose stars change.' : '');
+  }
+}
+
+/* The topbar switcher: which telescope the panels drive, with every
+   telescope's camera state visible at once. */
+function renderRigSwitch() {
+  const strip = $('rigSwitch');
+  if (!strip) return;
+  const telescopes = (state.equipment && state.equipment.telescopes) || [];
+  const selected = state.rig || (state.equipment && state.equipment.masterRig);
+  strip.hidden = telescopes.length < 2;
+  strip.innerHTML = '';
+  for (const rig of telescopes) {
+    const button = document.createElement('button');
+    button.className = `btn small ghost${rig.id === selected ? ' active' : ''}`
+      + (rig.role === 'master' ? ' master' : '');
+    button.dataset.rig = rig.id;
+    button.innerHTML = '<span class="dot"></span><span class="name"></span>';
+    button.querySelector('.name').textContent = rig.name;
+    button.addEventListener('click', () => { selectRig(rig.id); renderEquipment(); });
+    strip.appendChild(button);
+  }
+  updateRigSwitch();
+}
+
+function updateRigSwitch() {
+  const strip = $('rigSwitch');
+  if (!strip || strip.hidden) return;
+  for (const button of strip.querySelectorAll('[data-rig]')) {
+    const live = liveDevices(button.dataset.rig);
+    const camera = live.camera || {};
+    const any = Object.values(live).some((device) => device && device.connected);
+    const dot = button.querySelector('.dot');
+    dot.className = `dot${camera.connected ? ' on' : (any ? ' part' : '')}`;
+    const on = Object.entries(live).filter(([, device]) => device && device.connected)
+      .map(([kind]) => CARD_LABELS[kind] || kind);
+    button.title = (on.length ? `connected: ${on.join(', ')}` : 'nothing connected')
+      + (button.classList.contains('master') ? ' · master' : '');
+  }
+}
+
+/* ------------------------------------- every telescope from N.I.N.A. at once */
+
+const setupState = { plan: null };
+
+async function openNinaSetup() {
+  const dialog = $('ninaSetupDialog');
+  $('ninaSetupRows').innerHTML = '';
+  $('ninaSetupNotes').innerHTML = '';
+  $('ninaSetupSummary').textContent = '';
+  $('btnNinaSetupApply').disabled = true;
+  $('ninaSetupNote').textContent = 'Reading the N.I.N.A. profiles on this PC…';
+  if (!dialog.open) dialog.showModal();
+  let plan;
+  try {
+    plan = await api('/api/nina/setup');
+  } catch (error) {
+    $('ninaSetupNote').textContent = error.message;
+    return;
+  }
+  setupState.plan = plan;
+  if (!plan.found) {
+    $('ninaSetupNote').textContent = `No N.I.N.A. profile with a camera in it was found in ${plan.folder}. `
+      + 'N.I.N.A. has to have been run on this PC with its equipment connected at least once.';
+    return;
+  }
+  $('ninaSetupNote').textContent = `${plan.telescopes.length} profile${plan.telescopes.length === 1 ? '' : 's'} `
+    + 'with a camera. Tick the ones that are telescopes on this mount, name them, and '
+    + 'choose the master. Each becomes one telescope here; the ones already here are '
+    + 'reused in order and renamed.';
+  renderNinaSetup(plan);
+}
+
+function renderNinaSetup(plan) {
+  const host = $('ninaSetupRows');
+  host.innerHTML = '';
+  const focusers = plan.zwoFocusers || [];
+  plan.telescopes.forEach((entry, index) => {
+    const row = document.createElement('div');
+    row.className = 'setup-row';
+    row.dataset.index = String(index);
+    row.innerHTML = '<div class="setup-head">'
+      + '<label class="inline"><input type="checkbox" data-include checked> <b class="profile-name"></b></label>'
+      + '<span class="when"></span><span class="spacer"></span><span class="when reuse"></span></div>'
+      + '<div class="setup-grid">'
+      + '<label>Telescope name<input type="text" data-name spellcheck="false"></label>'
+      + '<label class="inline"><input type="radio" name="ninaMaster" data-master> master — carries the mount and the guider</label>'
+      + '<div class="setup-devices"></div>'
+      + '<div class="setup-summary"></div>'
+      + '</div>';
+    row.querySelector('.profile-name').textContent = entry.profile.name;
+    row.querySelector('.when').textContent = `last used ${entry.profile.lastUsedText || '?'}`;
+    row.querySelector('.reuse').textContent = entry.rigName
+      ? `becomes ${entry.rigName}` : 'added as a new telescope';
+    row.querySelector('[data-name]').value = entry.name;
+    row.querySelector('[data-master]').checked = !!entry.master;
+    row.querySelector('.setup-summary').textContent = entry.summary || '';
+    const include = row.querySelector('[data-include]');
+    include.addEventListener('change', () => {
+      row.classList.toggle('off', !include.checked);
+      summariseSetup();
+    });
+
+    const devices = row.querySelector('.setup-devices');
+    const order = ['camera', 'focuser', 'filterwheel', 'rotator', 'flatpanel', 'mount',
+      'guider', 'safetymonitor', 'dome', 'switch'];
+    for (const kind of order) {
+      const spec = (entry.devices || {})[kind];
+      if (!spec && kind !== 'camera' && kind !== 'focuser') continue;
+      const line = document.createElement('div');
+      line.className = `setup-dev ${spec ? spec.status || '' : 'none'}`;
+      line.dataset.kind = kind;
+      line.innerHTML = '<span class="kind"></span><span class="what"></span>';
+      line.querySelector('.kind').textContent = CARD_LABELS[kind] || kind;
+      const what = line.querySelector('.what');
+      if (kind === 'focuser') {
+        // The one slot a profile cannot settle on its own: three profiles
+        // name one ASCOM driver. So it is a choice, with the plan's best
+        // guess selected and every EAF that can be seen on the list.
+        const select = document.createElement('select');
+        select.dataset.focuser = '';
+        select.appendChild(new Option('— choose later —', ''));
+        for (const focuser of focusers) {
+          select.appendChild(new Option(focuser.name, `zwo|${focuser.id}|${focuser.name}`));
+        }
+        if (spec && spec.backend !== 'zwo') {
+          select.appendChild(new Option(`${spec.name} (${spec.driverId})`,
+            `${spec.backend}|${spec.driverId}|${spec.name}`));
+        }
+        if (spec) {
+          const value = `${spec.backend}|${spec.driverId}|${spec.name}`;
+          if (![...select.options].some((o) => o.value === value)) {
+            select.appendChild(new Option(spec.name, value));
+          }
+          select.value = value;
+        }
+        what.appendChild(select);
+        const note = document.createElement('span');
+        note.className = 'note';
+        note.textContent = spec ? spec.note : 'no focuser in this profile';
+        what.appendChild(note);
+      } else if (spec) {
+        what.appendChild(nameWithAlias(spec.name || spec.driverId));
+        const note = document.createElement('span');
+        note.className = 'note';
+        note.textContent = spec.note || '';
+        what.appendChild(note);
+      } else {
+        what.textContent = 'none in this profile';
+      }
+      devices.appendChild(line);
+    }
+    host.appendChild(row);
+  });
+  const notes = $('ninaSetupNotes');
+  notes.innerHTML = '';
+  for (const text of plan.notes || []) {
+    const item = document.createElement('li');
+    item.textContent = text;
+    notes.appendChild(item);
+  }
+  host.querySelectorAll('[data-master]').forEach((radio) =>
+    radio.addEventListener('change', summariseSetup));
+  summariseSetup();
+}
+
+function readNinaSetup() {
+  const plan = setupState.plan;
+  if (!plan) return [];
+  return [...$('ninaSetupRows').querySelectorAll('.setup-row')].map((row) => {
+    const entry = plan.telescopes[Number(row.dataset.index)];
+    const devices = {};
+    for (const [kind, spec] of Object.entries(entry.devices || {})) {
+      if (kind === 'focuser') continue;
+      devices[kind] = { backend: spec.backend, driverId: spec.driverId, name: spec.name };
+    }
+    const focuser = row.querySelector('[data-focuser]');
+    if (focuser && focuser.value) {
+      const [backend, driverId, name] = focuser.value.split('|');
+      devices.focuser = { backend, driverId, name };
+    }
+    return {
+      profile: entry.profile.id,
+      name: row.querySelector('[data-name]').value.trim() || entry.name,
+      master: row.querySelector('[data-master]').checked,
+      include: row.querySelector('[data-include]').checked,
+      rig: entry.rig || null,
+      devices,
+    };
+  });
+}
+
+function summariseSetup() {
+  const rows = readNinaSetup();
+  const chosen = rows.filter((row) => row.include);
+  const master = chosen.find((row) => row.master);
+  const button = $('btnNinaSetupApply');
+  if (!chosen.length) {
+    $('ninaSetupSummary').textContent = 'nothing ticked';
+    button.disabled = true;
+    return;
+  }
+  $('ninaSetupSummary').textContent = `${chosen.length} telescope${chosen.length === 1 ? '' : 's'}`
+    + (master ? `, ${master.name} as master` : ' — tick a master')
+    + (chosen.some((row) => !row.devices.focuser) ? ' · a focuser is left to choose later' : '');
+  button.disabled = !master;
+  button.textContent = `Set up ${chosen.length} telescope${chosen.length === 1 ? '' : 's'}`;
+}
+
+async function applyNinaSetup() {
+  const rows = readNinaSetup();
+  if (!rows.some((row) => row.include && row.master)) {
+    toast('Tick one telescope as the master', 'error');
+    return;
+  }
+  const button = $('btnNinaSetupApply');
+  button.disabled = true;
+  try {
+    const result = await api('/api/nina/setup', 'POST', {
+      telescopes: rows.filter((row) => row.include),
+      devices: $('ninaSetupDevices').checked,
+    });
+    $('ninaSetupDialog').close();
+    state.rig = result.master || null;
+    state.filterNames = null;
+    await afterEquipmentChange(result.equipment);
+    const names = (result.telescopes || []).map((t) => t.name + (t.master ? ' (master)' : ''));
+    toast(`Set up ${names.join(', ')} from N.I.N.A. — now press Connect everything`,
+      'success', 9000);
+  } catch (error) {
+    toast(error.message, 'error');
+    button.disabled = false;
+  }
+}
+
+/* ------------------------------------------------- which focuser is which */
+
+const identifyState = { timer: null, lastLog: '' };
+
+function openIdentify() {
+  const dialog = $('identifyDialog');
+  const sequencer = (state.settings && state.settings.sequencer) || {};
+  $('idSteps').placeholder = `${4 * (Number(sequencer.focusStepSize) || 100)} (4 × the focus step)`;
+  $('idExposure').placeholder = `${Number(sequencer.focusExposure) || 6} (the autofocus exposure)`;
+  $('identifyFootnote').textContent = '';
+  if (!dialog.open) dialog.showModal();
+  pollIdentify();
+  if (!identifyState.timer) {
+    identifyState.timer = setInterval(pollIdentify, 1000);
+  }
+  dialog.addEventListener('close', () => {
+    clearInterval(identifyState.timer);
+    identifyState.timer = null;
+  }, { once: true });
+}
+
+async function pollIdentify() {
+  let status;
+  try { status = await api('/api/equipment/identify'); } catch { return; }
+  renderIdentify(status);
+}
+
+function renderIdentify(status) {
+  $('btnIdentifyStart').hidden = !!status.running;
+  $('btnIdentifyAbort').hidden = !status.running;
+  $('idSteps').disabled = !!status.running;
+  $('idExposure').disabled = !!status.running;
+  const total = Number(status.total) || 0;
+  $('identifyBar').style.width = total ? `${Math.round(100 * (status.done || 0) / total)}%` : '0%';
+  $('identifyProgress').textContent = status.running
+    ? `${status.message || 'working'}…` : (status.message || '');
+  const log = (status.log || []).join('\n');
+  if (log !== identifyState.lastLog) {
+    identifyState.lastLog = log;
+    const node = $('identifyLog');
+    node.textContent = log;
+    node.scrollTop = node.scrollHeight;
+  }
+
+  const host = $('identifyResult');
+  const result = status.result;
+  host.hidden = !result;
+  $('btnIdentifyApply').hidden = !(result && (result.moves || []).length && !result.applied);
+  if (!result) return;
+  host.innerHTML = '';
+  for (const row of result.rows || []) {
+    const line = document.createElement('div');
+    const kind = row.camera === null ? 'none' : (row.ownCamera ? 'ok' : 'cross');
+    line.className = `identify-row ${kind}`;
+    line.innerHTML = '<span class="mark"></span><span><span class="text"></span><span class="detail"></span></span>';
+    line.querySelector('.mark').textContent = kind === 'ok' ? '✓' : (kind === 'cross' ? '⇄' : '✗');
+    let text;
+    if (kind === 'ok') text = `${row.name}'s focuser (${row.focuser}) is on its own camera.`;
+    else if (kind === 'cross') text = `The focuser in ${row.name}'s slot (${row.focuser}) actually focuses ${row.cameraName}'s camera.`;
+    else text = `${row.name}'s focuser (${row.focuser}) changed nobody's stars.`;
+    line.querySelector('.text').textContent = text;
+    const responses = Object.entries(row.responses || {})
+      .map(([rig, pct]) => `${((result.cameras || []).find((c) => c.rig === rig) || {}).name || rig} ${pct}%`)
+      .join(' · ');
+    line.querySelector('.detail').textContent = (row.camera !== null
+      ? `${row.changePercent}% change by ${row.metric === 'hfr' ? 'star size' : 'sharpness'}`
+        + (row.clear ? '' : ` — ${row.why}`)
+      : row.why) + (responses ? ` · responses: ${responses}` : '');
+    host.appendChild(line);
+  }
+  if (result.conflict) {
+    $('identifyFootnote').textContent = result.conflict;
+  } else if (result.applied) {
+    $('identifyFootnote').textContent = 'The focusers have been moved to the telescopes whose cameras they focus.';
+  } else if (result.allMatched) {
+    $('identifyFootnote').textContent = 'Every focuser is on its own telescope. Nothing to change.';
+  } else if ((result.moves || []).length) {
+    $('identifyFootnote').textContent = 'Press the button to make each telescope remember the focuser that moves its own stars, and reconnect them.';
+  } else {
+    $('identifyFootnote').textContent = 'No focuser could be placed. Try on a star field, with a longer exposure or a bigger move.';
+  }
+}
+
+function bindIdentify() {
+  $('btnIdentifyStart').addEventListener('click', async () => {
+    const body = {};
+    if ($('idSteps').value.trim()) body.steps = Number($('idSteps').value);
+    if ($('idExposure').value.trim()) body.exposure = Number($('idExposure').value);
+    try {
+      await api('/api/equipment/identify', 'POST', body);
+      identifyState.lastLog = '';
+      $('identifyResult').hidden = true;
+      $('identifyFootnote').textContent = '';
+      await pollIdentify();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  $('btnIdentifyAbort').addEventListener('click', () =>
+    api('/api/equipment/identify/abort', 'POST').catch((error) => toast(error.message, 'error')));
+  $('btnIdentifyApply').addEventListener('click', async () => {
+    const button = $('btnIdentifyApply');
+    button.disabled = true;
+    try {
+      const result = await api('/api/equipment/identify/apply', 'POST');
+      toast(result.changed && result.changed.length
+        ? `Moved ${result.changed.length} focuser(s) to the right telescopes`
+        + ((result.failed || []).length ? ` — ${result.failed.length} failed to reconnect, see the log` : '')
+        : (result.note || 'Nothing to change'),
+      (result.failed || []).length ? 'warn' : 'success', 7000);
+      await afterEquipmentChange(result.equipment);
+      await pollIdentify();
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 /* ------------------------------------------------- coming over from NINA */
@@ -1081,11 +1780,16 @@ function updateSequenceBanner(status) {
 }
 
 function updateCamera(camera, capture) {
-  const connected = !!camera.connected;
-  $('btnCapture').disabled = !connected || capture.busy;
+  // On a multi-telescope rig the buttons drive every camera, so they are
+  // live when any camera is, and Abort when any one is exposing.
+  const multi = multiTelescope();
+  const connected = multi ? anyCameraConnected() : !!camera.connected;
+  const every = multi ? anyCapture() : capture;
+  $('btnCapture').disabled = !connected || every.busy;
   $('btnLoop').disabled = !connected;
-  $('btnAbort').disabled = !capture.busy;
-  $('btnLoop').classList.toggle('active', !!capture.loop);
+  $('btnAbort').disabled = !every.busy;
+  $('btnLoop').classList.toggle('active', !!every.loop);
+  $('btnCapture').title = multi ? 'Takes a frame on every telescope at once' : '';
 
   // Timed by the server from when the exposure was commanded. The camera's own
   // `elapsed` comes from ASCOM's optional PercentCompleted, which plenty of
@@ -1864,6 +2568,8 @@ function applyStatus(status) {
 
   updatePills(devices);
   updateConnectButtons(devices);
+  updateRigOverview();
+  updateRigSwitch();
   updateCamera(devices.camera || {}, capture);
   updateFilterWheel(devices.filterwheel || {});
   updateFocuser(devices.focuser || {});
@@ -4320,8 +5026,8 @@ function bindTelescopes() {
       // takes its time waking up.
       const result = await send('/api/equipment/connect', 'POST');
       if (!result.connected && !result.failed) {
-        toast('Nothing is remembered yet — connect each device once and it '
-          + 'will come back on its own', 'info', 6000);
+        toast('Nothing is remembered yet — set up from N.I.N.A., or connect '
+          + 'each device once and it will come back on its own', 'info', 6000);
       } else {
         toast(`Connected ${result.connected} device(s)`
           + (result.failed ? `, ${result.failed} failed — see the log` : ''),
@@ -4330,9 +5036,14 @@ function bindTelescopes() {
       await loadEquipment();
     } finally {
       button.disabled = false;
-      button.textContent = 'Connect all';
+      button.textContent = 'Connect everything';
     }
   });
+
+  $('btnNinaSetup').addEventListener('click', openNinaSetup);
+  $('btnNinaSetupApply').addEventListener('click', applyNinaSetup);
+  $('btnIdentify').addEventListener('click', openIdentify);
+  bindIdentify();
 
   $('btnProfileSave').addEventListener('click', async () => {
     const active = (state.equipment && state.equipment.activeProfile) || {};
@@ -4420,15 +5131,25 @@ function bindControls() {
     if (ok) send('/api/sequence/stop', 'POST');
   });
 
-  // Camera
-  $('btnCapture').addEventListener('click', () => send(rigQuery('/api/camera/expose'), 'POST', captureBody(false)));
+  // Camera. With more than one telescope on the mount, Capture, Loop and
+  // Abort act on every camera at once: a press means "show me what each
+  // scope sees", and the thumbnail strip underneath shows each answer.
+  const cameraPath = (path) => rigQuery(multiTelescope() ? `${path}?all=true` : path);
+  const reportSkipped = (result) => {
+    const skipped = (result && result.skipped) || [];
+    if (skipped.length) {
+      toast(skipped.map((s) => `${s.name}: ${s.reason}`).join(' · '), 'warn');
+    }
+    return result;
+  };
+  $('btnCapture').addEventListener('click', () =>
+    send(cameraPath('/api/camera/expose'), 'POST', captureBody(false)).then(reportSkipped));
   $('btnLoop').addEventListener('click', () => {
-    const rig = currentRig();
-    const capture = (rig && rig.capture) || (state.status && state.status.capture);
-    if (capture && capture.busy) send(rigQuery('/api/camera/loop'), 'POST', { on: !capture.loop });
-    else send(rigQuery('/api/camera/expose'), 'POST', captureBody(true));
+    const capture = anyCapture();
+    if (capture.busy) send(cameraPath('/api/camera/loop'), 'POST', { on: !capture.loop });
+    else send(cameraPath('/api/camera/expose'), 'POST', captureBody(true)).then(reportSkipped);
   });
-  $('btnAbort').addEventListener('click', () => send(rigQuery('/api/camera/abort'), 'POST'));
+  $('btnAbort').addEventListener('click', () => send(cameraPath('/api/camera/abort'), 'POST'));
   $('gain').addEventListener('input', (e) => setText('gainValue', e.target.value));
   $('offset').addEventListener('input', (e) => setText('offsetValue', e.target.value));
   $('gain').addEventListener('change', () => send(rigQuery('/api/camera/settings'), 'POST',
@@ -4812,6 +5533,8 @@ window.astro = {
   toast,
   confirmAction,
   askForText,
+  /** Before a run: which filter is in each telescope that has no wheel. */
+  askInstalledFilters,
   fmtHours,
   fmtDegrees,
   showTab,
@@ -4820,6 +5543,10 @@ window.astro = {
   openEquipment,
   openSettings,
   openNinaImport,
+  openNinaSetup,
+  openIdentify,
+  /** Every telescope's live state, master first. */
+  rigList,
   /** Scope a path to the selected telescope, the way every device call does. */
   rigQuery,
   /** Re-render everything from the status already held. */
@@ -4833,6 +5560,7 @@ function init() {
   bindFocusFloatDrag();
   buildConnectRows();
   bindAsk();
+  bindFilters();
   bindControls();
   initViewer();
   applyOptionalTabs();

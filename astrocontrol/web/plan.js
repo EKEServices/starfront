@@ -3256,6 +3256,10 @@
       const count = data && data.entries ? data.entries.length : 0;
       const frames = data && data.entries
         ? data.entries.reduce((sum, e) => sum + e.frames, 0) : 0;
+      // First, what is in each telescope's light path tonight: a filter in
+      // a drawer is changed by hand and nothing can read it, so it is asked
+      // every time rather than remembered from the last run.
+      if (!(await app.askInstalledFilters())) return;
       const ok = await app.confirmAction(
         `Run the sequence now? It will slew the mount, rotate the camera, focus `
         + `and take ${frames} frames across ${count} target`
@@ -3269,6 +3273,7 @@
     $('btnSeqLoop').addEventListener('click', async () => {
       const data = sched.data;
       const count = data && data.entries ? data.entries.length : 0;
+      if (!(await app.askInstalledFilters())) return;
       const ok = await app.confirmAction(
         `Run the plan tonight and every night after, unattended? Each night `
         + `opens before dark with the mount released and homed, the cameras `

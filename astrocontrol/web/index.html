@@ -8,7 +8,7 @@
 <!-- The ?v= stamps exist to break a browser cache that has already decided an
      older copy is still fresh. Bump them if a released build ever needs to
      invalidate a client that has not revalidated. -->
-<link rel="stylesheet" href="style.css?v=62">
+<link rel="stylesheet" href="style.css?v=63">
 </head>
 <body>
 
@@ -1677,62 +1677,80 @@
   <div class="modal-body" id="equipmentBody">
 
     <section class="pref" data-pref="connection" data-pref-label="Connection">
-    <h3>Profile</h3>
+    <!-- The whole observatory first. On a rig of three identical telescopes
+         the question somebody opens this dialog with is "what is connected,
+         and to which scope" — answered here for every telescope at once,
+         before anything is asked of them. The one button a night starts with
+         sits right under it. -->
+    <h3>Telescopes <span class="small muted" id="obsSummary"></span></h3>
+    <div id="rigOverview" class="rig-overview"></div>
+    <p class="small obs-hint" id="obsHint"></p>
+    <div class="row gap">
+      <button class="btn primary" id="btnConnectAll">Connect everything</button>
+      <button class="btn small" id="btnIdentify" hidden
+              title="Move each focuser and watch which camera's stars change">Which focuser is which?…</button>
+      <span class="spacer"></span>
+      <button class="btn ghost small danger" id="btnDisconnectAll">Disconnect everything</button>
+    </div>
+    <p class="small muted" id="rigNote">
+      ★ marks the <b>master</b>: it carries the mount and the guider and decides
+      where everything points. Every other telescope is bolted to the same
+      mount, focuses and exposes in step with the master, and never exposes
+      while the master is dithering. Click a telescope to set it up below.
+    </p>
+
+    <h3>Set up <span class="tag" id="rigSetupName">—</span></h3>
+    <div id="connectList" class="connect-list"></div>
+    <div class="row gap">
+      <button class="btn small" id="btnRigConnect">Connect this telescope</button>
+      <button class="btn ghost small" id="btnScanAlpaca">Scan Alpaca</button>
+      <button class="btn ghost small" id="btnRefreshDrivers">Refresh drivers</button>
+      <span class="spacer"></span>
+      <button class="btn ghost small" id="btnRigRename">Rename</button>
+      <button class="btn ghost small" id="btnRigMaster">Make master</button>
+      <button class="btn ghost small danger" id="btnRigRemove">Remove</button>
+    </div>
+    <p class="small muted">
+      Each slot remembers the driver it last connected to, so from the second
+      night on <b>Connect everything</b> is the whole job. <b>ZWO direct</b>
+      lists every camera and EAF by the name written into it — <span
+      class="mono">RASA-L</span>, <span class="mono">RASA-R</span> — and its
+      serial number, which is how three identical bodies are told apart. Set a
+      row to <b>— none —</b> and press Connect to leave that slot empty, so a
+      telescope with no rotator does not report one missing every night. The ⚙
+      pins a driver's own settings for this telescope.
+    </p>
+    <p class="small muted" id="backendNote">
+      ASCOM drivers appear automatically. Alpaca devices need a scan. PHD2 must be
+      running with its server enabled (Tools → Enable Server).
+    </p>
+
+    <h3>Start from N.I.N.A.</h3>
+    <div class="row gap">
+      <button class="btn small primary" id="btnNinaSetup">Set up every telescope from N.I.N.A.…</button>
+      <button class="btn small ghost" id="btnNinaImport">Import one profile onto this telescope…</button>
+    </div>
+    <p class="small muted">
+      One N.I.N.A. profile per telescope already says which camera is on which
+      scope, which one has the mount, and every setting around them — focal
+      length, pixel size, gain, filters, focus, dither, ASTAP. The first button
+      reads all of them, makes a telescope for each, picks the master and
+      matches the cameras and focusers by name. Everything is shown before it
+      is written.
+    </p>
+
+    <h3>Profiles</h3>
     <div class="row gap">
       <select id="profileSelect" class="grow"></select>
       <button class="btn small" id="btnProfileLoad">Load</button>
       <button class="btn small" id="btnProfileSave">Save as…</button>
       <button class="btn small ghost danger" id="btnProfileDelete">Delete</button>
+      <button class="btn ghost small" id="btnRigAdd" title="Another telescope on the same mount">Add telescope</button>
     </div>
     <p class="small muted">
       A profile remembers every telescope here, which driver each of its slots
       connects to, and the settings around them — so a rig that comes apart in
       the spring goes back together in one click.
-    </p>
-    <div class="row gap">
-      <button class="btn small" id="btnNinaImport">Import from N.I.N.A.…</button>
-      <span class="small muted">Your focal length, pixel size, filters and
-        their offsets, focus and dither settings, ASTAP, and which driver is
-        which — read from the N.I.N.A. profile you last used, shown before
-        anything is written.</span>
-    </div>
-
-    <h3>Telescopes</h3>
-    <div id="rigTabs" class="rig-tabs"></div>
-    <div class="row gap">
-      <button class="btn ghost small" id="btnRigAdd">Add telescope</button>
-      <button class="btn ghost small" id="btnRigRename">Rename</button>
-      <button class="btn ghost small" id="btnRigMaster">Make master</button>
-      <span class="spacer"></span>
-      <button class="btn ghost small danger" id="btnRigRemove">Remove</button>
-    </div>
-    <p class="small muted" id="rigNote">
-      The master carries the mount and the guider and decides where everything
-      points. Every other telescope is bolted to the same mount: it focuses and
-      exposes in step with the master, and never exposes while the master is
-      dithering.
-    </p>
-
-    <div id="connectList" class="connect-list"></div>
-
-    <div class="row gap">
-      <button class="btn primary small" id="btnConnectAll">Connect all</button>
-      <button class="btn small" id="btnRigConnect">This telescope</button>
-      <button class="btn ghost small" id="btnScanAlpaca">Scan Alpaca</button>
-      <button class="btn ghost small" id="btnRefreshDrivers">Refresh drivers</button>
-      <span class="spacer"></span>
-      <button class="btn ghost small danger" id="btnDisconnectAll">Disconnect all</button>
-    </div>
-    <p class="small muted">
-      <b>Connect all</b> brings up every telescope's remembered drivers — each
-      device is remembered the first time you connect it by hand. Set a row to
-      <b>— none —</b> and press Connect to leave that slot empty, so a telescope
-      with no rotator does not report one missing every night.
-    </p>
-
-    <p class="small muted" id="backendNote">
-      ASCOM drivers appear automatically. Alpaca devices need a scan. PHD2 must be
-      running with its server enabled (Tools → Enable Server).
     </p>
     </section>
 
@@ -2922,6 +2940,81 @@
   </div>
 </dialog>
 
+<!-- ------------------------------- every telescope from N.I.N.A., at once -->
+<!-- One N.I.N.A. profile per telescope is the one place on a triple rig that
+     already records which camera is on which scope. Shown as a plan: a row
+     per profile, the master chosen, every slot resolved as far as it can be,
+     every guess marked as one. -->
+<dialog id="ninaSetupDialog" class="modal wide">
+  <form method="dialog" class="modal-head">
+    <h2>Set up from N.I.N.A.</h2>
+    <span class="spacer"></span>
+    <button class="btn small ghost" value="close">Close</button>
+  </form>
+  <div class="modal-body">
+    <p class="small muted" id="ninaSetupNote">Reading the profiles…</p>
+    <div id="ninaSetupRows" class="setup-rows"></div>
+    <ul class="small muted setup-notes" id="ninaSetupNotes"></ul>
+    <label class="inline"><input type="checkbox" id="ninaSetupDevices" checked>
+      Remember the drivers too (nothing is connected now)</label>
+    <p class="small muted">
+      Each telescope gets its own profile's optics, camera and focus settings;
+      the site, the solver, the guiding and the folders come from the master's.
+      Everything is disconnected first. Afterwards press
+      <b>Connect everything</b>, then <b>Which focuser is which?</b> if any
+      focuser above is marked as a guess.
+    </p>
+    <div class="row gap" style="margin-top: 10px">
+      <span class="small muted" id="ninaSetupSummary"></span>
+      <span class="spacer"></span>
+      <button class="btn small primary" id="btnNinaSetupApply" disabled>Set up</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ---------------------------------------------- which focuser is which -->
+<!-- Found out, not looked up: each focuser is moved out and back and every
+     camera is measured at each stop. On a remote telescope this is the only
+     way to settle it. -->
+<dialog id="identifyDialog" class="modal">
+  <form method="dialog" class="modal-head">
+    <h2>Which focuser is which?</h2>
+    <span class="spacer"></span>
+    <button class="btn small ghost" value="close">Close</button>
+  </form>
+  <div class="modal-body">
+    <p class="small muted">
+      Three identical focusers cannot be told apart from a driver list, but a
+      focuser can only change the stars of the camera it is bolted to. Each
+      focuser is moved out and back a few focus steps while every camera takes
+      a frame at each stop; the camera whose star size moved is on the same
+      telescope. Point the rig at some stars first — a daytime horizon works,
+      but not nearly as well — and connect every camera and focuser.
+    </p>
+    <div class="grid-2">
+      <label>Move each focuser by (steps)
+        <input type="number" id="idSteps" step="1" min="1" max="100000" placeholder="4 × the focus step size">
+      </label>
+      <label>Exposure (s)
+        <input type="number" id="idExposure" step="0.5" min="0.1" max="120" placeholder="the autofocus exposure">
+      </label>
+    </div>
+    <div class="row gap">
+      <button class="btn primary small" id="btnIdentifyStart">Start</button>
+      <button class="btn small danger" id="btnIdentifyAbort" hidden>Stop</button>
+      <span class="small muted" id="identifyProgress"></span>
+    </div>
+    <div class="progress"><div class="progress-fill" id="identifyBar"></div></div>
+    <div id="identifyLog" class="identify-log mono small"></div>
+    <div id="identifyResult" class="identify-result" hidden></div>
+    <div class="row gap" style="margin-top: 10px">
+      <span class="small muted" id="identifyFootnote"></span>
+      <span class="spacer"></span>
+      <button class="btn primary small" id="btnIdentifyApply" hidden>Move the focusers to the right telescopes</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- ---------------------------------------------- first light walk-through -->
 <dialog id="wizardDialog" class="modal wizard">
   <form method="dialog" class="modal-head">
@@ -2964,9 +3057,34 @@
   </div>
 </dialog>
 
+<!-- Asked before every run on a rig whose telescopes carry their filter in a
+     drawer rather than a wheel: a drawer is changed by hand in the afternoon
+     and nothing can detect it, so the night's frames would otherwise be
+     labelled with whatever was said last week. -->
+<dialog id="filtersDialog" class="modal ask filters">
+  <form method="dialog" class="modal-head">
+    <h2>Which filter is in each telescope?</h2>
+  </form>
+  <div class="modal-body">
+    <p class="small muted">
+      These telescopes have no filter wheel, so nothing can read what is in
+      the light path. Say which filter is fitted in each one tonight: it goes
+      into the <span class="mono">FILTER</span> header of every light and flat
+      they take, so the frames land in the right stack.
+    </p>
+    <div id="filtersRows" class="filters-rows"></div>
+    <datalist id="filtersOptions"></datalist>
+    <div class="row gap">
+      <span class="spacer"></span>
+      <button class="btn small" id="filtersCancel">Cancel</button>
+      <button class="btn primary small" id="filtersConfirm">That is what is fitted</button>
+    </div>
+  </div>
+</dialog>
+
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=63"></script>
+<script src="app.js?v=64"></script>
 <script src="sky.js?v=62"></script>
 <script src="planner.js?v=62"></script>
 <script src="plan.js?v=62"></script>
@@ -2974,6 +3092,6 @@
 <script src="calibrate.js?v=62"></script>
 <script src="collab.js?v=62"></script>
 <script src="allsky.js?v=62"></script>
-<script src="wizard.js?v=62"></script>
+<script src="wizard.js?v=63"></script>
 </body>
 </html>
