@@ -225,9 +225,12 @@
         ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#eef2fa';
         ctx.font = '600 11px system-ui, sans-serif';
-        ctx.textAlign = p.x > w - 90 ? 'right' : 'left';
+        // The label sits to the right of the mark unless it would run off
+        // the chart there, in which case it sits to the left.
         var label = t.name + (t.target ? ' · ' + t.target : '');
-        ctx.fillText(label, p.x + (p.x > w - 90 ? -9 : 9), p.y + 4);
+        var flip = p.x + 9 + ctx.measureText(label).width > w - 4;
+        ctx.textAlign = flip ? 'right' : 'left';
+        ctx.fillText(label, p.x + (flip ? -9 : 9), p.y + 4);
         ctx.globalAlpha = 1;
       });
       ctx.textAlign = 'left';
