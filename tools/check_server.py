@@ -1399,6 +1399,39 @@ case("everybody can see who is on the sky",
      and abs(me["ra"] - 5.5883) < 1e-6 and me["target"] == "M42" and me["state"] == "imaging",
      str(me))
 case("...and how many telescopes are online", who.get("online", 0) >= 2, str(who.get("online")))
+
+# ------------------------------------------------- the sky, for a web page
+# Open to anyone, with nothing in it but what a telescope said about
+# itself: a page on the observatory's website shows where everybody points.
+status, _ = call("POST", "/api/v1/agent/hello", {
+    "protocol": collab.PROTOCOL, "profile": PROFILE,
+    "presence": {"ra": 5.6, "dec": -5.4, "state": "imaging", "target": "M42"}},
+    token=AGENT_TOKEN)
+request = urllib.request.Request(f"{BASE}/api/v1/sky?hours=14")
+with urllib.request.urlopen(request, timeout=10) as response:
+    sky = json.loads(response.read())
+    cors = response.headers.get("Access-Control-Allow-Origin")
+mine = next((t for t in sky["telescopes"] if t["name"] in (PROFILE.get("name"), "agent", "rig")
+             or abs(t["ra"] - 5.6) < 1e-6), None)
+case("the sky is public, and answers with permissive CORS",
+     cors == "*" and mine is not None and mine["online"] is True, str(mine))
+case("...and carries no ids, owners or pictures",
+     mine is not None and not any(k in mine for k in ("id", "owner", "ownerName", "avatar", "project")),
+     str(sorted(mine.keys())) if mine else "")
+case("...and the track holds every pointing the telescope has sent tonight",
+     mine is not None and len(mine["trail"]) >= 2
+     and abs(mine["trail"][-1][1] - 5.6) < 1e-6 and abs(mine["trail"][-2][1] - 5.5883) < 1e-3,
+     str((mine or {}).get("trail")))
+for name, kind in (("widget.js", "javascript"), ("stars.json", "json"), ("index.html", "html")):
+    with urllib.request.urlopen(f"{BASE}/sky/{name}", timeout=10) as response:
+        body, served = response.read(), response.headers.get("Content-Type", "")
+    if kind not in served or len(body) < 100:
+        break
+else:
+    body = b"ok"
+case("the widget, the stars and the page are served", body != b"" and kind == "html", served)
+status, _ = call("GET", "/sky/..%2Fcollab.sqlite")
+case("...and nothing else from that folder", status == 404)
 # The owner's Discord picture and name travel with the telescope, for the
 # chart. An agent enrolled by the owner's token has no signed-in person
 # behind it, so its picture is blank rather than a broken link.

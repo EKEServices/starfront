@@ -1378,6 +1378,87 @@ def nina_download(name: str):
 
 
 # ---------------------------------------------------------------------------
+# The sky: where everybody is pointing, for anybody's web page
+# ---------------------------------------------------------------------------
+#
+# A public picture of the night: each telescope that shares its position,
+# where it points now, what it is on, and the track it has drawn across the
+# sky since dusk. Meant for a page on the observatory's own website, so it
+# is served with permissive CORS and no sign-in, and it carries nothing but
+# what the telescope chose to say - its name, its target, its pointing. No
+# ids, no owners, no pictures of people. A rig that has position sharing off
+# never sends a pointing and never appears.
+
+SKY_DIR = Path(__file__).resolve().parent / "sky"
+#: How far back a telescope's track is drawn by default: a whole night.
+TRAIL_HOURS = 14.0
+#: The files the widget is made of, and nothing else from that folder.
+_SKY_FILES = {"widget.js": "application/javascript; charset=utf-8",
+              "stars.json": "application/json",
+              "index.html": "text/html; charset=utf-8",
+              "starfront-sky.liquid": "text/plain; charset=utf-8"}
+_SKY_HEADERS = {"Access-Control-Allow-Origin": "*"}
+
+
+@app.get("/api/v1/sky")
+def sky(hours: float = Query(default=TRAIL_HOURS, ge=0.0, le=48.0)) -> JSONResponse:
+    """Every telescope on the sky tonight, with its track. Open to anyone."""
+    now = time.time()
+    trails = store.presence_trails(now - hours * 3600.0) if hours > 0 else {}
+    rows: list[dict[str, Any]] = []
+    for entry in store.agents():
+        age = now - float(entry.get("seen") or 0.0)
+        if age > 24 * 3600:
+            continue
+        said = entry.get("presence") or {}
+        ra = _number_or_none(said.get("ra"))
+        dec = _number_or_none(said.get("dec"))
+        if ra is None or dec is None:
+            continue
+        called = str(said.get("telescope") or "").strip()[:60]
+        rows.append({
+            "name": called or str(entry.get("name") or "")[:60],
+            "state": str(said.get("state") or "")[:40],
+            "target": str(said.get("target") or "")[:80],
+            "ra": round(ra, 4), "dec": round(dec, 4),
+            "online": age <= ONLINE_SECONDS,
+            "ageSeconds": round(age),
+            "trail": [[round(float(row["at"])), round(float(row["ra"]), 4),
+                       round(float(row["dec"]), 4), str(row.get("target") or "")[:80]]
+                      for row in trails.get(entry["id"], [])],
+        })
+    rows.sort(key=lambda row: (not row["online"], row["name"].lower()))
+    online = [row for row in rows if row["online"]]
+    return JSONResponse(
+        {"telescopes": rows, "online": len(online),
+         "imaging": sum(1 for row in online if row["state"] == "imaging"),
+         "serverTime": round(now), "trailHours": hours,
+         "onlineSeconds": ONLINE_SECONDS},
+        headers={**_SKY_HEADERS, "Cache-Control": "public, max-age=30"})
+
+
+@app.get("/sky")
+def sky_page():
+    """The chart on its own, for a look or for an iframe."""
+    return sky_file("index.html")
+
+
+@app.get("/sky/{name}")
+def sky_file(name: str):
+    """The widget's own files: the script, the stars, the page."""
+    media = _SKY_FILES.get(name)
+    path = SKY_DIR / name
+    if media is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="no such file")
+    return FileResponse(path, media_type=media, headers={
+        **_SKY_HEADERS,
+        # The stars never change; the script changes with a deploy, which
+        # is rare, and a visitor an hour behind is no loss.
+        "Cache-Control": "public, max-age=" + ("86400" if name == "stars.json" else "3600"),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Everything else
 # ---------------------------------------------------------------------------
 

@@ -85,7 +85,22 @@ CREATE TABLE IF NOT EXISTS logins (
     user        TEXT NOT NULL DEFAULT '',
     claimed     INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS presence_log (
+    agent       TEXT NOT NULL,
+    at          REAL NOT NULL,
+    ra          REAL NOT NULL,
+    dec         REAL NOT NULL,
+    state       TEXT NOT NULL DEFAULT '',
+    target      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS presence_log_by_time ON presence_log (at);
 """
+
+#: How long a telescope's track across the sky is kept. Two nights: a chart
+#: of "where everybody pointed tonight" wants last night too when it is
+#: looked at in the morning, and nothing older is anybody's business.
+PRESENCE_LOG_SECONDS = 48 * 3600
 
 #: Run after the schema, on a database that may predate the `panel` column.
 #: One report per agent per night per filter per *panel* per task. A sequence
@@ -204,6 +219,40 @@ class Store:
             args.append(json.dumps(presence))
         args.append(agent_id)
         self._run(f"UPDATE agents SET {', '.join(sets)} WHERE id = ?", *args)
+        if presence is not None:
+            self._log_presence(agent_id, presence)
+
+    def _log_presence(self, agent_id: str, presence: dict[str, Any]) -> None:
+        """Keep where a telescope pointed, for its track across the night.
+
+        One row per check-in that carried a pointing; the rest of the
+        presence is not kept. Old rows go as new ones arrive, so the table
+        is two nights deep and no more.
+        """
+        try:
+            ra = float(presence.get("ra"))
+            dec = float(presence.get("dec"))
+        except (TypeError, ValueError):
+            return
+        now = time.time()
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO presence_log (agent, at, ra, dec, state, target) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (agent_id, now, ra, dec, str(presence.get("state") or "")[:40],
+                 str(presence.get("target") or "")[:80]))
+            self._db.execute("DELETE FROM presence_log WHERE at < ?",
+                             (now - PRESENCE_LOG_SECONDS,))
+            self._db.commit()
+
+    def presence_trails(self, since: float) -> dict[str, list[dict[str, Any]]]:
+        """Each telescope's pointings since a moment, oldest first."""
+        trails: dict[str, list[dict[str, Any]]] = {}
+        for row in self._all(
+                "SELECT agent, at, ra, dec, state, target FROM presence_log "
+                "WHERE at >= ? ORDER BY at", since):
+            trails.setdefault(row["agent"], []).append(row)
+        return trails
 
     def agents_on(self, project_id: str,
                   states: tuple[str, ...] = ("offered", "accepted", "complete")
