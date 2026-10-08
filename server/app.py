@@ -791,7 +791,10 @@ def join_project(project_id: str, body: JoinRequest,
                             detail="there is nothing left to hand out")
 
     goals = payload.get("goals") or {}
-    names = list(wants.filters) or list(goals) or ["L"]
+    # Only the project's filters this telescope carries: a rig with R, G and
+    # B on an H, O, R, G, B project is dealt R, G and B and nothing else, and
+    # the deal sends the H and O to the rigs that have them.
+    names = list(verdict.get("usable") or []) or list(wants.filters) or list(goals) or ["L"]
     fallback = body.exposure or _middle_exposure(wants)
     # The rig's own exposure per filter first: that is the length its darks
     # are built for, and a light with no dark of its own length is a light

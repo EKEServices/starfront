@@ -978,18 +978,28 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
         else:
             note("camera", True, "one-shot colour")
 
-    # Filters: a project asking for Ha will not take a rig without one, and a
-    # bandpass limit is not a suggestion.
+    # Filters: a rig takes part in whichever of the project's filters it
+    # carries, and is dealt frames in those alone. A project asking for H, O,
+    # R, G and B is not refusing a telescope that has only R, G and B - a
+    # broadband-only rig is most of the hours a wide-field collaboration ever
+    # gets, and three RASAs with one fixed filter each were being turned away
+    # from a project that wanted exactly what they had. What does stop a rig
+    # is carrying none of the filters wanted, and a bandpass limit is not a
+    # suggestion: a filter too wide for the project is simply not one of the
+    # usable ones.
     #
     # Matched without regard to case. "Ha", "ha" and "HA" are one filter, and
     # a coordinator who typed it in lowercase was refusing every rig on the
     # server for a difference nobody could see.
     wanted = set(wants.filters)
+    usable: list[str] = []
     if wanted and profile.colour and not profile.filters:
         # A colour camera with nothing in front of it shoots RGB, and says so
         # without anybody typing a filter name for a wheel it does not have.
         # A project that wants one lists "RGB" among its filters.
-        if any(str(name).strip().lower() in COLOUR_FILTERS for name in wanted):  # noqa: E501 - colour names are not filters
+        usable = [name for name in wants.filters
+                  if str(name).strip().lower() in COLOUR_FILTERS]
+        if usable:
             note("filters", True, "can shoot RGB")
         else:
             note("filters", False,
@@ -1004,7 +1014,7 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
              "Equipment (the wheel cannot be asked while it is off)")
     elif wanted:
         carried = {_key(name): value for name, value in profile.filters.items()}
-        usable, why = [], []
+        why = []
         for name, limit in wants.filters.items():
             key = _key(name)
             if key not in carried:
@@ -1019,9 +1029,9 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
                 continue
             usable.append(name)
         if usable:
-            note("filters", not why,
+            note("filters", True,
                  "can shoot " + ", ".join(usable)
-                 + (f" — but {'; '.join(why)}" if why else ""))
+                 + (f" ({'; '.join(why)}: left to the others)" if why else ""))
         else:
             note("filters", False, "; ".join(why) or "none of the wanted filters")
 
@@ -1065,6 +1075,9 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
         "ok": not failed,
         "certain": not failed and not unknown,
         "checks": checks,
+        # The project's filters this rig can be dealt, in the project's own
+        # spelling; every filter when the project names none.
+        "usable": usable if wanted else list(wants.filters),
         "summary": ("cannot contribute: " + "; ".join(c["detail"] for c in failed))
                    if failed
                    else ("can contribute, but some of it is unverified"

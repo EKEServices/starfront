@@ -1346,6 +1346,43 @@ case("a rig that names no exposure still gets the middle of the range",
      status == 200 and middle["task"]["filters"][0]["exposure"] == 600.0,
      str(middle.get("task", {}).get("filters")))
 
+# A rig takes part in the filters it carries. Three RASAs with one fixed
+# filter each were turned away from a project wanting H, O, R, G and B -
+# which wanted exactly what they had - and a rig that did get in was dealt
+# every filter of the project, carried or not.
+_, lrgb = call("POST", "/api/v1/projects", {
+    "name": "Five filters", "kind": "single",
+    "region": {"ra": 10.68, "dec": 41.27, "width": 3.0, "height": 2.0, "rotation": 0.0},
+    "requirements": {"filters": {"H": 5.0, "O": 5.0, "R": None, "G": None, "B": None}},
+    "goals": {"H": 10.0, "O": 10.0, "R": 10.0, "G": 10.0, "B": 10.0},
+}, token=ADMIN)
+FIVE = lrgb["project"]["id"]
+_, rasa = call("POST", "/api/v1/agents", {"name": "rasa-r"}, token=ADMIN)
+call("POST", "/api/v1/agent/hello", {
+    "protocol": collab.PROTOCOL,
+    "profile": {"name": "rasa-r", "focalLength": 620.0, "pixelSize": 3.76,
+                "sensorWidth": 9576, "sensorHeight": 6388, "binning": 1,
+                "filters": {"R": None}, "hoursPerNight": 6.0,
+                "scale": 206.265 * 3.76 / 620.0,
+                "field": [206.265 * 3.76 / 620.0 * 9576 / 3600.0,
+                          206.265 * 3.76 / 620.0 * 6388 / 3600.0]}},
+    token=rasa["token"])
+status, only_r = call("POST", f"/api/v1/agent/projects/{FIVE}/join",
+                      {"exposures": {"R": 120.0}}, token=rasa["token"])
+dealt_filters = [f["filter"] for f in (only_r.get("task") or {}).get("filters") or []]
+case("a rig with one fixed filter joins a five-filter project",
+     status == 200, str(only_r)[:120])
+case("...and is dealt that filter alone, at its own exposure",
+     dealt_filters == ["R"] and only_r["task"]["filters"][0]["exposure"] == 120.0,
+     str((only_r.get("task") or {}).get("filters")))
+_, r_night = call("GET", f"/api/v1/agent/task?night=2026-10-07&project={FIVE}",
+                  token=rasa["token"])
+r_task = next((t for t in (r_night.get("tasks") or [r_night.get("task") or {}])
+               if (t or {}).get("project") == FIVE), r_night.get("task") or {})
+r_frames = ((r_task or {}).get("visit") or {}).get("frames") or {}
+case("...and tonight's deal for it names no other filter",
+     set(r_frames) <= {"R"} and r_frames.get("R", 0) > 0, str(r_frames))
+
 # ------------------------------------------------- who is on the sky
 # Every check-in may say where the telescope points and what it is doing;
 # the group sees each other on the chart, and each project says how many
