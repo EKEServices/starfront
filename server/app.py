@@ -1124,6 +1124,16 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
             continue
         depth, mine = collab.coverage(cells, shot)
         filters = [collab.FilterTask.read(f) for f in (task.get("filters") or [])]
+        # Only what this rig can shoot. A telescope with one filter in a
+        # drawer carries exactly that filter tonight, and dealing it OIII
+        # because OIII is thinnest gets the project a night of Ha labelled
+        # as a disappointment. A rig that has said nothing about its filters
+        # is offered the lot, as before.
+        carried = {collab._key(name) for name in (profile.filters or {})}
+        if carried:
+            able = [f for f in filters if collab._key(f.filter) in carried]
+            if able:
+                filters = able
         night_goals = goals
         chosen = None
         if (task.get("kind") or "mosaic") == "mosaic" and len(filters) > 1:

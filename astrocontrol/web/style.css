@@ -537,7 +537,15 @@ table.survey-fields tr:hover td { background: var(--panel-2); }
    sees them. */
 
 .rig-switch { display: flex; gap: 4px; }
-.rig-switch .btn { padding: 3px 9px; font-size: 11px; }
+.rig-switch .btn { padding: 3px 9px; font-size: 11px; gap: 6px; }
+/* Each telescope's camera, lit when it is connected: the whole observatory's
+   state is readable from the bar without opening anything. */
+.rig-switch .dot { width: 7px; height: 7px; border-radius: 50%; background: #47506180; }
+.rig-switch .dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.rig-switch .dot.part { background: var(--warn); }
+.rig-switch .btn.master::after {
+  content: '★'; margin-left: 5px; color: var(--muted); font-size: 10px;
+}
 
 .rig-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
 .rig-tab { padding: 5px 11px; font-size: 11.5px; }
@@ -549,6 +557,124 @@ table.survey-fields tr:hover td { background: var(--panel-2); }
 /* A telescope with no allocation of its own is following the master's. */
 .rig-tab.mirrored:not(.active) { border-style: dashed; }
 .grow { flex: 1 1 auto; min-width: 0; }
+
+/* The observatory at a glance: one card per telescope, every slot with its
+   state and the name of what is in it. The alias is the part a person
+   recognises, so it is what the card leads with. */
+.rig-overview {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px; margin: 4px 0 8px;
+}
+.rig-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px 8px; text-align: left; font: inherit; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); min-width: 0;
+}
+.rig-card:hover { border-color: var(--accent-dim); }
+.rig-card.active { border-color: var(--accent-edge); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+/* The name is the thing a person recognises, so the role wraps under it
+   rather than squeezing it to "Telesc…". */
+.rig-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
+.rig-card-head b { font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rig-card-head .role { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.rig-card.master .rig-card-head b::before { content: '★ '; color: var(--muted); font-size: 10px; }
+.rig-slots { display: flex; flex-direction: column; gap: 3px; }
+.rig-slot {
+  display: grid; grid-template-columns: 9px 52px minmax(0, 1fr);
+  align-items: center; gap: 6px; font-size: 11px; min-width: 0;
+}
+.rig-slot .dot { width: 7px; height: 7px; border-radius: 50%; background: #47506180; }
+.rig-slot.on .dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.rig-slot.busy .dot { background: var(--warn); animation: blink 1s infinite; }
+.rig-slot.failed .dot { background: var(--bad); }
+.rig-slot-kind { color: var(--muted); }
+.rig-slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rig-slot.off .rig-slot-name { color: var(--muted); }
+.rig-slot.none .rig-slot-name { color: var(--muted); font-style: italic; }
+.rig-slot-name .alias { color: var(--accent); font-weight: 600; }
+.rig-card-foot { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.rig-card-foot .btn { padding: 3px 9px; font-size: 11px; }
+.rig-card-foot .count { font-size: 10.5px; color: var(--muted); }
+.obs-hint {
+  margin: 0 0 10px; padding: 7px 10px; border-radius: 4px; line-height: 1.5;
+  border-left: 3px solid var(--blue); background: var(--panel-2); color: var(--text);
+}
+.obs-hint:empty { display: none; }
+.obs-hint.good { border-left-color: var(--good); }
+.obs-hint.warn { border-left-color: var(--warn); }
+#btnConnectAll { min-width: 170px; }
+
+/* The connect rows say what the slot remembers, under the dropdown, so a
+   device that is not plugged in right now is still named. */
+.connect-remembered {
+  grid-column: 2 / 5; margin-top: -3px; font-size: 10.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.connect-remembered:empty { display: none; }
+
+/* Every telescope from N.I.N.A.: a row per profile. */
+.setup-rows { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 8px; }
+.setup-row {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel-2); padding: 8px 10px;
+}
+.setup-row.off > *:not(.setup-head) { opacity: 0.35; pointer-events: none; }
+.setup-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.setup-head label.inline { margin: 0; }
+.setup-head .when { font-size: 11px; color: var(--muted); }
+.setup-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: end; }
+.setup-grid label { margin-bottom: 4px; }
+.setup-grid label.inline { margin-bottom: 6px; white-space: nowrap; }
+.setup-devices { grid-column: 1 / 3; display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.setup-dev {
+  display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: center;
+  font-size: 11.5px;
+}
+.setup-dev .kind { color: var(--muted); }
+.setup-dev select { margin-top: 0; font-size: 11px; padding: 3px 5px; }
+.setup-dev .what { min-width: 0; overflow-wrap: anywhere; }
+.setup-dev .note { display: block; font-size: 10.5px; color: var(--muted); }
+.setup-dev.found .what::before, .setup-dev.matched .what::before { content: '✓ '; color: var(--good); }
+.setup-dev.byAlias .what::before, .setup-dev.leftover .what::before { content: '? '; color: var(--warn); }
+.setup-dev.shared .what::before { content: '! '; color: var(--warn); }
+/* The focuser is a full-width dropdown, so a mark in front of it would sit
+   alone on a line above; it goes on the note underneath instead. */
+.setup-dev.found .what:has(> select)::before,
+.setup-dev.matched .what:has(> select)::before,
+.setup-dev.byAlias .what:has(> select)::before,
+.setup-dev.leftover .what:has(> select)::before,
+.setup-dev.shared .what:has(> select)::before { content: none; }
+.setup-dev.found .what > select + .note::before,
+.setup-dev.matched .what > select + .note::before { content: '✓ '; color: var(--good); }
+.setup-dev.byAlias .what > select + .note::before,
+.setup-dev.leftover .what > select + .note::before { content: '? '; color: var(--warn); }
+.setup-dev.shared .what > select + .note::before { content: '! '; color: var(--warn); }
+.setup-summary { grid-column: 1 / 3; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.setup-notes { margin: 0 0 8px 16px; padding: 0; }
+.setup-notes:empty { display: none; }
+
+/* Which focuser is which: the story as it happens, then the answer. */
+.identify-log {
+  max-height: 160px; overflow-y: auto; scrollbar-width: thin;
+  margin: 8px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--bg); color: var(--muted); white-space: pre-wrap; line-height: 1.5;
+}
+.identify-log:empty { display: none; }
+.identify-result { display: flex; flex-direction: column; gap: 5px; }
+.identify-row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; align-items: baseline;
+  padding: 6px 9px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line);
+  font-size: 12px;
+}
+.identify-row .mark { font-weight: 700; }
+.identify-row.ok { border-color: #2c5d43; }
+.identify-row.ok .mark { color: var(--good); }
+.identify-row.cross { border-color: #6b5324; }
+.identify-row.cross .mark { color: var(--warn); }
+.identify-row.none { border-color: #5d2c2c; }
+.identify-row.none .mark { color: var(--bad); }
+.identify-row .detail { display: block; font-size: 10.5px; color: var(--muted); }
 
 .connect-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
 
@@ -1608,8 +1734,12 @@ table.survey-fields tr:hover td { background: var(--panel-2); }
 #panel-run .readout b { font-size: 12px; }
 #focusDetail, #runDetail { margin-bottom: 2px; }
 #focusTag.ready { color: var(--good); border-color: #2c5d43; }
-#equipmentDialog { width: min(620px, 94vw); }
-#equipmentDialog .modal-body { max-height: 80vh; overflow-y: auto; scrollbar-width: thin; }
+/* Wide enough for three telescope cards side by side: the observatory is
+   read across, not down. */
+#equipmentDialog { width: min(920px, 96vw); }
+#equipmentDialog .modal-body { max-height: 80vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+/* Button rows wrap rather than push a scrollbar under the dialog. */
+#equipmentDialog .row.gap { flex-wrap: wrap; row-gap: 6px; }
 #equipmentDialog h3 {
   margin: 16px 0 8px;
   font-size: 10.5px; letter-spacing: 0.9px; text-transform: uppercase;
@@ -1622,6 +1752,32 @@ table.survey-fields tr:hover td { background: var(--panel-2); }
 .modal.ask #askMessage { margin: 0 0 12px; line-height: 1.5; }
 .modal.ask #askInputRow { margin-bottom: 12px; }
 .modal.ask .row.gap { margin-bottom: 0; }
+
+/* Which filter is in each telescope: one row per scope, name then box. */
+.modal.ask.filters { width: min(500px, 92vw); }
+.modal.ask.filters .modal-body > p { margin: 0 0 12px; line-height: 1.5; }
+.filters-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.filters-row {
+  display: grid; grid-template-columns: minmax(96px, 1fr) 2fr; gap: 10px;
+  align-items: center; margin: 0;
+}
+.filters-row .who { font-weight: 600; font-size: 12.5px; }
+.filters-row .who .role { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.filters-row input { margin-top: 0; font-family: var(--mono, monospace); }
+.filters-row input.missing { border-color: var(--bad); }
+
+/* The Filters page: what is in each telescope, one row each. */
+.scope-filters { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 14px; }
+.scope-filter-row {
+  display: grid; grid-template-columns: minmax(110px, 1fr) 2fr; gap: 10px;
+  align-items: center; margin: 0; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.scope-filter-row .who { font-weight: 600; font-size: 12.5px; }
+.scope-filter-row .who .role { display: block; font-weight: 400; font-size: 10.5px; color: var(--muted); }
+.scope-filter-row .what { min-width: 0; }
+.scope-filter-row input { margin-top: 0; font-family: var(--mono, monospace); font-size: 12.5px; }
+.scope-filter-row .wheel { font-size: 11.5px; color: var(--muted); }
 
 #settingsDialog { width: min(620px, 94vw); }
 #settingsDialog .modal-body { max-height: 78vh; overflow-y: auto; scrollbar-width: thin; }

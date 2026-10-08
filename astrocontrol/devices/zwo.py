@@ -980,9 +980,18 @@ class ZwoCamera(Camera):
             "coolerOn": self.cooler_on if self._connected else False,
             "coolerPower": self.cooler_power if self._connected else None,
             "setpoint": self.setpoint if self._connected else None,
+            # The same capability fields the ASCOM and Alpaca cameras report.
+            # The page enables the cooler buttons from `canCool`, and without
+            # it every ZWO body looked like one that cannot cool.
+            "canCool": bool(self.can_cool) if self._connected else False,
             "binning": self.binning,
             "gain": self.gain,
             "offset": self.offset,
+            "gainRange": [self.gain_min, self.gain_max],
+            "offsetRange": [self.offset_min, self.offset_max],
+            "maxBin": self.max_bin,
+            "sensor": [self.sensor_width, self.sensor_height],
+            "pixelSizeUm": self.pixel_size_um,
         }
         return state
 

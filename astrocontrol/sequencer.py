@@ -146,6 +146,9 @@ class Sequencer:
         #: Called alongside the camera aborts in a shutdown: anything else
         #: that drives the cameras (the focuser check) and must stop too.
         self.extra_aborts: list[Any] = []
+        #: (rig id, asked filter, fitted filter) already warned about, so a
+        #: drawer telescope following another's allocation says so once.
+        self._said_fitted: set[tuple[str, str, str]] = set()
 
         self._thread: threading.Thread | None = None
         # The warm-down outlives the run that started it, so it gets its own.
@@ -443,6 +446,9 @@ class Sequencer:
         self._abort.clear()
         self._paused.clear()
         self._skip.clear()
+        # A new night may have new drawers; the fitted-filter warning is
+        # worth hearing once more.
+        self._said_fitted.clear()
         with self._lock:
             self._loop = bool(loop)
             self._loop_next = None
@@ -3395,9 +3401,16 @@ class Sequencer:
             # frames go in the wrong stack.
             fitted = filters.canonical(rig.config.get("camera", "fixedFilter", "") or "")
             if name and fitted and name.lower() != fitted.lower():
-                self._say(f"{rig.name}: the plan asks for {name} but {fitted} is "
-                          f"in the light path, and there is no wheel to change "
-                          f"it — shooting {fitted}", "warn")
+                # Once per telescope and filter, not once per frame: on a
+                # three-scope mount following one allocation this is the
+                # normal state of two of them all night, and a log that says
+                # so every two minutes buries everything else.
+                key = (rig.id, name.lower(), fitted.lower())
+                if key not in self._said_fitted:
+                    self._said_fitted.add(key)
+                    self._say(f"{rig.name}: the plan asks for {name} but {fitted} is "
+                              f"in the light path, and there is no wheel to change "
+                              f"it — shooting {fitted} (said once)", "warn")
             return False
         # Matched in the one spelling on both sides: a wheel that reports its
         # own names through a driver that never folded them still lines up.
@@ -3497,8 +3510,9 @@ class Sequencer:
     def _deal_key(self, entry: dict[str, Any], rigs: list[Any], master_id: str) -> str:
         """What the entry asks for, as one string: filters, counts and panels."""
         options = plans.options_for(entry)
+        fitted = plans.fitted_filters(rigs)
         return json.dumps({
-            "filters": {rig.id: plans.allocation_for(entry, rig.id, master_id)
+            "filters": {rig.id: plans.allocation_for(entry, rig.id, master_id, fitted)
                         for rig in rigs},
             "panels": sorted(int(i) for i in (options.get("panels") or [])),
         }, sort_keys=True)
@@ -3535,9 +3549,12 @@ class Sequencer:
 
         # The labels are already set by `_run_entry`, before the slew.
         queues: dict[str, list[dict[str, Any]]] = {}
+        # A follower with a filter in its drawer shoots the master's frames
+        # through that filter, and its queue has to say so.
+        fitted = plans.fitted_filters(rigs)
         for rig in rigs:
             queues[rig.id] = _flatten(
-                plans.allocation_for(entry, rig.id, master_id), filter_order)
+                plans.allocation_for(entry, rig.id, master_id, fitted), filter_order)
             self._set_rig(rig, frame=0, frames=len(queues[rig.id]), filter="")
 
         slots = max((len(queue) for queue in queues.values()), default=0)

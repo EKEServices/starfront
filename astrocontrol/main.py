@@ -1352,16 +1352,27 @@ def set_telescope_filters(body: TelescopeFiltersRequest) -> dict[str, Any]:
     and the warning when a night asks for a filter that is not there.
     """
     saved: dict[str, str] = {}
+    changed = False
     for rig_id, name in body.filters.items():
         telescope = _rig(rig_id)
         clean = filters.canonical(name)
         before = str(telescope.config.get("camera", "fixedFilter", "") or "")
         _guard(telescope.config.update, "camera", {"fixedFilter": clean})
         saved[telescope.id] = clean
+        changed = changed or (clean != before)
         # The manager already prefixes a slave's lines with its name.
         telescope.manager.log(
             f"{clean or 'No filter'} in the light path"
             + (f" (was {before})" if before and before != clean else ""))
+    if changed and collab_client.running:
+        # The collaboration server deals tonight's filter from the profile it
+        # was last told, and a drawer changed this afternoon is not in it
+        # until the next poll. Tell it now, off the request thread: the
+        # server may be slow or away, and the Run button is waiting.
+        def tell() -> None:
+            with contextlib.suppress(Exception):
+                collab_client.hello()
+        threading.Thread(target=tell, name="collab-filters", daemon=True).start()
     return {"filters": saved}
 
 
@@ -4938,7 +4949,10 @@ def get_plan(date: str | None = Query(default=None)) -> dict[str, Any]:
         # its slowest telescope's allocation costs — not the sum of them.
         used = plans.entry_seconds(entry, rig_ids, master_id, info["panels"],
                                    overheads)
-        allocations = {rig_id: plans.allocation_for(entry, rig_id, master_id)
+        # A follower with a filter in its drawer is shown shooting the
+        # master's frames through that filter, which is what it will do.
+        fitted = plans.fitted_filters(rigs.all)
+        allocations = {rig_id: plans.allocation_for(entry, rig_id, master_id, fitted)
                        for rig_id in rig_ids}
         options = plans.options_for(entry)
         # What will actually be shot before the window closes, as against what

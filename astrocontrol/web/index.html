@@ -8,7 +8,7 @@
 <!-- The ?v= stamps exist to break a browser cache that has already decided an
      older copy is still fresh. Bump them if a released build ever needs to
      invalidate a client that has not revalidated. -->
-<link rel="stylesheet" href="style.css?v=63">
+<link rel="stylesheet" href="style.css?v=66">
 </head>
 <body>
 
@@ -1825,15 +1825,32 @@
     </section>
 
     <section class="pref" data-pref="filters" data-pref-label="Filters" hidden>
-    <h3>Filters <span class="tag" data-role="rig-scope">—</span></h3>
+    <!-- The plain answer first: one row per telescope, type what is in it.
+         On a rig of drawer telescopes this is the whole page; the wheel
+         controls below only matter to a telescope that has one. -->
+    <h3>What is in each telescope</h3>
     <p class="small muted">
-      Name the slots, in the order they are fitted in the wheel. Slot 1 here has
-      to be slot 1 in the wheel: everything downstream matches on the name, so
-      get the order wrong and the sequencer asks for Ha and moves to whatever is
-      really in that position. Leave a slot blank if it is empty.
+      Type the filter that is in each telescope tonight — L, R, G, B, Ha, OIII,
+      SII, or whatever sits in the drawer. It is saved as soon as you leave the
+      box, goes into the <span class="mono">FILTER</span> header of every frame
+      that telescope takes, and is what a collaboration is told this rig can
+      shoot. A telescope with a filter wheel connected answers for itself.
+      Run asks the same question every night.
+    </p>
+    <div class="scope-filters" id="scopeFilters">
+      <p class="small muted">Loading…</p>
+    </div>
+    <datalist id="filterNameOptions"></datalist>
+
+    <h3>Filter wheel <span class="tag" data-role="rig-scope">—</span></h3>
+    <p class="small muted">
+      Only for a telescope that has a wheel. Name the slots, in the order they
+      are fitted: slot 1 here has to be slot 1 in the wheel, because everything
+      downstream matches on the name, so get the order wrong and the sequencer
+      asks for Ha and moves to whatever is really in that position. Leave a
+      slot blank if it is empty.
     </p>
     <div class="filter-slots" id="camFilterSlots"></div>
-    <datalist id="filterNameOptions"></datalist>
     <div class="row gap">
       <button class="btn small ghost" id="btnFilterAdd">Add a slot</button>
       <button class="btn small ghost" id="btnFilterFromWheel"
@@ -1848,18 +1865,6 @@
       Learned from the camera's own Bayer matrix the first time it connects,
       and kept. Tick it yourself if the camera has not been connected yet: a
       collaboration needs to know before it lets a colour camera in.
-    </p>
-
-    <label>In the light path now
-      <select id="camFixedFilter"></select>
-    </label>
-    <p class="small muted">
-      For a telescope with no filter wheel — a RASA carries its filter in a
-      drawer at prime focus, and nothing can move it. Say which one is fitted
-      and the frames are labelled with it, the plan can allocate to it, and the
-      sequencer says so plainly if the night asks for a different one instead of
-      quietly shooting the wrong stack. Ignored while a wheel is connected,
-      because then the wheel knows.
     </p>
 
     <h3>Focus offsets <span class="tag" data-role="rig-scope">—</span></h3>
@@ -3118,7 +3123,7 @@
 
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=65"></script>
+<script src="app.js?v=66"></script>
 <script src="livestack.js?v=65"></script>
 <script src="sky.js?v=66"></script>
 <script src="planner.js?v=62"></script>
@@ -3127,6 +3132,6 @@
 <script src="calibrate.js?v=62"></script>
 <script src="collab.js?v=66"></script>
 <script src="allsky.js?v=62"></script>
-<script src="wizard.js?v=63"></script>
+<script src="wizard.js?v=66"></script>
 </body>
 </html>

@@ -28,6 +28,7 @@ from astrocontrol.config import Config                             # noqa: E402
 from astrocontrol.devices import zwo                               # noqa: E402
 from astrocontrol.devices.base import Camera, DeviceError, Focuser  # noqa: E402
 from astrocontrol.equipment import EquipmentStore                  # noqa: E402
+from astrocontrol import collab, collabclient                       # noqa: E402
 
 results = []
 
@@ -216,11 +217,14 @@ print("\n-- carrying it out --")
 
 class FakeRig:
     def __init__(self, definition, config, store):
+        import types
         from astrocontrol.rigs import RigConfig
         self.id = definition["id"]
         self.name = definition["name"]
         self.role = definition["role"]
         self.config = RigConfig(config, store, self.id, primary=self.role == "master")
+        # No devices at all: the case a drawer telescope is in all afternoon.
+        self.manager = types.SimpleNamespace(get=lambda kind: None, log=lambda *a, **k: None)
 
 
 class FakeRigSet:
@@ -263,6 +267,94 @@ case("...the mount only on the master",
 case("each telescope says what it was given",
      sorted(d["name"] for d in done["telescopes"]) == ["Right RASA", "rasa1", "rasa2"]
      and all(d["devices"] for d in done["telescopes"]))
+
+print("\n-- what the collaboration is told --")
+# Three drawer telescopes, no wheel anywhere, nothing typed into any slot
+# list: the collaboration profile used to say "no filters" and the server's
+# pre-flight check refused the rig. Now it carries what is in the drawers.
+fake_rigs.sync()
+for rig_obj, fitted in zip(fake_rigs.all, ["L", "Ha", "OIII"]):
+    rig_obj.config.update("camera", {"filterNames": [], "fixedFilter": fitted})
+fake_rigs.master = next(r for r in fake_rigs.all if r.role == "master")
+client = collabclient.CollabClient(fake_rigs, config)
+carried, _bands = client._carried_filters()
+# Stored in the program's one spelling: Ha is H, OIII is O.
+case("the profile carries every telescope's drawer filter",
+     sorted(carried) == ["H", "L", "O"], str(carried))
+fake_rigs.all[1].config.update("camera", {"fixedFilter": "L"})
+carried, _bands = client._carried_filters()
+case("two telescopes with the same filter count it once",
+     sorted(carried) == ["L", "O"], str(carried))
+wants = collab.Requirements.read({"filters": {"Ha": None}})
+empty = collab.RigProfile.read({"name": "rig", "focalLength": 400, "pixelSize": 3.76,
+                                "sensorWidth": 6248, "sensorHeight": 4176, "filters": {}})
+verdict = collab.compatibility(empty, wants)
+text = " ".join(c["detail"] for c in verdict.get("checks", []) if c["check"] == "filters")
+case("the refusal for an empty filter list now points at the drawer setting",
+     "light path" in text and "no wheel" in text, text[:160])
+# And with the drawers declared, the same project takes the rig.
+full_profile = collab.RigProfile.read(
+    {**{"name": "rig", "focalLength": 400, "pixelSize": 3.76, "sensorWidth": 6248,
+        "sensorHeight": 4176}, "filters": {name: None for name in ["L", "Ha", "OIII"]}})
+verdict = collab.compatibility(full_profile, wants)
+ok = [c for c in verdict.get("checks", []) if c["check"] == "filters"]
+case("...and a declared drawer filter satisfies a project that asks for it",
+     bool(ok) and ok[0]["ok"] is True, str(ok))
+# Three RASAs carrying R, G and B on a project that wants LRGB and Ha/OIII:
+# it can shoot three of the six, so it can contribute, and the verdict says
+# which. It used to be refused for the three it lacked.
+rgb = collab.RigProfile.read(
+    {"name": "rgb", "focalLength": 400, "pixelSize": 3.76, "sensorWidth": 6248,
+     "sensorHeight": 4176, "filters": {"R": None, "G": None, "B": None}})
+mixed = collab.Requirements.read({"filters": {"L": None, "R": None, "G": None,
+                                              "B": None, "Ha": 5.0, "OIII": 5.0}})
+verdict = collab.compatibility(rgb, mixed)
+row = next((c for c in verdict["checks"] if c["check"] == "filters"), {})
+case("a rig carrying some of the wanted filters can contribute",
+     verdict["ok"] is True and row.get("ok") is True
+     and "can shoot R, G, B" in row.get("detail", "")
+     and "no L, H, O" in row.get("detail", ""),
+     row.get("detail"))
+nothing = collab.compatibility(rgb, collab.Requirements.read({"filters": {"Ha": None}}))
+case("...but a rig carrying none of them is still refused", nothing["ok"] is False,
+     nothing["summary"])
+
+print("\n-- what each telescope shoots for a target --")
+# One allocation typed for the master (R), R, G and B fitted across the three
+# drawers: the followers shoot the master's frames through their own filter.
+from astrocontrol import plans as _plans                                   # noqa: E402
+fake_rigs.sync()
+master_rig = next(r for r in fake_rigs.all if r.role == "master")
+followers = [r for r in fake_rigs.all if r.role != "master"]
+master_rig.config.update("camera", {"fixedFilter": "R", "filterNames": []})
+followers[0].config.update("camera", {"fixedFilter": "G", "filterNames": []})
+followers[1].config.update("camera", {"fixedFilter": "B", "filterNames": []})
+fitted_now = _plans.fitted_filters(fake_rigs.all)
+case("every drawer telescope reports its fitted filter",
+     fitted_now == {master_rig.id: "R", followers[0].id: "G", followers[1].id: "B"}, str(fitted_now))
+entry = {"id": "e1", "filters": [{"name": "R", "exposure": 120, "count": 20}]}
+case("the master shoots what was typed",
+     _plans.allocation_for(entry, master_rig.id, master_rig.id, fitted_now)
+     == [{"name": "R", "exposure": 120, "count": 20}])
+case("a follower shoots the same frames through its own filter",
+     _plans.allocation_for(entry, followers[0].id, master_rig.id, fitted_now)
+     == [{"name": "G", "exposure": 120, "count": 20}]
+     and _plans.allocation_for(entry, followers[1].id, master_rig.id, fitted_now)
+     == [{"name": "B", "exposure": 120, "count": 20}])
+two = {"id": "e2", "filters": [{"name": "R", "exposure": 120, "count": 10},
+                               {"name": "L", "exposure": 120, "count": 5},
+                               {"name": "R", "exposure": 60, "count": 4}]}
+case("several rows fold into one per exposure length, counts added",
+     _plans.allocation_for(two, followers[0].id, master_rig.id, fitted_now)
+     == [{"name": "G", "exposure": 120, "count": 15}, {"name": "G", "exposure": 60, "count": 4}])
+own_entry = {"id": "e3", "filters": [{"name": "R", "exposure": 120, "count": 20}],
+             "rigFilters": {followers[0].id: [{"name": "G", "exposure": 300, "count": 3}]}}
+case("a follower with its own allocation keeps it",
+     _plans.allocation_for(own_entry, followers[0].id, master_rig.id, fitted_now)
+     == [{"name": "G", "exposure": 300, "count": 3}])
+case("without the fitted table nothing changes",
+     _plans.allocation_for(entry, followers[0].id, master_rig.id)
+     == [{"name": "R", "exposure": 120, "count": 20}])
 
 # ---------------------------------------------------------------------------
 print("\n-- which focuser is which --")

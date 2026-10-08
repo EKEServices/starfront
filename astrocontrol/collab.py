@@ -1008,17 +1008,20 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
     elif wanted and not profile.filters:
         # Not "no Ha; no R; no G; no B" - the rig has said nothing at all, and
         # the fix is one setting, not four filters. A wheel that is switched
-        # off cannot be asked, so the names have to be typed in once.
+        # off cannot be asked, so the names have to be typed in once; a
+        # telescope with no wheel has to be told what is in its drawer.
         note("filters", False,
-             "this telescope lists no filters - fill in its filter slots under "
-             "Equipment (the wheel cannot be asked while it is off)")
+             "this telescope lists no filters - name the wheel's slots under "
+             "Equipment, or for a telescope with no wheel say which filter is "
+             "in its light path (Equipment > Filters > What is in each "
+             "telescope; Run asks the same question every night)")
     elif wanted:
         carried = {_key(name): value for name, value in profile.filters.items()}
-        why = []
+        missing, why = [], []
         for name, limit in wants.filters.items():
             key = _key(name)
             if key not in carried:
-                why.append(f"no {name}")
+                missing.append(name)
                 continue
             have = carried.get(key)
             if limit is not None and have is not None and have > limit:
@@ -1028,6 +1031,15 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
                 why.append(f"{name} bandpass not set, wants {limit:g} nm or narrower")
                 continue
             usable.append(name)
+        if missing:
+            why.insert(0, "no " + ", ".join(missing))
+        # A rig that carries some of what the project wants can contribute
+        # those: the server deals a rig only the filters it carries, on a
+        # single field as on a mosaic, so an RGB rig on a project that also
+        # wants Ha and OIII shoots the R, G and B and leaves the narrowband
+        # to rigs that have it. It used to be refused outright for the two
+        # filters it lacked, which turned "can help with three of five" into
+        # "cannot help".
         if usable:
             note("filters", True,
                  "can shoot " + ", ".join(usable)

@@ -294,6 +294,8 @@ async function askInstalledFilters() {
   try {
     await send('/api/telescopes/filters', 'POST', { filters: answers });
   } catch { return false; }
+  // The Filters page shows the same answers; keep it in step.
+  renderScopeFilters();
   return true;
 }
 
@@ -1830,8 +1832,12 @@ function updateCamera(camera, capture) {
     return;
   }
 
-  $('btnCooler').disabled = !camera.canCool;
-  $('btnSetpoint').disabled = !camera.canCool;
+  // Disabled only when the camera says outright that it cannot cool.  A
+  // backend that leaves the flag out is not evidence of anything, and the
+  // server refuses a cooler call on a body without one anyway.
+  const cannotCool = camera.canCool === false;
+  $('btnCooler').disabled = cannotCool;
+  $('btnSetpoint').disabled = cannotCool;
 
   const temperature = camera.temperature;
   const setpoint = camera.setpoint;
@@ -3663,7 +3669,7 @@ function fillEquipmentForm(settings) {
   filterBandpass = { ...(camera.filterBandpass || {}) };
   if ($('camColour')) $('camColour').checked = !!camera.colour;
   renderFilterChips(camera.filterNames || []);
-  fillFixedFilter(camera.fixedFilter || '');
+  renderScopeFilters();
   renderFilterOffsets((settings.sequencer || {}).filterOffsets || {});
   fillFocusFilter((settings.sequencer || {}).autofocusFilter || '');
   fillOffsetReference();
@@ -3798,7 +3804,6 @@ function readFilterBandpass() {
 function filtersChanged() {
   drawFilterSlots();
   updateFilterNote();
-  fillFixedFilter();
   // Keep whatever has already been typed into the offsets that survive.
   renderFilterOffsets(readFilterOffsets());
   fillFocusFilter();
@@ -3974,22 +3979,83 @@ function fillFocusFilter(selected) {
 }
 
 /** The "in the light path now" list follows whatever is selected above. */
-function fillFixedFilter(selected) {
-  const select = $('camFixedFilter');
-  if (!select) return;
-  const wanted = selected !== undefined ? selected : select.value;
-  const names = readFilterNames();
-  select.innerHTML = '';
-  select.appendChild(new Option('nothing / not known', ''));
-  for (const name of names) select.appendChild(new Option(name, name));
-  select.value = names.includes(wanted) ? wanted : '';
-
-  const rig = currentRig() || {};
-  const wheel = (rig.devices || {}).filterwheel;
-  select.disabled = !!(wheel && wheel.connected);
-  select.title = select.disabled
-    ? 'A filter wheel is connected, so the wheel decides what is in the path'
-    : 'What is fitted, on a telescope with no wheel to change it';
+/* What is in each telescope: one row per telescope on the Filters page, a
+   box to type the filter into, saved the moment the box is left.  This is
+   the whole of filter setup on a rig of drawer telescopes, so it is the
+   first thing on the page and it names every telescope at once rather than
+   making the person switch between them.  A telescope with a wheel
+   connected shows what the wheel reports instead of a box. */
+async function renderScopeFilters() {
+  const host = $('scopeFilters');
+  if (!host) return;
+  let info;
+  try { info = await api('/api/telescopes/filters'); } catch (error) {
+    host.innerHTML = '';
+    const note = document.createElement('p');
+    note.className = 'small muted';
+    note.textContent = `Could not read the telescopes: ${error.message}`;
+    host.appendChild(note);
+    return;
+  }
+  const options = $('filterNameOptions');
+  if (options && !options.options.length) {
+    for (const name of FILTER_SUGGESTIONS) options.appendChild(new Option(name));
+  }
+  host.innerHTML = '';
+  for (const row of info.telescopes || []) {
+    const line = document.createElement('label');
+    line.className = 'scope-filter-row';
+    line.innerHTML = '<span class="who"></span><span class="what"></span>';
+    const who = line.querySelector('.who');
+    who.textContent = row.name;
+    if (row.role === 'master') {
+      const role = document.createElement('span');
+      role.className = 'role';
+      role.textContent = 'master';
+      who.appendChild(role);
+    }
+    const what = line.querySelector('.what');
+    if (row.hasWheel) {
+      const live = rigList().find((rig) => rig.id === row.rig);
+      const wheel = ((live && live.devices) || {}).filterwheel || {};
+      const names = (wheel.names || []).filter(Boolean);
+      const text = document.createElement('span');
+      text.className = 'wheel';
+      text.textContent = names.length
+        ? `filter wheel: ${names.join(', ')}` : 'filter wheel connected';
+      what.appendChild(text);
+    } else {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.setAttribute('list', 'filterNameOptions');
+      input.spellcheck = false;
+      input.maxLength = 24;
+      input.placeholder = 'L, Ha, OIII…';
+      input.value = row.filter || '';
+      input.dataset.rig = row.rig;
+      input.addEventListener('change', async () => {
+        const value = input.value.trim();
+        try {
+          const saved = await send('/api/telescopes/filters', 'POST',
+            { filters: { [row.rig]: value } });
+          const stored = (saved.filters || {})[row.rig] || '';
+          input.value = stored;
+          toast(`${row.name}: ${stored || 'no filter'} in the light path`, 'success');
+        } catch { /* send() already said */ }
+      });
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); input.blur(); }
+      });
+      what.appendChild(input);
+    }
+    host.appendChild(line);
+  }
+  if (!(info.telescopes || []).length) {
+    const note = document.createElement('p');
+    note.className = 'small muted';
+    note.textContent = 'No telescopes yet.';
+    host.appendChild(note);
+  }
 }
 
 /** Say what the wheel itself is reporting, so the two can be compared. */
@@ -4048,7 +4114,6 @@ function bindFilterChips() {
   });
   $('btnFilterClear').addEventListener('click', () => {
     renderFilterChips([]);
-    fillFixedFilter('');
     filtersChanged();
   });
 }
@@ -4230,7 +4295,6 @@ async function saveEquipmentSettings() {
     // dithering belong to the observatory, so they go in unscoped.
     payload.camera.filterNames = readFilterNames();
     payload.camera.filterBandpass = readFilterBandpass();
-    payload.camera.fixedFilter = $('camFixedFilter').value;
     if ($('camColour')) payload.camera.colour = $('camColour').checked;
     if (Object.keys(payload.camera).length) {
       await api(rigQuery('/api/settings/camera'), 'POST', payload.camera);
@@ -5235,13 +5299,28 @@ function bindControls() {
     { offset: Number($('offset').value) }));
   $('binning').addEventListener('change', () => send(rigQuery('/api/camera/settings'), 'POST',
     { binning: Number($('binning').value) }));
+  // Cooling, like capture, is for every camera on the mount at once: they
+  // sit in the same air and a night wants all of them cold.  The button
+  // follows the selected camera's state, and turns the rest to match.
+  const coolerPath = () => rigQuery(multiTelescope() ? '/api/camera/cooler?all=true' : '/api/camera/cooler');
+  const reportCoolerSkipped = (result) => {
+    const skipped = (result && result.skipped) || [];
+    if (skipped.length) {
+      toast(skipped.map((s) => `${s.name}: ${s.reason}`).join(' · '), 'warn');
+    }
+    return result;
+  };
   $('btnCooler').addEventListener('click', () => {
     const rig = currentRig();
     const camera = ((rig && rig.devices) || state.status.devices).camera;
-    send(rigQuery('/api/camera/cooler'), 'POST', { on: !camera.coolerOn });
+    const on = !camera.coolerOn;
+    // Turning on sends the setpoint too, so three cameras do not come on
+    // chasing three different remembered temperatures.
+    const body = on ? { on, setpoint: Number($('setpointInput').value) } : { on };
+    send(coolerPath(), 'POST', body).then(reportCoolerSkipped);
   });
-  $('btnSetpoint').addEventListener('click', () => send(rigQuery('/api/camera/cooler'), 'POST',
-    { setpoint: Number($('setpointInput').value) }));
+  $('btnSetpoint').addEventListener('click', () => send(coolerPath(), 'POST',
+    { setpoint: Number($('setpointInput').value) }).then(reportCoolerSkipped));
 
   // Focuser
   document.querySelectorAll('[data-focus-step]').forEach((button) => {

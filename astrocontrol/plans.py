@@ -700,18 +700,56 @@ class SequenceStore:
         self.save()
 
 
-def allocation_for(entry: dict[str, Any], rig_id: str,
-                   master_id: str) -> list[dict[str, Any]]:
+def fitted_filters(rigs: Any) -> dict[str, str]:
+    """The filter fixed in each telescope that has no wheel to change it.
+
+    Keyed by telescope id; a telescope with a connected wheel is left out,
+    because there the wheel decides.  Names in the one spelling the plan
+    uses.
+    """
+    from . import filters as _filters
+
+    out: dict[str, str] = {}
+    for rig in rigs or []:
+        wheel = rig.manager.get("filterwheel")
+        if wheel is not None and getattr(wheel, "connected", False):
+            continue
+        fitted = _filters.canonical(rig.config.get("camera", "fixedFilter", "") or "")
+        if fitted:
+            out[rig.id] = fitted
+    return out
+
+
+def allocation_for(entry: dict[str, Any], rig_id: str, master_id: str,
+                   fitted: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """What one telescope is asked to shoot for this entry.
 
     A telescope with nothing of its own mirrors the master, so adding a second
     scope that carries the same filters needs no planning at all.
+
+    `fitted` is what `fitted_filters` returns.  A follower whose filter sits
+    in a drawer cannot shoot the master's filter, only its own: it follows
+    the master's frames and exposures and shoots them through what it
+    carries.  Three RASAs with R, G and B fitted and one allocation typed
+    for the master are then R on the master, G and B on the other two -
+    not R on all three, which is what the plan said before and what the
+    FITS headers then contradicted.
     """
     if rig_id != master_id:
         own = (entry.get("rigFilters") or {}).get(rig_id)
         if own is not None:
             return [dict(item) for item in own]
-    return [dict(item) for item in entry.get("filters") or []]
+    rows = [dict(item) for item in entry.get("filters") or []]
+    if rig_id != master_id and fitted and fitted.get(rig_id):
+        carried = fitted[rig_id]
+        # One filter, so the rows fold into one per exposure length.
+        folded: dict[float, dict[str, Any]] = {}
+        for row in rows:
+            seconds = float(row.get("exposure") or 0.0)
+            slot = folded.setdefault(seconds, {**row, "name": carried, "count": 0})
+            slot["count"] = int(slot.get("count") or 0) + int(row.get("count") or 0)
+        rows = list(folded.values())
+    return rows
 
 
 def entry_seconds(entry: dict[str, Any], rig_ids: list[str], master_id: str,

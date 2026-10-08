@@ -218,18 +218,13 @@ class CollabClient:
                 with _quiet():
                     rig.config.update("camera", {"colour": colour})
 
-        # Filter names come from the wheel where there is one, overlaid with
-        # what was typed in — the same list everything else in the program uses.
-        names: list[str] = []
-        wheel = rig.manager.get("filterwheel")
-        if wheel is not None and wheel.connected:
-            names = [str(name).strip() for name in (wheel.names or [])
-                     if str(name).strip()]
-        if not names:
-            names = [str(name).strip()
-                     for name in (rig.config.get("camera", "filterNames", []) or [])
-                     if str(name).strip()]
-        bandpasses = rig.config.get("camera", "filterBandpass", {}) or {}
+        # Every filter the mount can shoot tonight, across all its telescopes:
+        # the wheel's names where there is a wheel, the names typed for it
+        # otherwise, and for a telescope with no wheel at all the one filter
+        # said to be in its drawer.  A triple RASA carrying L, Ha and OIII in
+        # three drawers is a rig that can shoot L, Ha and OIII, and used to
+        # be refused as a rig that "lists no filters".
+        names, bandpasses = self._carried_filters()
 
         return collab.RigProfile(
             name=rig.name,
@@ -260,6 +255,42 @@ class CollabClient:
             windowFrom=str(settings.get("fromClock") or ""),
             windowTo=str(settings.get("toClock") or ""),
         ).payload()
+
+    def _carried_filters(self) -> tuple[list[str], dict[str, Any]]:
+        """The filters on the mount tonight, in the order the telescopes come.
+
+        Per telescope, the same order of preference the rest of the program
+        uses: a connected wheel, the slot names typed for it, and failing
+        both the filter fitted in the drawer (`camera.fixedFilter`, which the
+        Run button asks for every night).  Names are merged case-blind, so
+        two telescopes both carrying L count it once; bandpasses are merged
+        from every telescope's table.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        bandpasses: dict[str, Any] = {}
+        for rig in self.rigs.all:
+            own: list[str] = []
+            wheel = rig.manager.get("filterwheel")
+            if wheel is not None and wheel.connected:
+                own = [str(name).strip() for name in (wheel.names or [])
+                       if str(name).strip()]
+            if not own:
+                own = [str(name).strip()
+                       for name in (rig.config.get("camera", "filterNames", []) or [])
+                       if str(name).strip()]
+            if not own:
+                fitted = str(rig.config.get("camera", "fixedFilter", "") or "").strip()
+                if fitted:
+                    own = [fitted]
+            for name in own:
+                if name.lower() not in seen:
+                    seen.add(name.lower())
+                    names.append(name)
+            table = rig.config.get("camera", "filterBandpass", {}) or {}
+            for name, value in table.items():
+                bandpasses.setdefault(str(name), value)
+        return names, bandpasses
 
     def _default_exposures(self) -> dict[str, float]:
         from . import calibrating
