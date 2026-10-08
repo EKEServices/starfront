@@ -15,21 +15,29 @@ on top of.
 
 ## Running it
 
-**The download.** `Starfront-<version>-windows.zip` unzips to a folder with
-`Starfront.exe` in it; double-click that and the window opens.  Nothing to
-install and no Python needed — everything the program uses sits beside it in
-`_internal`.  Windows SmartScreen may ask on the first run (*More info → Run
-anyway*).  `Starfront Console.exe` is the same program with a console and the
-command-line switches below, for a headless rig or for reading why a window
-will not open.  `READ ME FIRST.txt` in the folder says the rest: ASCOM, ASTAP
-and PHD2 are installed as they are for N.I.N.A.
+**The download.** The installer, `Starfront-Setup-<version>.exe` from
+[the releases page](https://github.com/bray-sfro/starfront/releases), puts
+Starfront under your own Programs folder with a Start-menu shortcut and an
+uninstaller, with no administrator prompt.  `Starfront-<version>-windows.zip`
+beside it is the same program as a folder: unzip it anywhere and double-click
+`Starfront.exe`.  No Python is needed either way — everything the program uses
+sits beside it in `_internal`.  Windows SmartScreen may ask on the first run
+(*More info → Run anyway*).  `Starfront Console.exe` is the same program with a
+console and the command-line switches below, for a headless rig or for reading
+why a window will not open.  `READ ME FIRST.txt` in the folder says the rest:
+ASCOM, ASTAP and PHD2 are installed as they are for N.I.N.A.  Settings, targets
+and the plan live under your home folder, so an upgrade keeps them.
 
-To build that zip from this source: `python -m pip install pyinstaller`, then
-`powershell -ExecutionPolicy Bypass -File packaging\build.ps1`.  It writes
+To build the download from this source: `python -m pip install pyinstaller
+pillow`, `winget install JRSoftware.InnoSetup`, then `powershell
+-ExecutionPolicy Bypass -File packaging\build.ps1`.  It writes
+`packaging\dist\Starfront-Setup-<version>.exe` and
 `packaging\dist\Starfront-<version>-windows.zip`.  The version is
 `astrocontrol.__version__`; bump it for a release.  The program icon is built
 from `packaging\logo.png`, the Starfront Observatories mark, by
-`packaging\make_icon.py`.
+`packaging\make_icon.py`.  A release goes up with `gh release create
+v<version> packaging\dist\Starfront-Setup-<version>.exe
+packaging\dist\Starfront-<version>-windows.zip`.
 
 **The first run.** A window called *First light* opens over an empty program
 and walks through the whole thing in order: bring your settings over from

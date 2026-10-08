@@ -42,4 +42,23 @@ Compress-Archive -Path (Join-Path $dist "Starfront") -DestinationPath $zip -Comp
 $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host ""
 Write-Host "Built $zip  ($size MB)"
-Write-Host "Share that file. People unzip it and double-click Starfront.exe."
+
+# The installer: one file that puts Starfront under the person's own Programs
+# folder with Start-menu and desktop shortcuts and an uninstaller, with no
+# administrator prompt. Needs Inno Setup 6 (winget install JRSoftware.InnoSetup);
+# without it the zip above is still a complete download.
+Write-Host "== installer"
+$iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+          "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+          "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($iscc) {
+    & $iscc /Q "/DVersion=$version" (Join-Path $PSScriptRoot "starfront.iss")
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+    $setup = Join-Path $dist "Starfront-Setup-$version.exe"
+    $setupSize = [math]::Round((Get-Item $setup).Length / 1MB, 1)
+    Write-Host "Built $setup  ($setupSize MB)"
+    Write-Host "Share the installer. People run it; the zip is for anybody who would rather unzip."
+} else {
+    Write-Host "Inno Setup is not installed, so no installer was made: winget install JRSoftware.InnoSetup"
+    Write-Host "Share the zip. People unzip it and double-click Starfront.exe."
+}
