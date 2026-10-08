@@ -664,6 +664,13 @@ class Sequencer:
         tolerance = float(settings.get("coolToleranceC") or 1.0)
         timeout = float(settings.get("coolTimeoutMinutes") or 20.0) * 60.0
         label = rig.name
+        # What the run was showing before the wait, to put back after it. The
+        # wait is announced as "cooling", and with nothing putting the stage
+        # back the banner and the activity line read "cooling -4.0 C" through
+        # a ten-minute exposure that had plainly started.
+        with self._lock:
+            before = (self._state, self._message)
+            before_rig = str(self._rig_state.get(rig.id, {}).get("state") or "")
 
         deadline = time.monotonic() + timeout
         announced = False
@@ -711,6 +718,9 @@ class Sequencer:
             self._set_rig(rig, state=f"cooling {now:.1f} C" if now is not None
                           else "cooling")
             time.sleep(5.0)
+        if announced:
+            self._set(*before)
+            self._set_rig(rig, state=before_rig)
         with self._lock:
             self._cooling_wanted.discard(rig.id)
 
