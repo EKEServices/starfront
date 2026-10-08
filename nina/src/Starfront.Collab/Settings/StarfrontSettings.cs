@@ -222,6 +222,12 @@ namespace Starfront.Collab.Settings {
             set { options.SetValueInt32(nameof(DitherEvery), Math.Max(0, value)); RaisePropertyChanged(); }
         }
 
+        /// <summary>Recentre a field once it has drifted this far, in arcminutes; 0 never recentres.</summary>
+        public double RecentreArcMinutes {
+            get => options.GetValueDouble(nameof(RecentreArcMinutes), 5.0);
+            set { options.SetValueDouble(nameof(RecentreArcMinutes), Math.Max(0.0, Math.Min(180.0, value))); RaisePropertyChanged(); }
+        }
+
         /// <summary>Turn the camera to the project's angle when a rotator is connected.</summary>
         public bool MatchRotation {
             get => options.GetValueBoolean(nameof(MatchRotation), true);

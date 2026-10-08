@@ -111,6 +111,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Gain (-1 = camera default)" />
@@ -126,13 +127,17 @@
                     <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Text="{Binding Settings.DitherEvery, ValidatesOnExceptions=True}" />
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="0 leaves dithering to the triggers around the container" TextWrapping="Wrap" />
 
-                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Rotate to the project's angle" />
-                    <CheckBox Grid.Row="4" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.MatchRotation}" />
-                    <TextBlock Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="when a rotator is connected; a fixed camera shoots at the angle it sits" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Recentre after drifting (arcmin)" />
+                    <TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Text="{Binding Settings.RecentreArcMinutes, ValidatesOnExceptions=True}" />
+                    <TextBlock Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="each field checks its own drift between frames; 0 never recentres. Do not add Center after drift above the container: it would use another target's coordinates" TextWrapping="Wrap" />
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Camera angle (no rotator)" />
-                    <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" Text="{Binding Settings.CameraAngleText}" />
-                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="read from the first plate solve of each field; on a mosaic the server lays your panels along the camera's axes" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Rotate to the project's angle" />
+                    <CheckBox Grid.Row="5" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.MatchRotation}" />
+                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="when a rotator is connected; a fixed camera shoots at the angle it sits" TextWrapping="Wrap" />
+
+                    <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Camera angle (no rotator)" />
+                    <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" Text="{Binding Settings.CameraAngleText}" />
+                    <TextBlock Grid.Row="6" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="read from the first plate solve of each field; on a mosaic the server lays your panels along the camera's axes" TextWrapping="Wrap" />
                 </Grid>
 
                 <!--  Telescope  -->

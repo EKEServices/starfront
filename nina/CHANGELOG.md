@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0.9
+
+- Every field recentres on its own coordinates when it drifts (the distance is an option; 0 switches it off). A *Center after drift* trigger placed on a container above the Starfront one takes its target from that container, and one run was slewed to M33 in the middle of M31 that way.
+- A single-field collaboration no longer spends a slew and a plate solve measuring the camera's angle before starting, nor warns that the panels were laid for another angle; only a mosaic's grid depends on it.
+- A run that is stopped still reports the frames shot since its last check-in.
+
 ## 1.0.0.8
 
 - The container no longer fails the moment it runs. Its panels were added to the sequence from the sequencer's worker thread, which WPF refuses once the sequence editor is bound to them; N.I.N.A. then carried on with whatever instructions followed, and nothing was reported. Panels are now added and cleared on the window's thread.

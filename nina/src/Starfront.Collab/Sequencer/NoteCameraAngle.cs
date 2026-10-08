@@ -59,7 +59,9 @@ namespace Starfront.Collab.Sequencer {
                     Logger.Info($"Starfront: camera sits at {angle:0.0}°" + (double.IsNaN(was) ? "" : $" (was {was:0.0}°)"));
                 }
                 var laidFor = panel.Plan.Cell.Rotation;
-                if (RigProfile.HalfTurnDifference(angle, laidFor) > 2.0) {
+                // Only a mosaic's grid depends on the angle; a single field
+                // is shot however the camera sits.
+                if (!panel.Plan.SingleField && RigProfile.HalfTurnDifference(angle, laidFor) > 2.0) {
                     Logger.Warning($"Starfront: this panel was laid for a camera at {laidFor:0.0}° and the camera sits at {angle:0.0}°; the server lays the panels again from the next check-in, and tomorrow's deal uses them");
                 }
             }

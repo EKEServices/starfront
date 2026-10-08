@@ -22,6 +22,7 @@ using NINA.Sequencer.SequenceItem.Imaging;
 using NINA.Sequencer.SequenceItem.Platesolving;
 using NINA.Sequencer.Trigger;
 using NINA.Sequencer.Trigger.Guider;
+using NINA.Sequencer.Trigger.Platesolving;
 using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.ViewModel;
 using Newtonsoft.Json;
@@ -66,6 +67,7 @@ namespace Starfront.Collab.Sequencer {
         private readonly IPlateSolverFactory plateSolverFactory;
         private readonly IWindowServiceFactory windowServiceFactory;
         private readonly INighttimeCalculator nighttimeCalculator;
+        private readonly IApplicationStatusMediator applicationStatusMediator;
 
         private string projectId = "";
         private string summary = "";
@@ -85,7 +87,9 @@ namespace Starfront.Collab.Sequencer {
                                                IDomeFollower domeFollower,
                                                IPlateSolverFactory plateSolverFactory,
                                                IWindowServiceFactory windowServiceFactory,
-                                               INighttimeCalculator nighttimeCalculator) : base(new OnceStrategy()) {
+                                               INighttimeCalculator nighttimeCalculator,
+                                               IApplicationStatusMediator applicationStatusMediator) : base(new OnceStrategy()) {
+            this.applicationStatusMediator = applicationStatusMediator;
             this.profileService = profileService;
             this.cameraMediator = cameraMediator;
             this.telescopeMediator = telescopeMediator;
@@ -281,7 +285,12 @@ namespace Starfront.Collab.Sequencer {
                 Summary = plans.Count == 1 && done == 1 ? $"the {unit} was shot"
                         : $"{done} of {plans.Count} {unit} shot" + (skipped > 0 ? $", {skipped} never rose above the floor" : "");
                 Logger.Info($"Starfront: {Summary}");
-                try { await session.ReportPendingAsync(token); } catch (Exception ex) { StarfrontClient.Log("reporting the night", ex); }
+                // On a token of its own: a run that was stopped arrives here
+                // with the sequence's token already cancelled, and the frames
+                // shot since the last check-in would wait for the next one.
+                // Half a minute is plenty for one small request.
+                using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                try { await session.ReportPendingAsync(grace.Token); } catch (Exception ex) { StarfrontClient.Log("reporting the night", ex); }
             }
         }
 
@@ -294,6 +303,10 @@ namespace Starfront.Collab.Sequencer {
         private async Task<bool> ReconcileCameraAngleAsync(List<PanelPlan> plans, Settings.StarfrontSettings settings,
                                                             IProgress<ApplicationStatus> progress, CancellationToken token) {
             if (RigProfile.HasRotator(Runtime.Host)) return false;
+            // A single field is shot at whatever angle the camera sits; only a
+            // mosaic's grid depends on it. Solving here cost a slew and a
+            // minute, then warned twice about panels that were never laid.
+            if (plans.All(p => p.SingleField)) return false;
             var laidFor = plans[0].Cell.Rotation;
             var known = settings.CameraAngle;
             if (!double.IsNaN(known) && RigProfile.HalfTurnDifference(known, laidFor) <= 2.0) return false;
@@ -620,6 +633,22 @@ namespace Starfront.Collab.Sequencer {
                     Category = "Starfront",
                 });
             }
+            // The field's own drift check, on the field's own coordinates. A
+            // "Center after drift" trigger a user puts on a container above
+            // this one takes its coordinates from that container's target:
+            // one tester's, on an M33 container around this, measured 889
+            // arcminutes of "drift" and slewed to M33 in the middle of M31.
+            if (settings.RecentreArcMinutes > 0) {
+                panel.Add(new CenterAfterDriftTrigger(profileService, telescopeMediator, filterWheelMediator, guiderMediator,
+                                                      imagingMediator, cameraMediator, domeMediator, domeFollower,
+                                                      imageSaveMediator, applicationStatusMediator) {
+                    DistanceArcMinutes = settings.RecentreArcMinutes,
+                    AfterExposures = 1,
+                    Name = Icons.Label("Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name", "Center after drift"),
+                    Icon = Icons.Find("PlatesolveSVG"),
+                    Category = "Starfront",
+                });
+            }
             return panel;
         }
 
@@ -628,7 +657,8 @@ namespace Starfront.Collab.Sequencer {
         public override object Clone() {
             var copy = new StarfrontCollaborationContainer(profileService, cameraMediator, telescopeMediator, imagingMediator, imageSaveMediator,
                                                            imageHistoryVM, filterWheelMediator, guiderMediator, rotatorMediator, domeMediator,
-                                                           domeFollower, plateSolverFactory, windowServiceFactory, nighttimeCalculator) {
+                                                           domeFollower, plateSolverFactory, windowServiceFactory, nighttimeCalculator,
+                                                           applicationStatusMediator) {
                 ProjectId = ProjectId,
             };
             copy.CopyMetaData(this);
