@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.10
+
+- Every collaboration on the Starfront panel shows the target's altitude through tonight: dusk to dawn, the horizon and the project's floor shaded, the usable hours filled, transit marked and "now" drawn, with one line saying when it is up.
+
 ## 1.0.0.9
 
 - Every field recentres on its own coordinates when it drifts (the distance is an option; 0 switches it off). A *Center after drift* trigger placed on a container above the Starfront one takes its target from that container, and one run was slewed to M33 in the middle of M31 that way.

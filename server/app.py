@@ -564,6 +564,70 @@ def project_depth(project_id: str,
             "progress": _progress(project_id, project.get("payload") or {})}
 
 
+@app.get("/api/v1/agent/projects/{project_id}/people")
+def project_people(project_id: str,
+                   agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]:
+    """Who has put what into a project: each person's accepted hours, by
+    filter, with their telescopes and their Discord name and picture.
+
+    Grouped by the person rather than the telescope, because that is how
+    the group thinks of it - one member with three telescopes contributed
+    once, three times over. A telescope nobody has signed in for stands on
+    its own under its enrolled name.
+    """
+    store.seen(agent["id"])
+    project = store.project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="no such project")
+    people: dict[str, dict[str, Any]] = {}
+    refused = 0
+    for row in store.contributions(project_id):
+        if not row.get("accepted"):
+            refused += 1
+            continue
+        rig = store.agent(row["agent"]) or {}
+        owner_id = str(rig.get("owner_id") or "")
+        person = store.user(owner_id) if owner_id else None
+        key = owner_id or str(row["agent"])
+        called = str((rig.get("presence") or {}).get("telescope") or "").strip()
+        entry = people.setdefault(key, {
+            "name": (person or {}).get("name") or rig.get("owner") or rig.get("name") or key,
+            "avatar": _avatar_url(person),
+            "telescopes": [],
+            "byFilter": {},
+            "frames": 0,
+            "nights": set(),
+            "lastReported": 0.0,
+        })
+        telescope = called or str(rig.get("name") or "")
+        if telescope and telescope not in entry["telescopes"]:
+            entry["telescopes"].append(telescope)
+        name = filters.canonical(row.get("filter") or "") or str(row.get("filter") or "")
+        entry["byFilter"][name] = entry["byFilter"].get(name, 0.0) + float(row.get("seconds") or 0.0)
+        entry["frames"] += int((row.get("payload") or {}).get("frames") or 0)
+        if row.get("night"):
+            entry["nights"].add(str(row["night"]))
+        entry["lastReported"] = max(entry["lastReported"], float(row.get("received") or 0.0))
+    listed = []
+    for entry in people.values():
+        seconds = sum(entry["byFilter"].values())
+        listed.append({
+            "name": entry["name"],
+            "avatar": entry["avatar"],
+            "telescopes": entry["telescopes"],
+            "hours": round(seconds / 3600.0, 2),
+            "byFilter": {name: round(value / 3600.0, 2)
+                         for name, value in sorted(entry["byFilter"].items())},
+            "frames": entry["frames"],
+            "nights": len(entry["nights"]),
+            "lastReported": entry["lastReported"] or None,
+        })
+    listed.sort(key=lambda row: (-row["hours"], row["name"].lower()))
+    return {"project": project_id, "name": project["name"], "people": listed,
+            "hours": round(sum(row["hours"] for row in listed), 2),
+            "refused": refused, "serverTime": time.time()}
+
+
 @app.get("/api/v1/agent/projects")
 def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]:
     """Every project that is open, and whether this telescope can help.

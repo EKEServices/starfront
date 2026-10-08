@@ -7,8 +7,12 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using NINA.Astrometry;
+using NINA.Astrometry.Interfaces;
 using NINA.Core.Utility;
+using NINA.Profile.Interfaces;
 using Starfront.Collab.Server;
+using Starfront.Collab.Sky;
 
 namespace Starfront.Collab.Ui {
 
@@ -143,6 +147,147 @@ namespace Starfront.Collab.Ui {
             bitmap.Render(visual);
             bitmap.Freeze();
             return bitmap;
+        }
+
+        /// <summary>
+        /// The target's altitude through tonight, as a small chart: dusk to
+        /// dawn across, altitude up, the horizon and the project's floor
+        /// shaded, the curve, a mark at transit and a line at "now". Answers
+        /// "how well placed is this tonight?" before a word is read. Must run
+        /// on the UI thread: it draws. Returns the picture and one line of
+        /// words saying the same thing.
+        /// </summary>
+        public static (BitmapSource image, string caption) Transit(Region region, IProfileService profiles, INighttimeCalculator calculator,
+                                                                    double minAltitude, int width, int height) {
+            var coordinates = new Coordinates(Angle.ByDegree(region.Ra), Angle.ByDegree(region.Dec), Epoch.J2000);
+            DateTime dusk, dawn;
+            try {
+                (dusk, dawn) = SkyMath.DarkHours(calculator.Calculate());
+            } catch (Exception) {
+                dusk = DateTime.Now.Date.AddHours(20);
+                dawn = dusk.AddHours(10);
+            }
+            var now = DateTime.Now;
+            // Tonight's dark, or last night's still being shown in the morning:
+            // the chart reads from an hour before dusk to an hour after dawn.
+            if (dawn < now.AddHours(-2)) { dusk = dusk.AddDays(1); dawn = dawn.AddDays(1); }
+            var start = dusk.AddHours(-1);
+            var end = dawn.AddHours(1);
+            var span = (end - start).TotalMinutes;
+            if (span <= 0) span = 1;
+
+            const int left = 30, right = 6, top = 14, bottom = 16;
+            var plotWidth = width - left - right;
+            var plotHeight = height - top - bottom;
+            double X(DateTime t) => left + (t - start).TotalMinutes / span * plotWidth;
+            double Y(double altitude) => top + (1.0 - Math.Max(0.0, Math.Min(90.0, altitude)) / 90.0) * plotHeight;
+
+            var points = new List<(DateTime t, double alt, double floor)>();
+            DateTime? transitAt = null;
+            var best = -90.0;
+            DateTime? upFrom = null, upTo = null;
+            for (var t = start; t <= end; t = t.AddMinutes(5)) {
+                var (altitude, azimuth) = SkyMath.AltAz(coordinates, profiles, t);
+                var floor = Math.Max(0.0, SkyMath.HorizonAltitude(profiles, azimuth));
+                points.Add((t, altitude, floor));
+                if (altitude > best) { best = altitude; transitAt = t; }
+                var usable = altitude >= Math.Max(minAltitude, floor) && t >= dusk && t <= dawn;
+                if (usable) { upFrom ??= t; upTo = t; }
+            }
+
+            var visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen()) {
+                dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(8, 11, 20)), null, new Rect(0, 0, width, height));
+                // The dark itself, a shade lighter than the twilight either side.
+                var night = new SolidColorBrush(Color.FromRgb(14, 19, 34));
+                night.Freeze();
+                dc.DrawRectangle(night, null, new Rect(X(dusk), top, Math.Max(1, X(dawn) - X(dusk)), plotHeight));
+                // Ground: the profile's horizon, or zero without one.
+                var ground = new StreamGeometry();
+                using (var g = ground.Open()) {
+                    g.BeginFigure(new Point(X(points[0].t), Y(0)), true, true);
+                    foreach (var p in points) g.LineTo(new Point(X(p.t), Y(p.floor)), false, false);
+                    g.LineTo(new Point(X(points[^1].t), Y(0)), false, false);
+                }
+                ground.Freeze();
+                var groundBrush = new SolidColorBrush(Color.FromArgb(160, 60, 48, 36));
+                groundBrush.Freeze();
+                dc.DrawGeometry(groundBrush, null, ground);
+                // The project's floor, below which a frame does not count.
+                var floorPen = new Pen(new SolidColorBrush(Color.FromArgb(140, 240, 179, 91)), 1.0) { DashStyle = DashStyles.Dash };
+                floorPen.Freeze();
+                if (minAltitude > 0) dc.DrawLine(floorPen, new Point(left, Y(minAltitude)), new Point(width - right, Y(minAltitude)));
+                // Gridlines at 30 and 60 degrees, faint.
+                var gridPen = new Pen(new SolidColorBrush(Color.FromArgb(40, 160, 180, 220)), 1.0);
+                gridPen.Freeze();
+                foreach (var alt in new[] { 30.0, 60.0 }) dc.DrawLine(gridPen, new Point(left, Y(alt)), new Point(width - right, Y(alt)));
+                // The part of the night the target is usable, filled under the curve.
+                if (upFrom != null && upTo != null) {
+                    var usable = new StreamGeometry();
+                    using (var g = usable.Open()) {
+                        var inside = points.Where(p => p.t >= upFrom && p.t <= upTo).ToList();
+                        g.BeginFigure(new Point(X(inside[0].t), Y(Math.Max(minAltitude, inside[0].floor))), true, true);
+                        foreach (var p in inside) g.LineTo(new Point(X(p.t), Y(p.alt)), false, false);
+                        for (var i = inside.Count - 1; i >= 0; i--) g.LineTo(new Point(X(inside[i].t), Y(Math.Max(minAltitude, inside[i].floor))), false, false);
+                    }
+                    usable.Freeze();
+                    var usableBrush = new SolidColorBrush(Color.FromArgb(70, 126, 231, 165));
+                    usableBrush.Freeze();
+                    dc.DrawGeometry(usableBrush, null, usable);
+                }
+                // The curve.
+                var curve = new StreamGeometry();
+                using (var g = curve.Open()) {
+                    g.BeginFigure(new Point(X(points[0].t), Y(points[0].alt)), false, false);
+                    g.PolyLineTo(points.Skip(1).Select(p => new Point(X(p.t), Y(p.alt))).ToList(), true, true);
+                }
+                curve.Freeze();
+                var curvePen = new Pen(new SolidColorBrush(Color.FromRgb(126, 231, 165)), 1.8);
+                curvePen.Freeze();
+                dc.DrawGeometry(null, curvePen, curve);
+                // Now.
+                if (now >= start && now <= end) {
+                    var nowPen = new Pen(new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)), 1.0);
+                    nowPen.Freeze();
+                    dc.DrawLine(nowPen, new Point(X(now), top), new Point(X(now), top + plotHeight));
+                }
+                // Transit.
+                if (transitAt != null && best > 0) {
+                    var mark = new SolidColorBrush(Color.FromRgb(255, 196, 0));
+                    mark.Freeze();
+                    dc.DrawEllipse(mark, null, new Point(X(transitAt.Value), Y(best)), 3, 3);
+                }
+                // Words: the hours along the bottom, the altitude up the side.
+                var typeface = new Typeface("Segoe UI");
+                var ink = new SolidColorBrush(Color.FromArgb(190, 220, 228, 240));
+                ink.Freeze();
+                void Label(string text, double x, double y, TextAlignment align = TextAlignment.Left) {
+                    var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, typeface, 9.5, ink, 1.0) { TextAlignment = align };
+                    dc.DrawText(formatted, new Point(x, y));
+                }
+                Label("90°", left - 4, top - 6, TextAlignment.Right);
+                Label("0°", left - 4, Y(0) - 6, TextAlignment.Right);
+                if (minAltitude > 0) Label($"{minAltitude:0}°", left - 4, Y(minAltitude) - 6, TextAlignment.Right);
+                for (var t = new DateTime(start.Year, start.Month, start.Day, start.Hour, 0, 0).AddHours(1); t < end; t = t.AddHours(2)) {
+                    Label(t.ToString("HH:mm"), X(t), height - bottom + 2, TextAlignment.Center);
+                }
+                if (transitAt != null && best > 0) {
+                    var x = Math.Max(left + 24, Math.Min(width - right - 24, X(transitAt.Value)));
+                    Label($"transit {transitAt.Value:HH:mm} · {best:0}°", x, top - 12, TextAlignment.Center);
+                }
+            }
+            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(visual);
+            bitmap.Freeze();
+
+            string caption;
+            if (upFrom == null || upTo == null) {
+                caption = best <= 0 ? "never rises tonight" : $"never above {minAltitude:0}° during the dark tonight (peaks at {best:0}°)";
+            } else {
+                var hours = (upTo.Value - upFrom.Value).TotalHours;
+                caption = $"above {minAltitude:0}° from {upFrom:HH:mm} to {upTo:HH:mm} ({hours:0.0} h) · transit {transitAt:HH:mm} at {best:0}°";
+            }
+            return (bitmap, caption);
         }
 
         /// <summary>Gnomonic standard coordinates of (ra, dec) about (ra0, dec0), in degrees, east and north positive.</summary>

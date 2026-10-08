@@ -1400,6 +1400,22 @@ case("everybody can see who is on the sky",
      str(me))
 case("...and how many telescopes are online", who.get("online", 0) >= 2, str(who.get("online")))
 
+# ------------------------------------------------- who has contributed
+# The opened card on the Collab tab: each person's accepted hours by filter,
+# with their telescopes, grouped by the person rather than the telescope.
+status, who_did = call("GET", f"/api/v1/agent/projects/{PROJECT}/people", token=AGENT_TOKEN)
+case("a project lists who has contributed", status == 200 and len(who_did["people"]) >= 1,
+     str(who_did)[:160])
+top = who_did["people"][0] if who_did.get("people") else {}
+case("...with accepted hours by filter and the telescope that shot them",
+     top.get("hours", 0) > 0 and any(k.upper().startswith("O") for k in (top.get("byFilter") or {}))
+     and len(top.get("telescopes") or []) >= 1 and "avatar" in top and "name" in top,
+     f"{top.get('name')}: {top.get('hours')} h, {top.get('byFilter')}, {top.get('telescopes')}")
+case("...and the total is the sum of the people",
+     abs(who_did["hours"] - sum(p["hours"] for p in who_did["people"])) < 0.01)
+status, _ = call("GET", "/api/v1/agent/projects/nonsense/people", token=AGENT_TOKEN, expect=404)
+case("...and an unknown project is a 404", status == 404)
+
 # ------------------------------------------------- the sky, for a web page
 # Open to anyone, with nothing in it but what a telescope said about
 # itself: a page on the observatory's website shows where everybody points.

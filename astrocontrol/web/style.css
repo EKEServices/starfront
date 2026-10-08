@@ -2089,6 +2089,27 @@ label.inline.compact input[type="range"] { width: 150px; margin-top: 0; }
 .col-open.joined { border-color: #2c5d43; }
 .col-open p.small { margin: 4px 0; }
 .col-open .depth-grid { margin-top: 6px; }
+.col-open .col-hint { margin-top: 6px; opacity: 0.6; }
+.col-open.open { background: var(--panel-2); }
+/* Who has contributed: the opened part of a card. */
+.col-detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.col-detail-head { margin-bottom: 6px; }
+.col-person { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.col-person-body { flex: 1; min-width: 0; }
+.col-person-hours { flex: none; color: var(--text); }
+.col-avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex: none; object-fit: cover;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.col-avatar.blank {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted); font-weight: 600; font-size: 13px;
+}
+.col-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.col-chip {
+  font-size: 11px; padding: 1px 7px; border-radius: 100px;
+  border: 1px solid var(--line); color: var(--muted); font-family: var(--mono);
+}
 
 /* A chunk's framing, on the closed box rather than behind a double-click. */
 .plan-framing.framing-inline { margin-top: 10px; }

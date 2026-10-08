@@ -23,7 +23,17 @@
     targets: [],         // your own targets, to aim a simple collaboration at
     settingsSynced: false,
     loading: false,
+    // Cards opened with a double-click, by project id, and what each has
+    // fetched about who contributed: {at, data} or {at, error}.
+    expanded: new Set(),
+    people: new Map(),
+    lastRefresh: 0,
   };
+
+  /* How often the open collaborations are re-read while the tab is showing.
+     Progress moves as frames are reported, a few times an hour, so a
+     minute is plenty and a page left open overnight keeps up. */
+  const REFRESH_SECONDS = 60;
 
   /* ------------------------------------------------------------- helpers */
 
@@ -560,7 +570,9 @@
            <button class="btn small ghost danger" data-col-close="${esc(project.id)}">Close</button>`
         : '';
 
-      return `<div class="col-open${mine ? ' joined' : ''}">
+      const open = col.expanded.has(project.id);
+      return `<div class="col-open${mine ? ' joined' : ''}${open ? ' open' : ''}" data-col-id="${esc(project.id)}"
+                   title="Double-click to see who has contributed">
         <canvas class="col-sky" data-col-sky="${esc(project.id)}" width="240" height="160"
                 title="${esc(project.name)} on the sky survey"></canvas>
         <div class="col-open-body">
@@ -582,6 +594,9 @@
           ${limits.length
             ? `<div class="small muted">Takes: ${esc(limits.join(', '))}</div>` : ''}
           ${depth ? `<div class="depth-grid">${depth}</div>` : ''}
+          ${open
+            ? `<div class="col-detail" data-col-detail="${esc(project.id)}">${renderPeople(project.id)}</div>`
+            : '<div class="small muted col-hint">double-click for who has contributed</div>'}
         </div>
       </div>`;
     }).join('');
@@ -591,6 +606,19 @@
     box.querySelectorAll('[data-col-sky]').forEach((canvas) => {
       const project = projects.find((p) => p.id === canvas.dataset.colSky);
       if (project) drawSky(canvas, project);
+    });
+
+    // Double-click opens a card on who has contributed, as a target in the
+    // Planner opens on its framing; a click on a button or a box is not that.
+    box.querySelectorAll('[data-col-id]').forEach((card) => {
+      card.addEventListener('dblclick', (event) => {
+        if (event.target.closest('button, input, label, a')) return;
+        const id = card.dataset.colId;
+        if (col.expanded.has(id)) col.expanded.delete(id); else col.expanded.add(id);
+        window.getSelection && window.getSelection().removeAllRanges();
+        drawBrowse();
+        if (col.expanded.has(id)) loadPeople(id);
+      });
     });
 
     box.querySelectorAll('[data-col-take]').forEach((button) => {
@@ -604,6 +632,87 @@
       button.addEventListener('click', () => closeProject(
         projects.find((p) => p.id === button.dataset.colClose)));
     });
+  }
+
+  /* ------------------------------------------------- who has contributed */
+
+  const ago = (seconds) => {
+    const mins = Math.round(seconds / 60);
+    if (mins < 2) return 'just now';
+    if (mins < 90) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 36) return `${hours} h ago`;
+    return `${Math.round(hours / 24)} days ago`;
+  };
+
+  /** The opened part of a card: each person, their picture, their hours. */
+  function renderPeople(id) {
+    const held = col.people.get(id);
+    if (!held) return '<div class="small muted">fetching who has contributed…</div>';
+    if (held.error) return `<div class="small warn-text">${esc(held.error)}</div>`;
+    const data = held.data || {};
+    const people = data.people || [];
+    if (!people.length) {
+      return '<div class="small muted">Nothing accepted yet from anybody.</div>';
+    }
+    const now = Number(data.serverTime) || (Date.now() / 1000);
+    const rows = people.map((person) => {
+      const picture = person.avatar
+        ? `<img class="col-avatar" src="${esc(person.avatar)}" alt="" loading="lazy">`
+        : `<span class="col-avatar blank">${esc((person.name || '?').slice(0, 1).toUpperCase())}</span>`;
+      const filters = Object.entries(person.byFilter || {})
+        .map(([name, hours]) => `<span class="col-chip">${esc(name)} ${Number(hours).toFixed(1)}h</span>`)
+        .join('');
+      const when = person.lastReported ? `last report ${ago(now - person.lastReported)}` : '';
+      const scopes = (person.telescopes || []).join(', ');
+      return `<div class="col-person">
+        ${picture}
+        <div class="col-person-body">
+          <div><b>${esc(person.name)}</b>${scopes ? ` <span class="small muted">${esc(scopes)}</span>` : ''}</div>
+          <div class="col-chips">${filters}</div>
+          <div class="small muted">${person.frames ? `${person.frames} frames · ` : ''}${
+            person.nights ? `${person.nights} night${person.nights === 1 ? '' : 's'} · ` : ''}${esc(when)}</div>
+        </div>
+        <div class="col-person-hours mono">${Number(person.hours).toFixed(1)} h</div>
+      </div>`;
+    }).join('');
+    const total = Number(data.hours || 0).toFixed(1);
+    return `<div class="small muted col-detail-head">${people.length} ${people.length === 1 ? 'person' : 'people'} · ${total} h accepted${
+      data.refused ? ` · ${data.refused} report${data.refused === 1 ? '' : 's'} refused` : ''}</div>${rows}`;
+  }
+
+  /** Fetch who has contributed to one collaboration and fill its open card. */
+  async function loadPeople(id) {
+    try {
+      const data = await app.api(`/api/collab/projects/${encodeURIComponent(id)}/people`);
+      col.people.set(id, { at: Date.now(), data });
+    } catch (error) {
+      col.people.set(id, { at: Date.now(), error: error.message || String(error) });
+    }
+    const box = document.querySelector(`[data-col-detail="${CSS.escape(id)}"]`);
+    if (box) box.innerHTML = renderPeople(id);
+  }
+
+  /** Re-read the open collaborations and redraw them, keeping what is open.
+   *  The create form is left alone: it is the one place on the page somebody
+   *  may be in the middle of typing. */
+  async function refreshBrowse() {
+    col.lastRefresh = Date.now();
+    try {
+      col.state = await app.api('/api/collab');
+    } catch (error) {
+      console.error(error);
+      return;
+    }
+    // A ticked-off "turn to angle" box survives the redraw.
+    const turned = {};
+    document.querySelectorAll('[data-col-turn]').forEach((box) => { turned[box.dataset.colTurn] = box.checked; });
+    drawBrowse();
+    document.querySelectorAll('[data-col-turn]').forEach((box) => {
+      if (box.dataset.colTurn in turned) box.checked = turned[box.dataset.colTurn];
+    });
+    drawTask();
+    for (const id of col.expanded) loadPeople(id);
   }
 
   /** A collaboration's patch of sky on the survey, with its rectangle drawn.
@@ -923,10 +1032,16 @@
   app.onStatus((status, tab) => {
     syncSettings(app.state.settings);
     if (tab !== 'collab') { arrived = false; return; }
-    if (arrived) return;
-    arrived = true;
-    drawTargetPick();
-    load(true);
+    if (!arrived) {
+      arrived = true;
+      drawTargetPick();
+      col.lastRefresh = Date.now();
+      load(true);
+      return;
+    }
+    // While the tab stays open, the cards follow the server: progress moves
+    // as reports land, and a card opened on its contributors keeps up.
+    if (!col.loading && Date.now() - col.lastRefresh > REFRESH_SECONDS * 1000) refreshBrowse();
   });
 
   if (document.readyState === 'loading') {

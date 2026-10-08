@@ -539,6 +539,10 @@ class CollabClient:
         """Everybody's exposure on every cell of a project's region, per filter."""
         return self._call("GET", f"/api/v1/agent/projects/{project_id}/depth")
 
+    def people(self, project_id: str) -> dict[str, Any]:
+        """Who has put what into a project: each person's accepted hours."""
+        return self._call("GET", f"/api/v1/agent/projects/{project_id}/people")
+
     def tasks(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._tasks)

@@ -92,6 +92,19 @@
                                         </Grid>
                                     </Border>
                                     <TextBlock Opacity="0.6" FontSize="11" Text="{Binding FramingCaption}" Visibility="{Binding FramingCaption, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                                    <!--  How well placed it is tonight: altitude through the dark, transit marked.  -->
+                                    <Border
+                                        Width="320"
+                                        Height="90"
+                                        Margin="0,6,0,2"
+                                        HorizontalAlignment="Left"
+                                        Background="Black"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        Visibility="{Binding HasTransit, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                                        <Image Source="{Binding Transit}" Stretch="Uniform" />
+                                    </Border>
+                                    <TextBlock Opacity="0.6" FontSize="11" Text="{Binding TransitText}" TextWrapping="Wrap" Visibility="{Binding TransitText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                                     <TextBlock Opacity="0.85" Text="{Binding ProgressText}" />
                                     <TextBlock Opacity="0.7" Text="{Binding PeopleText}" TextWrapping="Wrap" />
                                     <TextBlock

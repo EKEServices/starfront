@@ -55,6 +55,22 @@ namespace Starfront.Collab.Ui {
 
         public bool HasFraming => framing != null;
 
+        private ImageSource transit;
+        private string transitText = "";
+
+        /// <summary>The target's altitude through tonight, as a chart: how well placed it is at a glance.</summary>
+        public ImageSource Transit {
+            get => transit;
+            set { transit = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(HasTransit)); }
+        }
+
+        public bool HasTransit => transit != null;
+
+        public string TransitText {
+            get => transitText;
+            set { transitText = value ?? ""; RaisePropertyChanged(); }
+        }
+
         public string FramingNote {
             get => framingNote;
             set { framingNote = value ?? ""; RaisePropertyChanged(); }
@@ -225,6 +241,7 @@ namespace Starfront.Collab.Ui {
                     var task = tasks.FirstOrDefault(t => t.Live && t.Project == listing.Id);
                     var row = new ProjectRowVM(listing, task, this);
                     Projects.Add(row);
+                    LoadTransit(row);
                     _ = LoadFramingAsync(row);
                 }
                 Tonight.Clear();
@@ -253,6 +270,21 @@ namespace Starfront.Collab.Ui {
                 await Runtime.Session.PollAsync(CancellationToken.None);
             } catch (Exception ex) {
                 Message = ex.Message;
+            }
+        }
+
+        /// <summary>The altitude chart for a row, drawn here and now: a few dozen transforms, on the UI thread it is called on.</summary>
+        private void LoadTransit(ProjectRowVM row) {
+            var region = row.Listing.Region;
+            if (region == null || !Runtime.Ready) return;
+            try {
+                var floor = row.Listing.Requirements?.MinAltitude ?? 30.0;
+                var (image, caption) = SkyThumbnails.Transit(region, Runtime.Host.Profile, Runtime.Host.Nighttime, floor,
+                                                             ProjectRowVM.ThumbWidth, 90);
+                row.Transit = image;
+                row.TransitText = caption;
+            } catch (Exception ex) {
+                Logger.Debug($"Starfront: transit chart - {ex.Message}");
             }
         }
 
