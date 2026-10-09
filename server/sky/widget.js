@@ -453,4 +453,14 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
+
+  // A page builder that re-renders its sections - Shopify's theme editor
+  // does, on every change - replaces the element without running this
+  // script again. Any sky element that appears later is built as it
+  // arrives, and the page may ask directly: window.StarfrontSky.start().
+  if (window.MutationObserver) {
+    new MutationObserver(function () { start(); }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  document.addEventListener('shopify:section:load', start);
+  window.StarfrontSky = { start: start };
 })();
