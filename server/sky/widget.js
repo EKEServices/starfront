@@ -9,8 +9,7 @@
  * It draws the sky as a planetarium does - the dome overhead, the bright
  * stars in place, the horizon as a line with the compass points on it and
  * everything below it darkened - and on it every telescope that shares its
- * position: a mark where it points now, its name and target, and the track
- * it has drawn across the sky through the night. Drag to look around,
+ * position: a mark where it points now, its name and target. Drag to look around,
  * scroll or pinch to zoom, press "Overhead" to come back to the whole sky.
  *
  * Options go on the element as data attributes:
@@ -21,6 +20,7 @@
  *   data-title="Tonight at Starfront"  the heading; blank for none
  *   data-height="auto"   pixels, or "auto" for two thirds of the width
  *   data-fov="196"       degrees of sky across the view to start with; 180 is horizon to horizon
+ *   data-tracks="1"      also draw each telescope's track through the night (off by default)
  *
  * Everything it asks for is public and read-only. Nothing is written
  * anywhere, nothing is stored in the visitor's browser.
@@ -86,7 +86,8 @@
       lon: host.hasAttribute('data-lon') ? Number(host.getAttribute('data-lon')) : -99.1,
       title: host.hasAttribute('data-title') ? host.getAttribute('data-title') : 'Tonight at Starfront',
       height: host.getAttribute('data-height') || 'auto',
-      fov: Math.max(20, Math.min(220, Number(host.getAttribute('data-fov')) || 196))
+      fov: Math.max(20, Math.min(220, Number(host.getAttribute('data-fov')) || 196)),
+      tracks: host.getAttribute('data-tracks') === '1'
     };
 
     host.classList.add('starfront-sky');
@@ -145,7 +146,8 @@
     host.appendChild(list);
     var foot = document.createElement('div');
     foot.className = 'sf-foot';
-    foot.textContent = 'The sky over the observatory right now, north up and east to the left as you see it looking up. Drag to look around, scroll to zoom. The dark part is below the horizon. Tracks show where each telescope has pointed through the night.';
+    foot.textContent = 'The sky over the observatory right now, north up and east to the left as you see it looking up. Drag to look around, scroll to zoom. The dark part is below the horizon.'
+      + (opts.tracks ? ' Tracks show where each telescope has pointed through the night.' : '');
     host.appendChild(foot);
 
     var stars = [];
@@ -296,18 +298,22 @@
 
       if (!data) return;
       var rows = data.telescopes || [];
-      // Tracks first, under the marks.
-      rows.forEach(function (t, index) {
-        var colour = palette(index);
-        var trail = t.trail || [];
-        if (trail.length > 1) {
-          var tp = [];
-          for (var k = 0; k < trail.length; k++) tp.push({ ra: trail[k][1], dec: trail[k][2] });
-          ctx.globalAlpha = t.online ? 0.75 : 0.3;
-          curve(P, tp, colour, 1.5);
-          ctx.globalAlpha = 1;
-        }
-      });
+      // The night's tracks, under the marks, only when asked for: a slew
+      // from one target to the next draws a line right across the sky, and
+      // a dozen of them read as a tangle rather than a story.
+      if (opts.tracks) {
+        rows.forEach(function (t, index) {
+          var colour = palette(index);
+          var trail = t.trail || [];
+          if (trail.length > 1) {
+            var tp = [];
+            for (var k = 0; k < trail.length; k++) tp.push({ ra: trail[k][1], dec: trail[k][2] });
+            ctx.globalAlpha = t.online ? 0.75 : 0.3;
+            curve(P, tp, colour, 1.5);
+            ctx.globalAlpha = 1;
+          }
+        });
+      }
       rows.forEach(function (t, index) {
         var colour = palette(index);
         var p = P.to(t.ra, t.dec);

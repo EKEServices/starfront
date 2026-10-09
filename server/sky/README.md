@@ -12,9 +12,10 @@ bright stars in place, the horizon as a ring with the compass points on it
 and everything below it darkened. Visitors drag to look around, scroll or
 use the buttons to zoom, and press Overhead to come back to the whole sky.
 On it, every telescope that shares its position: a mark where it points
-now, its name and target, and the track it has drawn across the sky through
-the night. Underneath, a list of the telescopes with what each is on.
-`data-fov` sets how much sky the view opens on; 180 is horizon to horizon.
+now, its name and target. Underneath, a list of the telescopes with what
+each is on. `data-fov` sets how much sky the view opens on; 180 is horizon
+to horizon. `data-tracks="1"` also draws each telescope's track through the
+night; it is off by default because a dozen slews read as a tangle.
 
 Only what a telescope chooses to say is shown: its name, its target, its
 pointing. No owners, no ids, no pictures. A telescope with position sharing
