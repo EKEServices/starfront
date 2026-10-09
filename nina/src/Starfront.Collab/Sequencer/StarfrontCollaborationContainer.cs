@@ -650,7 +650,7 @@ namespace Starfront.Collab.Sequencer {
                                                                     imageSaveMediator, applicationStatusMediator, safetyMonitorMediator);
                 drift.DistanceArcMinutes = settings.RecentreArcMinutes;
                 drift.AfterExposures = 1;
-                drift.Name = Icons.Label("Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name", "Center after drift");
+                drift.Name = Icons.Label("Lbl_SequenceTrigger_CenterAfterDriftTrigger_Name", "Center after drift");
                 drift.Icon = Icons.Find("PlatesolveSVG");
                 drift.Category = "Starfront";
                 panel.Add(drift);

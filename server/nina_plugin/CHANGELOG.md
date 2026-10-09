@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.13
+
+- The drift trigger the container builds inside each field is named *Center After Drift* again instead of "MISSING LABEL Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name". The label key was wrong, and the fallback did not recognise N.I.N.A.'s "MISSING LABEL" answer as missing.
+
 ## 1.0.0.12
 
 - A meridian-flip trigger on a container above the Starfront one no longer runs the flip routine (autofocus, recentre, settle) the moment the Starfront container is next. The container told the trigger its next instruction would take the whole night, so the trigger decided it had no time left; it now answers with one exposure, as *Take Many Exposures* does, and the trigger gets its look again before every item inside.

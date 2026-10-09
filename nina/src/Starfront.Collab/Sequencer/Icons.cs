@@ -17,7 +17,11 @@ namespace Starfront.Collab.Sequencer {
         public static string Label(string key, string fallback) {
             try {
                 var text = Loc.Instance[key];
-                return string.IsNullOrWhiteSpace(text) || text == key ? fallback : text;
+                // N.I.N.A. answers an unknown key with "MISSING LABEL <key>"
+                // rather than nothing, and that is what one tester saw on
+                // the drift trigger inside their field.
+                return string.IsNullOrWhiteSpace(text) || text == key
+                    || text.StartsWith("MISSING LABEL", StringComparison.Ordinal) ? fallback : text;
             } catch (Exception) {
                 return fallback;
             }
