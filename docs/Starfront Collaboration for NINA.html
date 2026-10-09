@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Starfront Collaboration for N.I.N.A.</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 10.5pt; line-height: 1.5; color: #1a1d24; max-width: 174mm; margin: 0 auto; }
+  h1 { font-size: 24pt; margin: 0 0 2px; }
+  .sub { color: #5c6470; margin: 0 0 18px; font-size: 10.5pt; }
+  h2 { font-size: 14pt; margin: 24px 0 8px; border-bottom: 1px solid #d6dae2; padding-bottom: 4px; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14px 0 4px; page-break-after: avoid; }
+  p { margin: 0 0 8px; }
+  ul, ol { margin: 0 0 8px 22px; padding: 0; }
+  li { margin: 0 0 4px; }
+  b { color: #0b0e14; }
+  code { font-family: Consolas, monospace; font-size: 9.5pt; background: #f1f4f8; padding: 1px 4px; border-radius: 3px; }
+  pre { font-family: Consolas, monospace; font-size: 9.5pt; background: #f1f4f8; padding: 8px 10px; border-radius: 4px; white-space: pre-wrap; margin: 6px 0 10px; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 10pt; page-break-inside: avoid; }
+  th, td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid #e3e6ec; }
+  th { background: #f1f4f8; font-weight: 600; }
+  .note { background: #eef8f2; border-left: 3px solid #7ee7a5; padding: 7px 11px; margin: 10px 0; }
+  .warn { background: #fdf3e7; border-left: 3px solid #d9a03d; padding: 7px 11px; margin: 10px 0; }
+  .toc { columns: 2; column-gap: 24px; font-size: 10pt; margin: 0 0 6px; }
+  .toc li { break-inside: avoid; }
+</style>
+</head>
+<body>
+<h1>Starfront Collaboration for N.I.N.A.</h1>
+<p class="sub">How to take part in a Starfront collaboration from N.I.N.A. with the Starfront Collaboration plugin. For plugin 1.0.0.13, October 2026.</p>
+
+<ol class="toc">
+  <li>Before you start</li>
+  <li>Install the plugin</li>
+  <li>Sign in with Discord</li>
+  <li>Your filters and exposures</li>
+  <li>Join a collaboration</li>
+  <li>Put it in your sequence</li>
+  <li>What happens during the night</li>
+  <li>Checking on it, and when something is wrong</li>
+  <li>Questions people ask</li>
+</ol>
+
+<h2>1. Before you start</h2>
+<p>You need N.I.N.A. 3.2 or later, membership of the Starfront Discord server, and a rig that can plate solve.</p>
+<ul>
+  <li><b>N.I.N.A. 3.2.0 or later.</b> Help &gt; About shows the version. The plugin runs on 3.2 and 3.3 and will not install on older builds.</li>
+  <li><b>A Starfront Discord account.</b> Only members of the Starfront Discord server can sign in; there is no separate password or account. If you are not in the server yet, ask in Discord before you start.</li>
+  <li><b>Plate solving that works.</b> Each field or panel is centred with N.I.N.A.'s own <i>Center</i> instruction, so your plate solver (ASTAP, PlateSolve2, Astrometry.net) must be set up under Options &gt; Plate Solving and working. The <i>Center</i> instruction from the Advanced Sequencer palette is a good test.</li>
+  <li><b>Your usual profile, connected as usual.</b> Focal length (Options &gt; Equipment &gt; Telescope) and pixel size (camera) must be filled in; the server uses them to work out what your camera covers.</li>
+  <li><b>Guiding is optional</b>, but your usual guider, autofocus and meridian-flip arrangements keep working; the plugin only decides where to point and what to shoot.</li>
+</ul>
+
+<h2>2. Install the plugin</h2>
+<p>The plugin comes from Starfront's own plugin repository, not from the public list, so N.I.N.A. has to be told where to look once.</p>
+<ol>
+  <li>In N.I.N.A. go to <b>Options &gt; General</b> and find <b>Plugin Repositories</b>.</li>
+  <li>Press <b>+</b> and enter exactly:
+    <pre>https://collab.starfront.space/nina</pre></li>
+  <li>Go to the <b>Plugins</b> tab (left sidebar) and open <b>Available</b>. <b>Starfront Collaboration</b> is listed; press <b>Install</b>.</li>
+  <li><b>Restart N.I.N.A.</b> Plugins only load at start-up.</li>
+  <li>Afterwards the plugin appears under Plugins &gt; Installed, and updates show there too; install them like any other plugin update.</li>
+</ol>
+<p>If Starfront Collaboration is not listed, check the address for typing errors, then press the refresh button on the Plugins tab. The server address must be reachable from the PC; a browser visit to <code>https://collab.starfront.space/api/v1/health</code> should show a short line of text.</p>
+
+<h2>3. Sign in with Discord</h2>
+<p>Signing in once ties this PC's telescope to your Discord account; after that the plugin checks in with the server by itself.</p>
+<ol>
+  <li>Go to <b>Options &gt; Plugins</b> and select <b>Starfront Collaboration</b> in the list. Its page opens on the right.</li>
+  <li>Under <b>Account</b>, press <b>Sign in with Discord</b>. Your browser opens on Discord's authorisation page.</li>
+  <li>Sign in to Discord if asked, then <b>Authorize</b>. Discord only tells Starfront who you are and which server roles you hold; it cannot read your messages.</li>
+  <li>The browser shows <b>Signed in as &lt;your name&gt;</b>. Go back to N.I.N.A.: the page now says you are signed in and that this telescope is enrolled under your account. Enrolment happens by itself and names the telescope after your N.I.N.A. profile.</li>
+  <li>Press <b>Check in now</b> once. The status line should read <b>Checked in just now</b>.</li>
+</ol>
+<p>If the page says the sign-in code expired, press the button again; you have ten minutes each time. If Discord says you are not a member of the server, join the Starfront Discord first.</p>
+<p><b>Several telescopes?</b> Sign in on each PC. Each gets its own telescope under your account, and the server deals each one its own share. Signing in on a second PC may sign the first one's <i>account</i> out, but the telescope stays enrolled and keeps working; nothing needs redoing.</p>
+<p><b>Sign out</b> forgets the sign-in and the telescope on this PC. Frames already shot stay recorded locally and are reported after the next sign-in.</p>
+
+<h2>4. Your filters and exposures</h2>
+<p>You keep choosing how your frames are exposed; the collaboration only decides which filters tonight and how many frames go where.</p>
+<p>On the same options page, under <b>Your exposures</b>, the table lists the filters of your N.I.N.A. filter wheel by their own names. Type the <b>seconds per sub</b> you normally shoot each one at, for example 300 for Ha and 120 for luminance. Your share of every collaboration is dealt at these lengths, so every light calibrates against the darks you already have. The server works out for itself that your "Ha 3nm" is the project's Ha; you never rename anything.</p>
+<p>A project may set a shortest or longest sub it will accept. If one of yours falls outside, joining tells you which filter to change, by its wheel name.</p>
+
+<h3>Under Camera</h3>
+<table>
+  <tr><th>Setting</th><th>What it does</th><th>Usual value</th></tr>
+  <tr><td>Gain, Offset</td><td>Used for every collaboration frame</td><td>-1 = the camera's default from your profile</td></tr>
+  <tr><td>Binning</td><td>Binning of collaboration frames</td><td>1</td></tr>
+  <tr><td>Dither after every N frames</td><td>A dither trigger inside each field or panel</td><td>0, and keep using your own dither trigger around the container</td></tr>
+  <tr><td>Recentre after drifting (arcmin)</td><td>Each field checks its own drift after every frame and recentres on its own coordinates when it crosses this</td><td>5. Do not add a Center After Drift trigger above the container; see step 6</td></tr>
+  <tr><td>Rotate to the project's angle</td><td>With a rotator connected, turn the camera to the angle the project asks for</td><td>ticked</td></tr>
+  <tr><td>Camera angle (no rotator)</td><td>Read automatically from the first plate solve of each field</td><td>nothing to type</td></tr>
+</table>
+
+<h3>Under This telescope</h3>
+<table>
+  <tr><th>Setting</th><th>What it does</th></tr>
+  <tr><td>Name on the chart</td><td>How your telescope is listed to everyone else; your profile's name unless you type one</td></tr>
+  <tr><td>Hours a night to give</td><td>How much of a night the deal is sized to; 0 lets the server assume six. A one-hour night gets about one hour's frames</td></tr>
+  <tr><td>Show where I point</td><td>Sends your mount's RA and Dec and what it is doing to the others' sky charts. Never your location</td></tr>
+  <tr><td>Check in every (minutes)</td><td>How often the plugin talks to the server; 10 is fine</td></tr>
+  <tr><td>Server</td><td>Leave as it is</td></tr>
+</table>
+
+<h2>5. Join a collaboration</h2>
+<p>Joining is done from the <b>Starfront</b> panel on the Imaging tab, and it is a decision you make; nothing is ever shot for a project you have not joined.</p>
+<ol>
+  <li>Open the <b>Imaging</b> tab. In the panel list at the top (the row of icons where Image History and HFR History live) switch on <b>Starfront</b>. It docks like any other panel; drag it where you want it.</li>
+  <li>The panel shows the server status, who is online, and every open collaboration with:
+    <ul>
+      <li>what it is: a single field or a mosaic, its size, and the hours wanted per filter;</li>
+      <li>how far it has got: <i>23% done - 4.5 h collected</i>, which is the share of the field at full depth, not a total of hours;</li>
+      <li>who is on it and how many of them are online now;</li>
+      <li>whether <b>your telescope qualifies</b>, and if not, why: focal length, star size, a filter too wide, a sub too short;</li>
+      <li>a picture of its sky with the region outlined in yellow, and a graph of the target's altitude through tonight: dusk to dawn, your horizon and the project's floor shaded, transit marked, with one line saying when it is up. Once you have joined, your own panels are drawn on the sky in white and tonight's share in green. <b>Show in Framing Assistant</b> opens N.I.N.A.'s Framing Assistant on the region at the project's angle, with your camera's footprint.</li>
+    </ul></li>
+  <li>Press <b>Join</b> on a collaboration you qualify for. The server hands your telescope its own part of the sky and, if it is already night, deals tonight's work straight away. The panel's <b>Tonight</b> line shows it, for example <i>M31: the field, 14 x Ha, 10 x OIII</i> or <i>Heart Nebula: 4 panels, 12 x OIII each</i>.</li>
+  <li><b>Leave</b> takes you off it. Frames already shot stay credited to the project.</li>
+</ol>
+<p>You can be on several collaborations at once; the sequence container shoots all of them, or the one you pick on it.</p>
+
+<h2>6. Put it in your sequence</h2>
+<p>One container does the whole night: drop <b>Starfront collaboration</b> where a target would go and keep your usual triggers around it.</p>
+<ol>
+  <li>Open the <b>Sequencer</b> tab in <b>Advanced</b> mode (the plugin cannot be used from the simple sequencer).</li>
+  <li>In the instruction palette on the right, find the <b>Starfront</b> category and drag <b>Starfront collaboration</b> into the <b>Targets</b> area of your sequence, where you would normally put a Deep Sky Object container.</li>
+  <li>On the container, <b>Collaboration</b> chooses what it shoots: <i>Every collaboration I have joined</i> (the default), or one project.</li>
+  <li>Put the container <b>directly in the Targets area</b>, never inside one of your own Deep Sky Object containers. A trigger on a target container takes its coordinates from <i>that</i> target: one tester's Center After Drift trigger, sitting on an M33 container around the Starfront one, measured 889 arcminutes of "drift" and slewed the mount to M33 in the middle of the M31 run. Nesting also costs a slew and a plate solve to the wrong target at every start.</li>
+  <li>Triggers that do not care about the target, <i>Autofocus after HFR increase</i> or <i>after time</i> and <i>Meridian Flip</i>, go on the Starfront container itself and fire around every frame. <b>Do not add Center After Drift or Dither after exposures above it.</b> Every field the container builds centres itself, dithers at the interval set in the options, and recentres on its own coordinates if it drifts further than the arcminutes set in the options. You will see that Center After Drift trigger inside each field while it runs; it is the plugin's own and should stay enabled.</li>
+  <li>Leave the container's own <b>Conditions</b> empty. It runs tonight's deal once and finishes; a <i>Loop until time</i> condition is honoured as a stop, never as a reason to shoot the deal twice.</li>
+  <li>Keep your <b>Start</b> and <b>End</b> areas as they are: cooling, unparking, guiding start, and parking and warming at the end.</li>
+</ol>
+<p>The line under the container shows what the last check-in dealt, and the plugin flags anything missing before you run: not signed in, no exposures set, camera or mount not connected.</p>
+<p>A simple arrangement that works:</p>
+<pre>Start
+  Cool camera, Unpark, Start guiding
+Targets
+  Starfront collaboration     triggers: Meridian Flip, Autofocus after HFR increase
+End
+  Warm camera, Park</pre>
+
+<h2>7. What happens during the night</h2>
+<p>When the sequence reaches the container it asks the server once what this telescope was dealt tonight, then works through it with N.I.N.A.'s own instructions.</p>
+<p><b>The deal.</b> The server has every telescope's part of the sky and everything anyone has already collected. Each night it deals you the frames to put on your field, or on a handful of panels of a mosaic, sized to the hours you said you give. On a mosaic that is one filter for the whole night, narrowband on a bright Moon, broadband or OIII on a dark one. On a single field it is one or more filters, starting with the one the project is furthest behind in against its goal, so the field's depth evens out across the filters; a night cut short loses frames from the deepest filter, not the thinnest. A night's deal holds for the whole night: nothing changes under a running sequence, however many frames arrive from elsewhere at 2 a.m. The next night is dealt afresh from what everyone really collected, and a project that adds a filter deals it to you on the next fresh deal if your wheel carries it.</p>
+<p><b>The run.</b> On a mosaic, if your camera has no rotator and the plugin does not yet know the angle it sits at, or the panels were laid for a different angle, the container first slews to the first panel and plate-solves once; the server then lays your panels again for the real angle before anything is shot. The container builds one target per field or panel, visible in the sequencer as it runs, each containing: <i>is it up?</i>, <i>Slew and center</i> (or <i>Slew, center and rotate</i> with a rotator), <i>Switch filter</i>, <i>Take many exposures</i>. Fields that are up go first, the one that sets soonest at the front; fields still to rise come after. The Starfront panel on the Imaging tab lists them all with where each has got to: done, shooting (frame 4 of 12, or slewing and centring), waiting and when it rises, skipped and why. The list updates with every frame and stays until the next run.</p>
+<p><b>Stopping and starting.</b> A sequence started again during the night carries on where it left off: frames already shot on a field tonight come off its count, and a finished field is not shot again.</p>
+<p><b>Skipping.</b> A field below the project's altitude floor, below your horizon file, or too near a Moon that is up is skipped for now, and the container comes back to it once the others are done. One that never clears the floor in the next twelve hours is left out of tonight and logged.</p>
+<p><b>Your frames.</b> Each light is saved by N.I.N.A. as usual. Its target name is the project's name, plus <i>panel 7</i> on a mosaic, so your file pattern's <code>$$TARGETNAME$$</code> sorts them. The FITS header carries <code>STARFRNT</code> (the project) and <code>SFPANEL</code>.</p>
+<p><b>Reporting.</b> Every light is credited to the sky it covered, with its star size and guiding error, kept on this PC, and sent to the server at the next check-in. If the server was down, the frames go the next time it answers; nothing is lost. The server judges each night against the project's rules and the panel shows accepted or rejected, with the reason.</p>
+<p><b>When it ends.</b> The container finishes when the deal is shot, and your End instructions run as normal. If you have time to spare after it, put another target after the container.</p>
+
+<h2>8. Checking on it, and when something is wrong</h2>
+<p>Everything the plugin does is written to N.I.N.A.'s log with the prefix <b>Starfront:</b>, so the log answers most questions.</p>
+<p>The log is under <code>%LOCALAPPDATA%\NINA\Logs</code> (paste that into the Windows Explorer address bar); the newest file is tonight's. Search it for <code>Starfront:</code>. The Starfront panel's status line and its <b>Frames reported</b> list show the same things in short.</p>
+<table>
+  <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
+  <tr><td><i>Not signed in</i></td><td>No Discord sign-in on this PC</td><td>Options &gt; Plugins &gt; Starfront Collaboration &gt; Sign in with Discord</td></tr>
+  <tr><td><i>This telescope's token is no longer accepted</i></td><td>The telescope was removed on the server, or the settings file was copied from another PC</td><td>Sign out, then sign in again</td></tr>
+  <tr><td><i>the collaboration server could not be reached</i></td><td>No internet, or the server is down</td><td>The deal already in hand still runs; frames are reported when it answers</td></tr>
+  <tr><td><i>set an exposure for Ha in the exposure table first</i></td><td>A filter the project wants has no seconds against it</td><td>Fill it in under Options &gt; Plugins</td></tr>
+  <tr><td><i>this telescope shoots Ha at 120s and the project wants 300s or longer</i></td><td>Your sub length is outside what the project accepts</td><td>Change that filter's seconds, or choose another project</td></tr>
+  <tr><td><i>Nothing dealt to this telescope tonight</i></td><td>You joined, but it is not night yet, or the collaboration is finished for your part of the sky</td><td>Check the Tonight line after dark</td></tr>
+  <tr><td><i>skipped for now: at 18°, below the 25° floor</i></td><td>The field is too low right now</td><td>Nothing; the container comes back to it</td></tr>
+  <tr><td><i>rejected - stars averaged 4.2", project wants 3.5" or better</i></td><td>The server judged the night against the project's rules</td><td>Nothing is lost locally; the coordinator can overrule a verdict</td></tr>
+  <tr><td>Plugin not in the Plugins list</td><td>N.I.N.A. older than 3.2, or the repository address mistyped</td><td>Update N.I.N.A.; check Options &gt; General &gt; Plugin Repositories</td></tr>
+  <tr><td>Meridian Flip ran at the very start of the container</td><td>Plugin older than 1.0.0.12</td><td>Update the plugin from Plugins &gt; Installed</td></tr>
+</table>
+<p>The plugin never touches your settings, profile or files beyond writing its own under <code>%LOCALAPPDATA%\NINA\PluginSettings</code>. Uninstalling it from the Plugins tab removes it completely.</p>
+
+<h2>9. Questions people ask</h2>
+<p><b>Can I still choose my exposure times?</b> Yes; that is what the exposure table is. The collaboration decides which filters tonight and how many frames go where, never how a frame is exposed.</p>
+<p><b>I set one hour but it dealt me more.</b> That was a flaw in the server's dealing, fixed on 9 October 2026. A one-hour night now gets about an hour of one filter, the one the project needs most.</p>
+<p><b>Will it move my rotator?</b> Only if one is connected and <i>Rotate to the project's angle</i> is ticked. Without a rotator it shoots at the angle the camera sits and tells the server, so your panels are laid along your camera's axes.</p>
+<p><b>What if clouds stop the night halfway?</b> Whatever was shot is credited and reported. The next night's deal starts from what everyone really collected, so nothing has to be made up by hand.</p>
+<p><b>Can I run my own targets the same night?</b> Yes. Put them before or after the container in the Targets area, with their own conditions. The container only takes the hours the deal is sized to.</p>
+<p><b>Does it see my location?</b> No. The server is told your focal length, pixel size, sensor size, filters, exposures and, if you allow it, where the mount points. Your site, horizon and local times stay on your PC; that is why the plugin works out the Moon and altitudes itself.</p>
+<p><b>I have Starfront and N.I.N.A. on different telescopes.</b> That is fine. Both talk to the same server, and the same person can own telescopes of either kind.</p>
+<p><b>Who do I ask?</b> The Starfront Discord server, where the people running the collaborations are. Say which telescope, and paste the <code>Starfront:</code> lines from the log for the night in question, or the whole log file.</p>
+</body>
+</html>

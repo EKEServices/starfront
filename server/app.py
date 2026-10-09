@@ -1703,6 +1703,18 @@ def nina_download(name: str):
     return FileResponse(path, media_type="application/zip", filename=name)
 
 
+@app.get("/nina/guide")
+def nina_guide():
+    """The plugin's instruction guide as a PDF, staged beside the releases,
+    for a link on the website and in Discord."""
+    path = NINA_DIR / "Starfront Collaboration for NINA.pdf"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no guide")
+    return FileResponse(path, media_type="application/pdf",
+                        filename="Starfront Collaboration for NINA.pdf",
+                        content_disposition_type="inline")
+
+
 @app.get("/nina/changelog")
 def nina_changelog():
     """The plugin's change log, which its manifests link to. A copy of

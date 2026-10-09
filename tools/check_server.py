@@ -143,6 +143,7 @@ os.environ["STARFRONT_NINA_DIR"] = str(NINA_DIR)
                   "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
 (NINA_DIR / "notes.txt").write_text("not a release", encoding="utf-8")
 (NINA_DIR / "CHANGELOG.md").write_text("# Change log\n\n## 1.0.0.0\n", encoding="utf-8")
+(NINA_DIR / "Starfront Collaboration for NINA.pdf").write_bytes(b"%PDF-1.4\n%test\n")
 # The installers the server offers at /download: two versions, where the
 # newer one sorts first only by number, and a file that is not an installer.
 DOWNLOAD_DIR = Path(tempfile.mkdtemp())
@@ -1818,6 +1819,11 @@ request = urllib.request.Request(f"{BASE}/nina/changelog", method="GET")
 with urllib.request.urlopen(request, timeout=10) as response:
     log = response.read().decode("utf-8")
 case("the plugin's change log is served for the manifests' link", "## 1.0.0.0" in log)
+request = urllib.request.Request(f"{BASE}/nina/guide", method="GET")
+with urllib.request.urlopen(request, timeout=10) as response:
+    guide = response.read(), response.headers.get("Content-Type", ""), response.headers.get("Content-Disposition", "")
+case("the plugin's guide is served as a PDF to read in the browser",
+     guide[0].startswith(b"%PDF") and "pdf" in guide[1] and "inline" in guide[2], f"{guide[1]} {guide[2]}")
 
 # ---------------------------------------------------- the Starfront download
 print("\n-- the download page --")

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How Starfront deals exposures</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 11pt; line-height: 1.5; color: #1a1d24; max-width: 170mm; margin: 0 auto; }
+  h1 { font-size: 22pt; margin: 0 0 4px; }
+  .sub { color: #5c6470; margin: 0 0 22px; font-size: 10.5pt; }
+  h2 { font-size: 14.5pt; margin: 26px 0 8px; border-bottom: 1px solid #d6dae2; padding-bottom: 4px; }
+  p { margin: 0 0 10px; }
+  ul, ol { margin: 0 0 10px 22px; padding: 0; }
+  li { margin: 0 0 5px; }
+  b { color: #0b0e14; }
+  .note { background: #f1f4f8; border-left: 3px solid #7ee7a5; padding: 8px 12px; margin: 12px 0; }
+  .example { font-size: 10.5pt; color: #3a4150; }
+</style>
+</head>
+<body>
+<h1>How Starfront deals exposures</h1>
+<p class="sub">What the collaboration server does when it decides who shoots what, each night. Describes the server as of Starfront 0.2.41 with the thinnest-first dealing of 9 October 2026, and plugin 1.0.0.12.</p>
+
+<h2>1. What the server knows before it deals</h2>
+
+<p><b>The project.</b> A region of sky, a list of filters with a depth goal in hours for each, acceptance rules (focal length, pixel scale, star size, guiding error, exposure range), a minimum number of frames per visit, and a kind: a single field or a mosaic.</p>
+
+<p><b>Each telescope that joined</b> holds a task on the project. When it joined, the server read its profile and built that telescope's own private tiling of the region:</p>
+<ul>
+  <li>A <b>single-field</b> project gets one cell per telescope: that telescope's own camera frame, centred on the target. A small camera and a big camera both point at the object, each with its own footprint. Nobody mosaics a single field.</li>
+  <li>A <b>mosaic with a rotator</b> gets a north-up grid of that camera's field with ten percent overlap.</li>
+  <li>A <b>mosaic without a rotator</b> gets a grid laid along the camera's axes at the angle the camera sits, using the same arithmetic the program uses to lay its panels, so cell N on the server is panel N in the program.</li>
+</ul>
+
+<p>The task also records the telescope's exposure per filter, taken from the rig's own settings so that every light has a dark of the same length. A filter the rig does not carry is dropped at join time: a fixed-filter RGB rig on an H, O, R, G, B project holds a task for R, G and B only, and the H and O go to the rigs that have them. If a rig's exposure falls outside the project's limits, the join is refused with the filter named, rather than a night being shot and rejected. When the coordinator later adds or removes a filter on the project, every task follows on its next fresh deal: a new filter is added for the rigs that carry it, and a dropped one is dropped.</p>
+
+<p><b>The depth map.</b> Every accepted frame report carries the footprint it was actually shot over, the filter, and the seconds. For each telescope's cells, the server credits each cell with the seconds times the fraction of the cell that footprint covers. That yields two things at once: how deep the whole collaboration is on each cell per filter, and how much each individual telescope has shot on each cell. Footprints from other cameras do not line up with your cells and do not need to, because overlap is overlap. A footprint only counts as a telescope having <i>been on</i> a cell when it covers at least a quarter of it, so the ten percent overlaps between neighbouring panels do not read as visits.</p>
+
+<h2>2. The deal itself</h2>
+
+<p>Dealing runs whenever a rig joins or polls. The rig says which night it is in and what its Moon is doing. Tasks are walked in the order they were issued. For each one the server first decides whether the list holds or is remade.</p>
+
+<p><b>A list holds for its night.</b> A list made for tonight is never changed tonight, whatever arrives: frames landing, another rig joining, a rig's hours changing. It counts as spoken for, and the server moves on. Only the rig that asked, in a new night, is dealt afresh. Another rig's list from an earlier night is left alone until that rig asks in a new night, and it does not count as tonight's claim. A rig that never says which night it is in keeps its list for twenty hours.</p>
+
+<div class="note">A sequence drawn up at dusk must be the sequence that runs. A server that redrew lists at two in the morning cost a slew and a refocus every time it did, and nothing was wrong.</div>
+
+<p><b>Hours.</b> The rig's own hours-per-night setting, or six if it has none.</p>
+
+<p><b>One filter per night on a mosaic.</b> When a mosaic task has more than one filter, the server picks one for the whole night. The wheel never turns between panels, and the night's frames calibrate against one set of flats. The choice is made in two steps:</p>
+<ol>
+  <li>For each filter, work out the seconds still wanted across this rig's whole tiling, minus the seconds the rigs dealt earlier tonight have already committed to that filter. Filters with nothing left are set aside unless nothing else remains.</li>
+  <li>If the rig reported its Moon, compute a badness number: the fraction lit times the fraction of the dark hours the Moon is up. A half Moon up half the night scores 0.25; a thin crescent setting at dusk scores almost nothing. At 0.2 or above it is a narrowband night and only H, S and N are considered. Below that it is a dark night, and the moon-sensitive filters (L, R, G, B, O) are preferred so the narrowband is kept for the moonlit nights to come. If the preferred kind has no work left, the other kind is used rather than nothing.</li>
+</ol>
+<p>Among the candidates, the filter furthest behind its goal wins. Behind is measured against the goal, not in hours: a filter at a tenth of what was asked is thinner than one at a third, so a project that asks five hundred hours of Ha and a hundred of blue keeps that proportion. Ties go to the project's filter order.</p>
+<p class="example">Example: three rigs on equal Ha, OIII and SII goals under a dark sky. The first rig is sent OIII. Its commitment is counted, so the second rig sees Ha and SII as thinner and is sent Ha; the third gets SII. When OIII is finished, nobody is sent to polish it while Ha is thin.</p>
+<p><b>A single field shoots several filters in one night, thinnest first.</b> For each filter the rig carries, the server works out what it still wants tonight: the goal, less what the field already has, less what the rigs dealt earlier tonight are putting in, under the same Moon rule. Thinnest is measured as a fraction of the goal. The night is then poured into the filter furthest behind until it is level with the next, then the two share, and so on down; a filter with a bigger goal takes more hours to move the same fraction. A filter the pour never reaches is not shot tonight; one reached for less than a stack's worth is dropped and its time goes back to the thinner filters. The filters are shot in that order, thinnest first, so a night cut short by cloud or dawn loses frames from the deepest filter rather than the one everybody is short of.</p>
+<p class="example">Example: a field eight hours deep in H, O, R and G of a ten-hour goal, and empty in B. A two-hour night is dealt as blue only. The next rig the same night is dealt around that commitment and still gets blue. A nine-hour rig gets five hours of blue first, then the remaining hours spread over all five filters.</p>
+
+<p><b>Which panels.</b> Cells already at the project's depth are not visited. The remaining ones are sorted by three pulls, in this order:</p>
+<ol>
+  <li><b>Not where somebody else is tonight.</b> Cells that overlap substantially with panels earlier rigs were dealt tonight go last. A panel two rigs shoot the same night is a panel one of them wasted.</li>
+  <li><b>Where this rig has been least.</b> Every rig should touch every part of the field over the season, so no patch of the mosaic carries one camera's optics, one night's seeing and one set of gradients alone. That is exactly the artifact a collaboration exists to average out.</li>
+  <li><b>Where the field is thinnest.</b> With everything else equal, the cell wanting the most seconds comes first, so the mosaic advances everywhere rather than being polished in one corner.</li>
+</ol>
+
+<p><b>How many panels, and how long on each.</b> The night is cut into as many visits as it holds. Each visit costs its frames plus ninety seconds for the slew, the centring and the settle. The smallest allowed visit is the minimum frames per visit times the exposure, so a stack is always possible from one visit. The number of visits is the night's seconds divided by that smallest visit plus overhead, capped at the number of open cells and never less than one. The night's seconds are then split evenly across the visits, and a visit is never longer than the project's full depth on a panel. Within a visit the seconds are shared across the night's filters in proportion to their goals, rounding down to whole frames, but never below the minimum frames of any filter. The rig is handed the first N cells in the sorted order, with the frames per filter per panel.</p>
+<p>A night that could give ten frames each to seven panels does that rather than seventy to one: a mosaic seven panels further on is worth more than one panel finished. A rig that qualified and asked always gets at least one panel.</p>
+
+<p><b>Recording the deal.</b> The task stores the panel list, the visit (frames per filter, the filter chosen, and the Moon badness it was chosen under), the night, and the hours it was dealt for. If anything changed, the task's version is bumped, which is the signal the program and the N.I.N.A. plugin watch for; an unchanged list costs an idle poll nothing. The rig's panels are added to tonight's claims and its committed seconds to the per-filter tally, and the next task in line is dealt around them.</p>
+
+<h2>3. After the night</h2>
+
+<p>Frames come back as contribution reports and are judged against the project's rules: the filter is one the project wants and narrow enough, focal length and pixel scale are in range, star size and guiding are good enough, the exposure is within limits, and a one-shot colour camera's night counts only if the project allows colour and the Moon was dim enough. Accepted frames join the depth map and shape the next night's deal. Rejected ones are kept with the reason, and a coordinator can overrule the verdict: seeing varies, and a night the numbers reject may be the only data anybody has on that patch of sky.</p>
+
+<p><b>Two things worth knowing as the person running it.</b> The deal is only as good as the footprints reported, so a rig that reports frames without a footprint adds nothing to the map. And because a list holds for its night, a rig that joins at two in the morning is dealt around what everyone else already holds, but nobody else's list moves.</p>
+
+<h2>Where this lives in the code</h2>
+<ul>
+  <li><b>server/app.py</b>: the dealing loop (<i>_redeal</i>), the tiling at join (<i>_cells_for</i>), the hours per night, and the contribution judging endpoint.</li>
+  <li><b>astrocontrol/collab.py</b>: the depth map (<i>coverage</i>), the filter choice and Moon rule (<i>choose_filter</i>, <i>moon_badness</i>), what a single field's filters still want tonight (<i>night_need</i>), the panel order and visit sizing (<i>assign</i>, <i>visit_frames</i>), the tilings (<i>single_cell</i>, <i>grid</i>, <i>camera_grid</i>), and the acceptance rules (<i>judge</i>).</li>
+</ul>
+</body>
+</html>
