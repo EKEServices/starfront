@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.12
+
+- A meridian-flip trigger on a container above the Starfront one no longer runs the flip routine (autofocus, recentre, settle) the moment the Starfront container is next. The container told the trigger its next instruction would take the whole night, so the trigger decided it had no time left; it now answers with one exposure, as *Take Many Exposures* does, and the trigger gets its look again before every item inside.
+
 ## 1.0.0.11
 
 - Runs on N.I.N.A. 3.3. The container failed the moment it built a panel there ("Method not found: DitherAfterExposures..ctor"): 3.3 gave the dither and centre-after-drift triggers a safety-monitor parameter, and the plugin was bound to the 3.2 constructors. The host's triggers are now built from whichever constructor the running N.I.N.A. has.

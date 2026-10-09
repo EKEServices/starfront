@@ -697,9 +697,23 @@ namespace Starfront.Collab.Sequencer {
             Listen(false);
         }
 
+        /// <summary>
+        /// One exposure, not the night. This is what N.I.N.A.'s triggers ask
+        /// before they let an item run: "how long until I next get a look?"
+        /// Take Many Exposures answers with one sub for the same reason. The
+        /// container used to add up every panel's frames, and a meridian-flip
+        /// trigger on the container above it, told the next instruction would
+        /// take 5.8 hours, decided it had no time left and ran the whole flip
+        /// routine - autofocus, recentre, settle - at the start of a night the
+        /// mount was already on the right side for. The triggers above get
+        /// their look again before every item inside the panels.
+        /// </summary>
         public override TimeSpan GetEstimatedDuration() {
-            var seconds = Items.OfType<StarfrontPanel>().Sum(p => p.Plan.Seconds);
-            return TimeSpan.FromSeconds(seconds);
+            var first = Items.OfType<StarfrontPanel>()
+                .SelectMany(p => p.Plan.Filters)
+                .Select(f => f.Exposure)
+                .FirstOrDefault(e => e > 0);
+            return TimeSpan.FromSeconds(first);
         }
 
         public override string ToString() => $"Category: {Category}, Container: StarfrontCollaborationContainer, Project: {(ProjectId.Length > 0 ? ProjectId : "all")}, Panels: {Items.Count}";
