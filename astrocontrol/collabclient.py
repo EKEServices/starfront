@@ -574,6 +574,10 @@ class CollabClient:
         """Who has put what into a project: each person's accepted hours."""
         return self._call("GET", f"/api/v1/agent/projects/{project_id}/people")
 
+    def activity(self) -> dict[str, Any]:
+        """What has happened lately across the open collaborations."""
+        return self._call("GET", "/api/v1/agent/activity")
+
     def tasks(self) -> list[dict[str, Any]]:
         with self._lock:
             return list(self._tasks)

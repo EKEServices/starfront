@@ -8,7 +8,7 @@
 <!-- The ?v= stamps exist to break a browser cache that has already decided an
      older copy is still fresh. Bump them if a released build ever needs to
      invalidate a client that has not revalidated. -->
-<link rel="stylesheet" href="style.css?v=69">
+<link rel="stylesheet" href="style.css?v=70">
 </head>
 <body>
 
@@ -1531,7 +1531,11 @@
         </details>
 
         <!-- ------------------------------------------------ 2. take part -->
-        <h3 class="collab-heading">Active collaborations
+        <!-- The night as it is happening: who is on the sky right now, and
+             the frames landing. The list of collaborations below is the
+             ledger; this is the reason to open it. -->
+        <div class="col-live" id="colLive" hidden></div>
+        <h3 class="collab-heading">Collaborations tonight
           <span class="tag" id="colOpenCount">0</span></h3>
         <div id="colBrowse">
           <p class="small muted">Set a server above, then refresh.</p>
@@ -3147,7 +3151,7 @@
 <script src="plan.js?v=64"></script>
 <script src="surveytab.js?v=62"></script>
 <script src="calibrate.js?v=62"></script>
-<script src="collab.js?v=67"></script>
+<script src="collab.js?v=68"></script>
 <script src="allsky.js?v=62"></script>
 <script src="wizard.js?v=66"></script>
 </body>

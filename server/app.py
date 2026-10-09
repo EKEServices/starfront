@@ -628,6 +628,83 @@ def project_people(project_id: str,
             "refused": refused, "serverTime": time.time()}
 
 
+#: How far back the activity feed looks by default.
+ACTIVITY_HOURS = 48.0
+
+
+@app.get("/api/v1/agent/activity")
+def activity(agent: dict[str, Any] = Depends(agent_from),
+             hours: float = Query(default=ACTIVITY_HOURS, ge=1.0, le=240.0)) -> dict[str, Any]:
+    """What has happened lately across every open collaboration, newest
+    first: frames accepted, with who shot them, on what, in which filter,
+    and telescopes that joined. Plus, per project, what the last day
+    brought - hours accepted, people who sent something, frames.
+
+    The Collab tab is a list of projects with a number on each; this is
+    the life behind the numbers, so somebody opening the tab sees a night
+    in progress rather than a ledger.
+    """
+    store.seen(agent["id"])
+    now = time.time()
+    since = now - hours * 3600.0
+    day = now - 24 * 3600.0
+    events: list[dict[str, Any]] = []
+    today: dict[str, dict[str, Any]] = {}
+    people_cache: dict[str, tuple[str, str, str]] = {}
+
+    def who(agent_id: str) -> tuple[str, str, str]:
+        """(person's name, picture, telescope) for a rig, cached per call."""
+        if agent_id in people_cache:
+            return people_cache[agent_id]
+        rig = store.agent(agent_id) or {}
+        owner_id = str(rig.get("owner_id") or "")
+        person = store.user(owner_id) if owner_id else None
+        telescope = str((rig.get("presence") or {}).get("telescope") or rig.get("name") or "")[:60]
+        name = (person or {}).get("name") or rig.get("owner") or rig.get("name") or ""
+        people_cache[agent_id] = (str(name), _avatar_url(person), telescope)
+        return people_cache[agent_id]
+
+    for project in store.projects():
+        if (project.get("status") or "open") != "open":
+            continue
+        pid = project["id"]
+        summary = today.setdefault(pid, {"hours": 0.0, "frames": 0, "people": set()})
+        for row in store.contributions(pid):
+            at = float(row.get("received") or 0.0)
+            if at < since or not row.get("accepted"):
+                continue
+            name, avatar, telescope = who(str(row["agent"]))
+            payload = row.get("payload") or {}
+            seconds = float(row.get("seconds") or 0.0)
+            events.append({
+                "kind": "frames", "at": round(at), "project": pid, "projectName": project["name"],
+                "person": name, "avatar": avatar, "telescope": telescope,
+                "filter": filters.canonical(row.get("filter") or "") or str(row.get("filter") or ""),
+                "frames": int(payload.get("frames") or 0), "seconds": round(seconds, 1),
+            })
+            if at >= day:
+                summary["hours"] += seconds / 3600.0
+                summary["frames"] += int(payload.get("frames") or 0)
+                summary["people"].add(name or str(row["agent"]))
+        for task in store.tasks_in(pid):
+            issued = float(task.get("issued") or 0.0)
+            if issued < since or task.get("state") not in ("offered", "accepted"):
+                continue
+            name, avatar, telescope = who(str(task.get("agent") or ""))
+            events.append({
+                "kind": "joined", "at": round(issued), "project": pid, "projectName": project["name"],
+                "person": name, "avatar": avatar, "telescope": telescope,
+            })
+    events.sort(key=lambda e: -e["at"])
+    return {
+        "events": events[:80],
+        "serverTime": round(now), "since": round(since),
+        "projects": {pid: {"hoursToday": round(s["hours"], 2), "framesToday": s["frames"],
+                           "peopleToday": len(s["people"])}
+                     for pid, s in today.items()},
+    }
+
+
 @app.get("/api/v1/agent/projects")
 def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]:
     """Every project that is open, and whether this telescope can help.

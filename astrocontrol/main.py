@@ -3000,6 +3000,16 @@ def collab_project_people(project_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/collab/activity")
+def collab_activity() -> dict[str, Any]:
+    """What has happened lately across the open collaborations: the life
+    behind the numbers on the Collab tab. Fetched as this telescope."""
+    try:
+        return collab_client.activity()
+    except Exception as exc:                       # noqa: BLE001 - the server's words
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/collab/projects")
 def collab_add_project(body: CollabProjectRequest) -> dict[str, Any]:
     source = body.region

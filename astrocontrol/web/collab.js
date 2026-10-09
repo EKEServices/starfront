@@ -28,6 +28,9 @@
     expanded: new Set(),
     people: new Map(),
     lastRefresh: 0,
+    // What has happened lately across the open collaborations: the feed
+    // behind the live strip and the "today" figures on each card.
+    activity: null,
   };
 
   /* How often the open collaborations are re-read while the tab is showing.
@@ -460,6 +463,70 @@
    *  target and puts that target in the plan — three steps only in the sense
    *  that the program does three things.
    */
+  /** A person's picture as a small round face, or their initial. */
+  function face(person, extra = '', title = '') {
+    const cls = `col-face${extra ? ` ${extra}` : ''}`;
+    const name = person.ownerName || person.person || person.name || '?';
+    const hint = title || name;
+    return person.avatar
+      ? `<img class="${cls}" src="${esc(person.avatar)}" alt="" title="${esc(hint)}" loading="lazy">`
+      : `<span class="${cls} blank" title="${esc(hint)}">${esc(name.slice(0, 1).toUpperCase())}</span>`;
+  }
+
+  /** One face per person among a list of telescopes, the shooting ones ringed. */
+  function faces(telescopes) {
+    const seen = new Map();
+    for (const t of telescopes) {
+      const key = t.ownerName || t.name || t.id;
+      const shooting = (t.state || '') === 'imaging';
+      const held = seen.get(key);
+      if (!held) {
+        seen.set(key, { ...t, shooting, hint: `${t.ownerName || t.name}${t.ownerName ? ` · ${t.name}` : ''}${t.target ? ` — ${t.target}` : ''}` });
+      } else if (shooting && !held.shooting) {
+        held.shooting = true;
+      }
+    }
+    return [...seen.values()].map((p) => face(p, p.shooting ? 'shooting' : '', p.hint)).join('');
+  }
+
+  /** The night as it is happening: who is on the sky, who is shooting,
+   *  and the frames landing, scrolling past. The list of collaborations
+   *  below is the ledger; this is the reason to open the tab. */
+  function drawLive() {
+    const node = $('colLive');
+    if (!node) return;
+    const status = col.state || {};
+    const who = status.presence || {};
+    if (!status.configured || who.online === undefined) { node.hidden = true; return; }
+    const online = (who.telescopes || []).filter((t) => t.online);
+    const shooting = online.filter((t) => (t.state || '') === 'imaging');
+    const people = who.people || 0;
+    const feed = ((col.activity || {}).events || []).slice(0, 14);
+    const now = Number((col.activity || {}).serverTime) || (Date.now() / 1000);
+    const lines = feed.map((e) => {
+      const whoDid = esc(e.person || e.telescope || 'somebody');
+      if (e.kind === 'frames') {
+        return `<span class="col-ticker-item">${esc(ago(now - e.at))} · <b>${whoDid}</b> put `
+          + `${e.frames} × ${esc(e.filter)} on <b>${esc(e.projectName)}</b> (${(e.seconds / 3600).toFixed(1)} h)</span>`;
+      }
+      return `<span class="col-ticker-item">${esc(ago(now - e.at))} · <b>${whoDid}</b> joined `
+        + `<b>${esc(e.projectName)}</b>${e.telescope ? ` with ${esc(e.telescope)}` : ''}</span>`;
+    });
+    const count = `${online.length} telescope${online.length === 1 ? '' : 's'} on the sky`
+      + (people ? ` · ${people} ${people === 1 ? 'person' : 'people'}` : '')
+      + (shooting.length ? ` · <b class="shooting-count">${shooting.length} shooting right now</b>` : '');
+    const quiet = !online.length && !lines.length;
+    node.hidden = false;
+    node.className = `col-live${shooting.length ? ' busy' : ''}`;
+    node.innerHTML = `
+      <div class="col-live-head"><span class="live-dot"></span><b>Live</b>
+        <span class="col-live-count">${quiet ? 'quiet for the moment — the first telescope out tonight starts the party' : count}</span></div>
+      ${online.length ? `<div class="col-faces">${faces(online)}</div>` : ''}
+      ${lines.length ? `<div class="col-ticker" title="The latest frames and joins across every collaboration">
+          <div class="col-ticker-track" style="animation-duration:${Math.max(40, lines.length * 7)}s">${lines.join('')}${lines.join('')}</div>
+        </div>` : ''}`;
+  }
+
   function drawBrowse() {
     const box = $('colBrowse');
     if (!box) return;
@@ -467,6 +534,9 @@
     const projects = status.open || [];
     const joined = new Set((status.tasks || []).map((task) => task.project));
     if ($('colOpenCount')) $('colOpenCount').textContent = String(projects.length);
+    drawLive();
+    const who = status.presence || {};
+    const today = (col.activity || {}).projects || {};
 
     if (!status.configured) {
       box.innerHTML = '<p class="small muted">Press <b>Join with Discord</b> '
@@ -551,11 +621,33 @@
              <input type="checkbox" data-col-turn="${esc(project.id)}" checked>
              turn to ${pa.toFixed(0)}°</label>`
         : '';
+      // Who is on it right now, and what the last day brought: the pulse of
+      // the thing, above the ledger. A card with telescopes shooting on it
+      // glows; the button to join one that is moving tonight glows too.
+      const onIt = (who.telescopes || []).filter((t) => t.online && t.project === project.id);
+      const shooting = onIt.filter((t) => (t.state || '') === 'imaging');
+      const day = today[project.id] || {};
+      const prog = project.progress || {};
+      const thin = Object.entries(prog)
+        .map(([name, p]) => [name, Number((p || {}).average || 0)])
+        .sort((a, b) => a[1] - b[1])[0];
+      const nowText = shooting.length
+        ? `<b>${shooting.length} shooting right now</b>${onIt.length > shooting.length ? ` · ${onIt.length - shooting.length} more on it` : ''}`
+        : (onIt.length ? `${onIt.length} telescope${onIt.length === 1 ? '' : 's'} on it right now` : 'nobody on it right now');
+      const chips = [
+        day.hoursToday ? `<span class="col-chip today">+${Number(day.hoursToday).toFixed(1)} h in the last day${
+          day.peopleToday ? ` · ${day.peopleToday} ${day.peopleToday === 1 ? 'person' : 'people'}` : ''}</span>` : '',
+        thin && Object.keys(prog).length > 1
+          ? `<span class="col-chip needs" title="The filter the field is thinnest in: tonight's deals go there first">needs ${esc(thin[0])} most</span>` : '',
+      ].filter(Boolean).join('');
+      const live = `<div class="col-now">${onIt.length ? `<div class="col-faces">${faces(onIt)}</div>` : ''}
+        <span>${nowText}</span>${chips}</div>`;
+
       const action = fit.ok === false
         // Why, not just no. "Your scale is fine, your Ha is too wide" is
         // actionable; a greyed-out button is not.
         ? `<span class="small warn-text">${esc(fit.summary)}</span>`
-        : `${turn}<button class="btn small primary" data-col-take="${esc(project.id)}">
+        : `${turn}<button class="btn small primary${!mine && (shooting.length || day.hoursToday) ? ' glow' : ''}" data-col-take="${esc(project.id)}">
              ${mine ? 'Add to tonight' : 'Take part tonight'}</button>`;
 
       // Yours to change. The server owner may change anything; a member may
@@ -571,8 +663,8 @@
         : '';
 
       const open = col.expanded.has(project.id);
-      return `<div class="col-open${mine ? ' joined' : ''}${open ? ' open' : ''}" data-col-id="${esc(project.id)}"
-                   title="Double-click to see who has contributed">
+      return `<div class="col-open${mine ? ' joined' : ''}${open ? ' open' : ''}${shooting.length ? ' live' : ''}" data-col-id="${esc(project.id)}"
+                   title="Double-click for the depth map and who has contributed">
         <canvas class="col-sky" data-col-sky="${esc(project.id)}" width="240" height="160"
                 title="${esc(project.name)} on the sky survey"></canvas>
         <div class="col-open-body">
@@ -593,6 +685,7 @@
           ${project.notes ? `<p class="small">${esc(project.notes)}</p>` : ''}
           ${limits.length
             ? `<div class="small muted">Takes: ${esc(limits.join(', '))}</div>` : ''}
+          ${live}
           ${depth ? `<div class="depth-grid">${depth}</div>` : ''}
           ${open
             ? `<div class="col-depth" data-col-depth="${esc(project.id)}"></div>
@@ -980,6 +1073,13 @@
       col.targets = listing.targets || [];
     } catch (error) {
       console.error(error);
+    }
+    // The feed is a nicety: an older server has none, and the tab must not
+    // wait on it or complain about it.
+    if ((col.state || {}).configured) {
+      try {
+        col.activity = await app.api('/api/collab/activity');
+      } catch (error) { /* the strip shows what presence alone can say */ }
     }
     col.loading = false;
     drawServer();

@@ -1551,6 +1551,23 @@ case("...and the total is the sum of the people",
 status, _ = call("GET", "/api/v1/agent/projects/nonsense/people", token=AGENT_TOKEN, expect=404)
 case("...and an unknown project is a 404", status == 404)
 
+# The life behind the numbers: frames accepted and telescopes joining,
+# newest first, across every open project, with who did it.
+status, feed = call("GET", "/api/v1/agent/activity?hours=240", token=AGENT_TOKEN)
+frames_events = [e for e in feed.get("events", []) if e["kind"] == "frames"]
+joins = [e for e in feed.get("events", []) if e["kind"] == "joined"]
+case("the activity feed lists the frames accepted lately, with who shot them and on what",
+     status == 200 and frames_events and all("person" in e and "avatar" in e and e["filter"]
+                                             and e["seconds"] > 0 and e["projectName"] for e in frames_events),
+     str(frames_events[:1])[:200])
+case("...and the telescopes that joined, newest first",
+     joins and all(feed["events"][i]["at"] >= feed["events"][i + 1]["at"]
+                   for i in range(len(feed["events"]) - 1)),
+     f'{len(joins)} joins, {len(feed["events"])} events')
+case("...with what the last day brought each project",
+     PROJECT in feed.get("projects", {}) and "hoursToday" in feed["projects"][PROJECT]
+     and "peopleToday" in feed["projects"][PROJECT], str(feed.get("projects", {}).get(PROJECT)))
+
 # ------------------------------------------------- the sky, for a web page
 # Open to anyone, with nothing in it but what a telescope said about
 # itself: a page on the observatory's website shows where everybody points.
