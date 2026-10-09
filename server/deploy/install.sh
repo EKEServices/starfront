@@ -47,7 +47,21 @@ OLD_SERVICE=astrocollab
 
 echo "== packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
+CADDY_LIST=/etc/apt/sources.list.d/caddy-stable.list
+if ! apt-get update -qq; then
+    # A package list that has stopped answering must not stop a deploy.
+    # Caddy's list on Cloudsmith began answering "402 Payment Required" in
+    # October 2026; Caddy was already installed, and nothing about this
+    # deploy needed its list. It is set aside and the update run again;
+    # anything else wrong with apt is still fatal.
+    if [[ -f "$CADDY_LIST" ]] && command -v caddy >/dev/null; then
+        echo "   the Caddy package list is not answering; Caddy is installed, so the list is set aside"
+        mv "$CADDY_LIST" "$CADDY_LIST.disabled"
+        apt-get update -qq
+    else
+        exit 1
+    fi
+fi
 apt-get install -y -qq python3 python3-venv python3-pip rsync curl \
     debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null
 if ! command -v caddy >/dev/null; then
