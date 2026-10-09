@@ -2287,6 +2287,10 @@ label.inline.compact input[type="range"] { width: 150px; margin-top: 0; }
 .col-open.open { background: var(--panel-2); }
 /* Who has contributed: the opened part of a card. */
 .col-detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+/* The field's depth map on an opened card: the Plan tab's own, in the card's width. */
+.col-depth { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.col-depth .plan-framing { margin: 0; }
+.col-depth .plan-framing h4 { margin-top: 0; }
 .col-detail-head { margin-bottom: 6px; }
 .col-person { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
 .col-person-body { flex: 1; min-width: 0; }

@@ -595,8 +595,9 @@
             ? `<div class="small muted">Takes: ${esc(limits.join(', '))}</div>` : ''}
           ${depth ? `<div class="depth-grid">${depth}</div>` : ''}
           ${open
-            ? `<div class="col-detail" data-col-detail="${esc(project.id)}">${renderPeople(project.id)}</div>`
-            : '<div class="small muted col-hint">double-click for who has contributed</div>'}
+            ? `<div class="col-depth" data-col-depth="${esc(project.id)}"></div>
+               <div class="col-detail" data-col-detail="${esc(project.id)}">${renderPeople(project.id)}</div>`
+            : '<div class="small muted col-hint">double-click for the depth map and who has contributed</div>'}
         </div>
       </div>`;
     }).join('');
@@ -606,6 +607,23 @@
     box.querySelectorAll('[data-col-sky]').forEach((canvas) => {
       const project = projects.find((p) => p.id === canvas.dataset.colSky);
       if (project) drawSky(canvas, project);
+    });
+
+    // An opened card carries the field's depth map: everybody's accepted
+    // frames where they really landed, each camera's field drawn at its
+    // angle. The Plan tab's own map, so the two never disagree; it keeps
+    // what it fetched across redraws, so a card opened a minute ago does
+    // not flash "Fetching…" on every refresh.
+    box.querySelectorAll('[data-col-depth]').forEach((host) => {
+      if (typeof app.buildDepthMap !== 'function') return;
+      const id = host.dataset.colDepth;
+      const task = (status.tasks || []).find((t) => t.project === id) || {};
+      const map = app.buildDepthMap({
+        collab: { project: id, share: task.share || [], visit: task.visit || {} },
+        target: {},
+      });
+      host.appendChild(map);
+      if (map.show) map.show();
     });
 
     // Double-click opens a card on who has contributed, as a target in the
@@ -618,6 +636,10 @@
         window.getSelection && window.getSelection().removeAllRanges();
         drawBrowse();
         if (col.expanded.has(id)) loadPeople(id);
+        if (col.expanded.has(id)) {
+          const opened = box.querySelector(`[data-col-id="${CSS.escape(id)}"]`);
+          if (opened) opened.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
       });
     });
 

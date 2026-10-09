@@ -1838,6 +1838,9 @@
   /** Depth maps and their sky pictures by project, across re-renders. */
   const depthCache = new Map();
   const DEPTH_REFRESH_MS = 60 * 1000;
+  // The Collab tab draws the same map on an opened card, so the one picture
+  // of a field is the same picture wherever it is looked at.
+  app.buildDepthMap = buildDepthMap;
 
   /* ------------------------------------------------------- the framing */
 
