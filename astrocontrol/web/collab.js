@@ -1106,6 +1106,11 @@
 
     on('btnColLogin', 'click', login);
     on('btnColLogout', 'click', logout);
+    // Opening the Start form puts the cursor in the name.
+    on('colStartFold', 'toggle', () => {
+      const fold = $('colStartFold');
+      if (fold && fold.open && $('colPName')) setTimeout(() => $('colPName').focus(), 150);
+    });
     on('btnColCreate', 'click', createProject);
     on('btnColAddFilter', 'click', () => {
       col.filters.push({ name: '', bandpass: null, hours: null });

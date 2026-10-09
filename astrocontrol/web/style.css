@@ -2399,6 +2399,18 @@ label.inline.compact input[type="range"] { width: 150px; margin-top: 0; }
 }
 .col-open .btn { flex-shrink: 0; }
 .col-offered { border-color: var(--accent-dim); margin-top: 10px; }
+/* Starting one: the form's fold line is a proper button, the one thing a
+   coordinator comes to the tab to press. */
+.col-start-fold { margin: 6px 0 10px; }
+.col-start-fold > summary {
+  display: inline-flex; align-items: center;
+  padding: 6px 14px; border-radius: 5px;
+  background: var(--accent-dim); border: 1px solid var(--accent-edge); color: var(--accent-text);
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none;
+}
+.col-start-fold > summary::before, .col-start-fold[open] > summary::before { content: none; }
+.col-start-fold > summary:hover { background: var(--accent-edge); color: var(--accent-text); }
+.col-start-fold[open] > summary { margin-bottom: 8px; }
 .collab-page > .fold { margin-top: 0; }
 
 /* Joining: one box, one button. Green once it is done. */
