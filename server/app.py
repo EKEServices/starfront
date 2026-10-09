@@ -1926,9 +1926,14 @@ def sky_file(name: str):
         raise HTTPException(status_code=404, detail="no such file")
     return FileResponse(path, media_type=media, headers={
         **_SKY_HEADERS,
-        # The stars never change; the script changes with a deploy, which
-        # is rare, and a visitor an hour behind is no loss.
-        "Cache-Control": "public, max-age=" + ("86400" if name == "stars.json" else "3600"),
+        # The stars never change. The script and the page are embedded by
+        # their bare names, with nothing to bust a cache, so they are
+        # revalidated on every load: the browser sends what it has and the
+        # server answers "unchanged" in a few bytes, or hands over the new
+        # one the moment it is deployed. An hour's cache meant the person
+        # who had just deployed a new sky saw the old one.
+        "Cache-Control": ("public, max-age=86400" if name == "stars.json"
+                          else "no-cache"),
     })
 
 
