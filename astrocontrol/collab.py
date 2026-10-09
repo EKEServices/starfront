@@ -490,22 +490,83 @@ def remaining_seconds(cell_depth: dict[str, float],
 
 
 def visit_frames(filters: list["FilterTask"], seconds: float,
-                 min_frames: int) -> dict[str, int]:
+                 min_frames: int,
+                 need: dict[str, float] | None = None) -> dict[str, int]:
     """How one visit's seconds fall across the filters, as frames.
 
-    Split in proportion to how deep the project wants each filter, and never
-    fewer than `min_frames` of any — a stack is per filter, and a filter given
-    two subs on a panel has nothing to stack.
+    Without `need`, split in proportion to how deep the project wants each
+    filter, and never fewer than `min_frames` of any — a stack is per
+    filter, and a filter given two subs on a panel has nothing to stack.
+
+    With `need` — seconds each filter still wants, keyed by canonical name,
+    after what the field already has and what the other rigs are putting in
+    tonight — the visit is poured into the thinnest filter first: the one
+    with the most still wanted gets the seconds until it is level with the
+    next, then the two share them, and so on down. A filter the pour never
+    reaches is not shot tonight and is not named; one reached for less than
+    `min_frames` gets `min_frames`, since fewer will not stack. The frames
+    come back in the order they should be shot, thinnest filter first, so a
+    night that is cut short loses frames from the deepest filter and not
+    from the one everybody is short of. A single-field collaboration that
+    split every night evenly by the goals and shot the filters in the
+    project's order sat at a third of the depth in blue, which came last
+    in every rig's night and was the first thing dawn took away.
     """
+    usable = [f for f in filters if f.exposure > 0]
     frames: dict[str, int] = {}
-    total = sum(max(0.0, f.hours) for f in filters)
-    for f in filters:
-        if f.exposure <= 0:
-            continue
-        weight = (f.hours / total) if total > 0 else (1.0 / max(1, len(filters)))
+    if need is not None:
+        left_for = {f.filter: max(0.0, float(need.get(_key(f.filter), 0.0))) for f in usable}
+        order = sorted((f for f in usable if left_for[f.filter] > 0),
+                       key=lambda f: (-left_for[f.filter], usable.index(f)))
+        while order:
+            given = _pour(order, left_for, max(0.0, seconds))
+            # A filter the pour reached for less than a stack's worth is
+            # dropped and the pour run again without it, so its seconds go
+            # to the filters above it rather than being rounded up into
+            # frames the night does not have. The last filter standing gets
+            # a stack's worth whatever the budget.
+            slivers = [f for f in order
+                       if 0 < given[f.filter] < min_frames * f.exposure - 1e-9]
+            if slivers and len(order) > 1:
+                order.remove(slivers[-1])
+                continue
+            for f in order:
+                if given[f.filter] <= 0:
+                    continue
+                frames[f.filter] = max(min_frames, int(math.floor(given[f.filter] / f.exposure)))
+            return frames
+    total = sum(max(0.0, f.hours) for f in usable)
+    for f in usable:
+        weight = (f.hours / total) if total > 0 else (1.0 / max(1, len(usable)))
         want = int(math.floor(seconds * weight / f.exposure))
         frames[f.filter] = max(min_frames, want)
     return frames
+
+
+def _pour(order: list["FilterTask"], left_for: dict[str, float],
+          budget: float) -> dict[str, float]:
+    """Water-fill `budget` seconds into filters sorted by how much each
+    still wants, most first: the first takes seconds until it is level with
+    the second, then both share until level with the third, and so on."""
+    given = {f.filter: 0.0 for f in order}
+    group: list["FilterTask"] = []
+    waiting = list(order)
+    remaining = lambda f: left_for[f.filter] - given[f.filter]      # noqa: E731
+    while budget > 1e-9 and (group or waiting):
+        if not group or (waiting and remaining(waiting[0]) >= remaining(group[0]) - 1e-9):
+            group.append(waiting.pop(0))
+            continue
+        step = max(0.0, remaining(group[0]) - (remaining(waiting[0]) if waiting else 0.0))
+        portion = min(budget, step * len(group)) if step > 0 else budget
+        per = portion / len(group)
+        for f in group:
+            given[f.filter] += per
+        budget -= portion
+        if waiting:
+            group.append(waiting.pop(0))
+        else:
+            break
+    return given
 
 
 def filter_demand(cells: list[dict[str, Any]], goals: dict[str, float],
@@ -610,8 +671,13 @@ def choose_filter(filters: list["FilterTask"], goals: dict[str, float],
 def assign(cells: list[dict[str, Any]], goals: dict[str, float],
            depth: dict[int, dict[str, float]], mine: dict[int, float],
            claimed: list[Region], hours: float, filters: list["FilterTask"],
-           min_frames: int) -> tuple[list[int], dict[str, Any]]:
+           min_frames: int,
+           need: dict[str, float] | None = None) -> tuple[list[int], dict[str, Any]]:
     """Tonight's panels for one rig, and how long to give each.
+
+    `need`, when given, is the seconds each filter still wants once the
+    field's depth and tonight's other rigs are counted; the visit is then
+    poured into the thinnest filters first (see `visit_frames`).
 
     The night is cut into as many visits as it holds — greedy on the whole
     field: a night that could give ten frames each to seven panels does that
@@ -663,15 +729,54 @@ def assign(cells: list[dict[str, Any]], goals: dict[str, float],
 
     budget = hours * 3600.0
     full = sum(max(0.0, f.hours) for f in filters) * 3600.0 or budget
-    floor = sum(min_frames * f.exposure for f in filters if f.exposure > 0)
+    if need is None:
+        floor = sum(min_frames * f.exposure for f in filters if f.exposure > 0)
+    else:
+        # The night is poured into the filters that want it, not spread
+        # over all of them, so the least a visit can be is one stack of the
+        # cheapest filter - not a stack of every filter the rig carries.
+        floor = min((min_frames * f.exposure for f in filters if f.exposure > 0), default=0.0)
     floor = min(floor, full) if floor > 0 else min(full, budget)
     visits = int(budget // (floor + VISIT_OVERHEAD_SECONDS))
     visits = max(1, min(len(order), visits))
     seconds = max(floor, min(full, budget / visits - VISIT_OVERHEAD_SECONDS))
-    frames = visit_frames(filters, seconds, min_frames)
+    frames = visit_frames(filters, seconds, min_frames, need)
     seconds = sum(n * f.exposure for f in filters for name, n in frames.items()
                   if name == f.filter)
     return order[:visits], {"seconds": round(seconds, 1), "frames": frames}
+
+
+def night_need(filters: list["FilterTask"], goals: dict[str, float],
+               depth: dict[int, dict[str, float]], cells: list[dict[str, Any]],
+               spoken: dict[str, float],
+               moon: dict[str, Any] | None = None) -> dict[str, float]:
+    """Seconds each of a rig's filters still wants tonight, for a night that
+    shoots several filters on one field.
+
+    What the project wants of each, less what the field already has, less
+    what the rigs dealt before this one are putting in tonight. The Moon
+    rule is the same as `choose_filter`'s: a bright Moon leaves only the
+    narrowband filters in want, a dark night the broadband ones, and when
+    nothing of the preferred kind is left the rest stand. A filter the
+    project sets no goal for wants the task's own hours of it.
+    """
+    wanted = dict(goals)
+    for f in filters:
+        if not any(_key(name) == _key(f.filter) for name in wanted):
+            wanted[f.filter] = f.hours
+    demand = filter_demand(cells, wanted, depth)
+    need = {_key(f.filter): max(0.0, demand.get(_key(f.filter), 0.0)
+                                - spoken.get(_key(f.filter), 0.0))
+            for f in filters if f.exposure > 0}
+    badness = moon_badness(moon)
+    if badness is not None:
+        wanting = [key for key, value in need.items() if value > 0]
+        tolerant = [key for key in wanting if key in MOON_TOLERANT]
+        sensitive = [key for key in wanting if key not in MOON_TOLERANT]
+        preferred = tolerant if badness >= MOON_BRIGHT else sensitive
+        if preferred:
+            need = {key: (value if key in preferred else 0.0) for key, value in need.items()}
+    return need
 
 
 def least_covered(candidates: list[Region], taken: list[Region]) -> Region | None:

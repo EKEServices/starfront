@@ -1391,6 +1391,77 @@ r_frames = ((r_task or {}).get("visit") or {}).get("frames") or {}
 case("...and tonight's deal for it names no other filter",
      set(r_frames) <= {"R"} and r_frames.get("R", 0) > 0, str(r_frames))
 
+# A single field's night goes to the thinnest filter first. The M31 test
+# collaboration sat at a third of the depth in blue for a week: every rig's
+# night was split evenly by the goals, blue came last in the order, and dawn
+# took it. Here H, O, R and G are eight hours deep of a ten-hour goal and B
+# is empty, so a two-hour night is all blue, the next rig the same night is
+# dealt around that, and a long night still puts blue first.
+_, lopsided = call("POST", "/api/v1/projects", {
+    "name": "Lopsided", "kind": "single",
+    "region": {"ra": 10.68, "dec": 41.27, "width": 3.0, "height": 2.0, "rotation": 0.0},
+    "requirements": {"filters": {"H": None, "O": None, "R": None, "G": None, "B": None}},
+    "goals": {"H": 10.0, "O": 10.0, "R": 10.0, "G": 10.0, "B": 10.0},
+}, token=ADMIN)
+LOPSIDED = lopsided["project"]["id"]
+
+
+def enrol_five(name, hours):
+    _, made = call("POST", "/api/v1/agents", {"name": name}, token=ADMIN)
+    scale_ = 206.265 * 3.76 / 620.0
+    call("POST", "/api/v1/agent/hello", {
+        "protocol": collab.PROTOCOL,
+        "profile": {"name": name, "focalLength": 620.0, "pixelSize": 3.76,
+                    "sensorWidth": 9576, "sensorHeight": 6388, "binning": 1,
+                    "filters": {"H": None, "O": None, "R": None, "G": None, "B": None},
+                    "exposures": {"H": 300.0, "O": 300.0, "R": 300.0, "G": 300.0, "B": 300.0},
+                    "hoursPerNight": hours, "scale": scale_,
+                    "field": [scale_ * 9576 / 3600.0, scale_ * 6388 / 3600.0]}},
+        token=made["token"])
+    return made["token"]
+
+
+deep_token = enrol_five("deep-already", 2.0)
+_, deep_join = call("POST", f"/api/v1/agent/projects/{LOPSIDED}/join", {}, token=deep_token)
+deep_cell = deep_join["task"]["cells"][0]
+_, _ = call("POST", "/api/v1/agent/report", {"contributions": [
+    {"task": deep_join["task"]["id"], "night": "2026-10-01", "filterName": name,
+     "frames": 96, "seconds": 8 * 3600, "exposure": 300,
+     "footprint": {"ra": deep_cell["ra"], "dec": deep_cell["dec"],
+                   "width": deep_cell["width"] * 3, "height": deep_cell["height"] * 3},
+     "scale": 1.25, "hfr": 2.5, "guideRms": 0.7}
+    for name in ("H", "O", "R", "G")]}, token=deep_token)
+_, deep_night = call("GET", f"/api/v1/agent/task?night=2026-10-09&project={LOPSIDED}",
+                     token=deep_token)
+deep_task = next(t for t in deep_night["tasks"] if t["project"] == LOPSIDED)
+deep_frames = deep_task["visit"]["frames"]
+case("a short night on a lopsided field is spent entirely on the thin filter, and fits the night",
+     list(deep_frames) == ["B"] and 20 <= deep_frames["B"] <= 24, str(deep_frames))
+case("...and the task's filters are put in the night's order, the thin one first",
+     [f["filter"] for f in deep_task["filters"]][0] == "B",
+     str([f["filter"] for f in deep_task["filters"]]))
+
+second_token = enrol_five("second-tonight", 2.0)
+_, second_join = call("POST", f"/api/v1/agent/projects/{LOPSIDED}/join", {"night": "2026-10-09"},
+                      token=second_token)
+_, second_night = call("GET", f"/api/v1/agent/task?night=2026-10-09&project={LOPSIDED}",
+                       token=second_token)
+second_task = next(t for t in second_night["tasks"] if t["project"] == LOPSIDED)
+case("the next rig dealt the same night is sent to blue as well, since it is still thinnest",
+     list(second_task["visit"]["frames"]) == ["B"], str(second_task["visit"]["frames"]))
+
+long_token = enrol_five("long-night", 9.0)
+_, long_join = call("POST", f"/api/v1/agent/projects/{LOPSIDED}/join", {"night": "2026-10-09"},
+                    token=long_token)
+_, long_night = call("GET", f"/api/v1/agent/task?night=2026-10-09&project={LOPSIDED}",
+                     token=long_token)
+long_task = next(t for t in long_night["tasks"] if t["project"] == LOPSIDED)
+long_frames = long_task["visit"]["frames"]
+case("a long night still starts with blue and gives it the most, then levels the others up",
+     list(long_frames)[0] == "B" and long_frames["B"] == max(long_frames.values())
+     and len(long_frames) > 1 and all(n >= 10 for n in long_frames.values()),
+     str(long_frames))
+
 # ------------------------------------------------- who is on the sky
 # Every check-in may say where the telescope points and what it is doing;
 # the group sees each other on the chart, and each project says how many

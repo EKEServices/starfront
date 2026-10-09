@@ -1136,6 +1136,7 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
                 filters = able
         night_goals = goals
         chosen = None
+        need = None
         if (task.get("kind") or "mosaic") == "mosaic" and len(filters) > 1:
             # A mosaic night is one filter per telescope, and which one is
             # the collaboration's call: the filter thinnest across the field
@@ -1148,11 +1149,28 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
                                if collab._key(name) == collab._key(chosen.filter)}
                 if not night_goals:
                     night_goals = {chosen.filter: chosen.hours}
+        elif len(filters) > 1:
+            # A single field shoots several filters in one night, and the
+            # night goes to the thinnest of them first: what the field has
+            # already, and what the rigs dealt before this one are adding
+            # tonight, decide the split and the order. An even split by the
+            # goals left one filter at a third of the others' depth, last in
+            # every rig's night and the first thing dawn cut.
+            need = collab.night_need(filters, goals, depth, cells, spoken,
+                                     moon if asked is not None else None)
         share, visit = collab.assign(cells, night_goals, depth, mine.get(agent_id, {}),
                                      tonight, hours, filters,
-                                     wants.minFramesPerVisit)
+                                     wants.minFramesPerVisit, need)
         if chosen is not None:
             visit["filter"] = chosen.filter
+        if need is not None and visit.get("frames"):
+            # The rig shoots its filters in the task's order; put the night's
+            # order there, thinnest first, with the rest behind unchanged.
+            shot_order = list(visit["frames"])
+            by_key = {collab._key(name): index for index, name in enumerate(shot_order)}
+            task["filters"] = sorted(task.get("filters") or [],
+                                     key=lambda f: by_key.get(collab._key(f.get("filter")),
+                                                              len(shot_order)))
         if moon is not None and asked is not None:
             # What the choice was made under, so a list made blind to the
             # Moon can be told from one that was not.
