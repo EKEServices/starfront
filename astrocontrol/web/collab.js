@@ -659,6 +659,8 @@
         || (person.signedIn && project.ownerId && project.ownerId === person.id);
       const owner = owned
         ? `<button class="btn small ghost" data-col-edit="${esc(project.id)}">Edit</button>
+           <button class="btn small ghost" data-col-redeal="${esc(project.id)}"
+                   title="Forget tonight's lists so every telescope is dealt afresh on its next poll - after changing the filters or goals">Re-deal tonight</button>
            <button class="btn small ghost danger" data-col-close="${esc(project.id)}">Close</button>`
         : '';
 
@@ -747,6 +749,37 @@
       button.addEventListener('click', () => closeProject(
         projects.find((p) => p.id === button.dataset.colClose)));
     });
+    box.querySelectorAll('[data-col-redeal]').forEach((button) => {
+      button.addEventListener('click', () => redealProject(
+        projects.find((p) => p.id === button.dataset.colRedeal), button));
+    });
+  }
+
+  /** Have every telescope on a collaboration dealt afresh. A list dealt
+   *  for a night holds for the night; after changing the filters or the
+   *  goals this is how the coordinator makes tonight follow. */
+  async function redealProject(project, button) {
+    if (!project) return;
+    const ok = await app.confirmAction(
+      `Deal “${project.name}” afresh for tonight? Every telescope on it gets a new `
+      + 'list the next time it polls - within ten minutes - and yours right now. '
+      + 'A telescope already shooting keeps its list until it polls.',
+      { title: 'Re-deal tonight', confirmLabel: 'Re-deal' });
+    if (!ok) return;
+    button.disabled = true;
+    try {
+      const answer = await app.api(
+        `/api/collab/projects/${encodeURIComponent(project.id)}/redeal`, 'POST');
+      col.state = answer.state || col.state;
+      const n = Number(answer.forgotten || 0);
+      app.toast(`“${project.name}”: ${n} list${n === 1 ? '' : 's'} forgotten — each telescope is dealt `
+        + 'afresh on its next poll; yours is on the plan now', 'success', 7000);
+      await load(true);
+    } catch (error) {
+      app.toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   /* ------------------------------------------------- who has contributed */

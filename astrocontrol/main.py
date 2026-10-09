@@ -3088,6 +3088,22 @@ class CollabProjectUpdateRequest(BaseModel):
     status: str | None = Field(default=None, pattern="^(open|closed)$")
 
 
+@app.post("/api/collab/projects/{project_id}/redeal")
+def collab_redeal_project(project_id: str) -> dict[str, Any]:
+    """Deal every rig on a collaboration afresh the next time it polls.
+
+    A list dealt for a night holds for the night, and the coordinator is
+    the one who may break that: after changing the project's filters or
+    goals, or when the dealing rules have changed under it. The server
+    forgets which night each live list was made for; this telescope polls
+    at once so its own plan follows, and the others follow on theirs.
+    """
+    made = _admin(collab_admin.redeal_project, project_id)
+    with contextlib.suppress(Exception):
+        collab_client.poll()
+    return {**made, "state": _collab_state()}
+
+
 @app.post("/api/collab/projects/{project_id}/update")
 def collab_update_project(project_id: str,
                           body: CollabProjectUpdateRequest) -> dict[str, Any]:
