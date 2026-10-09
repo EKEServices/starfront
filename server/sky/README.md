@@ -6,12 +6,15 @@ collaboration server, so the site never needs updating when the chart does.
 
 ## What it shows
 
-The whole sky as a chart, right ascension across and declination down, with
-the bright stars in place. On it, every telescope that shares its position:
-a mark where it points now, its name and target, and the track it has drawn
-across the sky through the night. The part of the sky below the
-observatory's horizon right now is shaded. Underneath, a list of the
-telescopes with what each is on.
+The sky over the observatory as a planetarium shows it: the dome straight
+up, north at the top and east to the left as you see it looking up, the
+bright stars in place, the horizon as a ring with the compass points on it
+and everything below it darkened. Visitors drag to look around, scroll or
+use the buttons to zoom, and press Overhead to come back to the whole sky.
+On it, every telescope that shares its position: a mark where it points
+now, its name and target, and the track it has drawn across the sky through
+the night. Underneath, a list of the telescopes with what each is on.
+`data-fov` sets how much sky the view opens on; 180 is horizon to horizon.
 
 Only what a telescope chooses to say is shown: its name, its target, its
 pointing. No owners, no ids, no pictures. A telescope with position sharing
