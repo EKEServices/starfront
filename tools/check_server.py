@@ -1206,6 +1206,47 @@ case("...dealt that one cell for the night, with the whole night on it",
      and spot_task["visit"]["frames"].get("H", 0) * 300 >= 3 * 3600 * 0.9,
      f'share {spot_task["share"]}, {spot_task["visit"]["frames"]} frames')
 
+# A single target's depth map shows the union of everybody's fields of view
+# as they were really turned. A 2 by 0.5 degree camera at a position angle
+# of 90 covers half a degree east-west and two degrees north-south; credited
+# north-up it put its seconds beside the field instead of above and below.
+# The map also reaches beyond the region to take the frames around it in,
+# says which cells are inside the box, and hands back the frames themselves.
+call("POST", "/api/v1/agent/report", {"contributions": [{
+    "task": one["task"]["id"], "night": "2026-10-08", "panel": "0", "filterName": "Ha",
+    "frames": 12, "seconds": 3600, "exposure": 300,
+    "footprint": {"ra": 85.25, "dec": -2.46, "width": 2.0, "height": 0.5, "rotation": 90.0},
+    "scale": 2.0, "hfr": 2.5, "guideRms": 0.7, "bandpass": 3.0}]}, token=NARROW_TOKEN)
+_, spot_map = call("GET", f"/api/v1/agent/projects/{SPOT}/depth", token=NARROW_TOKEN)
+
+
+def cell_near(grid_, dx, dy):
+    """The cell whose centre is nearest `dx` degrees east and `dy` north of the region's centre."""
+    import math as _m
+    cosine = _m.cos(_m.radians(grid_["region"]["dec"]))
+    best, best_d = None, None
+    for i, c in enumerate(grid_["cells"]):
+        x = (((c["ra"] - grid_["region"]["ra"] + 180.0) % 360.0) - 180.0) * cosine
+        y = c["dec"] - grid_["region"]["dec"]
+        d = (x - dx) ** 2 + (y - dy) ** 2
+        if best_d is None or d < best_d:
+            best, best_d = i, d
+    return best
+
+
+north = spot_map["seconds"]["H"][cell_near(spot_map, 0.0, 0.8)]
+east = spot_map["seconds"]["H"][cell_near(spot_map, 0.8, 0.0)]
+case("a frame turned ninety degrees credits the cells above and below the field, not beside it",
+     north > 0 and east == 0, f"north {north:.0f}s, east {east:.0f}s")
+case("...the single target's map is a fine grid that says which cells are inside the region",
+     spot_map["kind"] == "single" and len(spot_map["cells"]) > 1
+     and any(c["inside"] for c in spot_map["cells"]) and spot_map["columns"] * spot_map["rows"] == len(spot_map["cells"]),
+     f'{len(spot_map["cells"])} cells')
+case("...and hands back each camera's field as it was shot, with its angle and its hours",
+     len(spot_map["footprints"]) == 1 and spot_map["footprints"][0]["rotation"] == 90.0
+     and spot_map["footprints"][0]["seconds"] == 3600 and spot_map["footprints"][0]["filter"] == "H",
+     str(spot_map["footprints"])[:160])
+
 # --------------------------------------------- changing one after it started
 print("\n-- changing a project after it started --")
 

@@ -693,13 +693,82 @@ PROGRESS_CELLS = 16
 AT_GOAL = 0.9
 
 
+#: How far beyond its region a single target's map may reach to take in the
+#: frames around it, as a multiple of the region's size. A frame that landed
+#: in the wrong part of the sky altogether must not stretch the map to it.
+SINGLE_EXTENT_LIMIT = 3.0
+
+
+def _footprints(shot: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Everybody's accepted frames as the fields of view they were shot
+    with, merged where one telescope shot the same field at the same angle
+    through the same filter: where it was, how big, which way it was
+    turned, and the seconds that went into it."""
+    merged: dict[tuple, dict[str, Any]] = {}
+    for row in shot:
+        try:
+            region = collab.Region.read(row["footprint"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        agent = str(row.get("agent") or "")
+        key = (agent, collab._key(row.get("filterName")), round(region.ra, 3), round(region.dec, 3),
+               round(region.width, 3), round(region.height, 3), round(region.rotation, 1))
+        entry = merged.get(key)
+        if entry is None:
+            telescope = store.agent(agent) or {}
+            said = telescope.get("presence") or {}
+            entry = merged[key] = {
+                "agent": agent,
+                "telescope": str(said.get("telescope") or telescope.get("name") or "")[:60],
+                "filter": filters.canonical(row.get("filterName") or ""),
+                **region.payload(), "seconds": 0.0, "frames": 0,
+            }
+        entry["seconds"] += float(row.get("seconds") or 0.0)
+        entry["frames"] += int(row.get("frames") or 0)
+    out = sorted(merged.values(), key=lambda f: (-f["seconds"], f["telescope"]))
+    for entry in out:
+        entry["seconds"] = round(entry["seconds"], 1)
+    return out
+
+
+def _single_extent(region: collab.Region,
+                   prints: list[dict[str, Any]]) -> collab.Region:
+    """The sky a single target's map shows: the region and every frame
+    around it, with a margin, so the union of everybody's fields of view is
+    in the picture and not only the part of it inside the box."""
+    cosine = max(math.cos(math.radians(region.dec)), 1e-6)
+    xs = [-region.width / 2.0, region.width / 2.0]
+    ys = [-region.height / 2.0, region.height / 2.0]
+    for f in prints:
+        across, down = collab.footprint(f["width"], f["height"], f.get("rotation"))
+        x = (((f["ra"] - region.ra + 180.0) % 360.0) - 180.0) * cosine
+        y = f["dec"] - region.dec
+        xs += [x - across / 2.0, x + across / 2.0]
+        ys += [y - down / 2.0, y + down / 2.0]
+    limit_x = region.width * SINGLE_EXTENT_LIMIT / 2.0
+    limit_y = region.height * SINGLE_EXTENT_LIMIT / 2.0
+    x0, x1 = max(min(xs), -limit_x), min(max(xs), limit_x)
+    y0, y1 = max(min(ys), -limit_y), min(max(ys), limit_y)
+    width, height = (x1 - x0) * 1.1, (y1 - y0) * 1.1
+    return collab.Region(ra=(region.ra + (x0 + x1) / 2.0 / cosine) % 360.0,
+                         dec=region.dec + (y0 + y1) / 2.0,
+                         width=width, height=height, rotation=region.rotation)
+
+
 def _depth_grid(project_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    """The region cut fine, with everybody's accepted seconds on every cell.
+    """The field cut fine, with everybody's accepted seconds on every cell.
 
     The one depth map behind both the progress figures and the picture of
-    the field: cells north-up across the region, and per filter the seconds
-    each cell has been given, credited from every accepted frame's footprint
-    in proportion to how much of the cell it covers.
+    the field: cells north-up, and per filter the seconds each cell has been
+    given, credited from every accepted frame's footprint in proportion to
+    how much of the cell it covers, the frame turned as it really was.
+
+    A mosaic's cells tile its region. A single target's reach out to take
+    in every frame shot around it - the fields of view of a dozen cameras
+    at a dozen angles do not stop at the box - and each cell says whether
+    it is inside the region, which is what progress is measured over. The
+    frames themselves come back as `footprints`, so the picture can draw
+    each camera's field at its angle over the depth it made.
     """
     goals = _goals(payload.get("goals") or {})
     try:
@@ -708,25 +777,35 @@ def _depth_grid(project_id: str, payload: dict[str, Any]) -> dict[str, Any] | No
         return None
     if region.width <= 0 or region.height <= 0:
         return None
-    if payload.get("kind") == "single":
-        cells = [{"row": 0, "column": 0, **region.payload()}]
-    else:
-        cell = max(abs(region.width), abs(region.height)) / PROGRESS_CELLS
-        cells = collab.grid(region, cell, cell, 0.0)
     shot = [row["payload"] for row in store.contributions(project_id)
             if row.get("accepted") and (row.get("payload") or {}).get("footprint")]
+    prints = _footprints(shot)
+    single = payload.get("kind") == "single"
+    extent = _single_extent(region, prints) if single else region
+    cell = max(abs(extent.width), abs(extent.height)) / PROGRESS_CELLS
+    cells = collab.grid(extent, cell, cell, 0.0)
+    cosine = max(math.cos(math.radians(region.dec)), 1e-6)
+    for c in cells:
+        dx = (((c["ra"] - region.ra + 180.0) % 360.0) - 180.0) * cosine
+        dy = c["dec"] - region.dec
+        c["inside"] = (abs(dx) <= region.width / 2.0 + 1e-9
+                       and abs(dy) <= region.height / 2.0 + 1e-9)
     depth, _ = collab.coverage(cells, shot)
     names = list(goals) or sorted({name for i in depth for name in depth[i]})
     seconds = {name: [round(depth.get(i, {}).get(collab._key(name), 0.0), 1)
                       for i in range(len(cells))] for name in names}
     return {
         "region": region.payload(),
+        "extent": extent.payload(),
+        "kind": "single" if single else "mosaic",
         "columns": (max(int(c.get("column", 0)) for c in cells) + 1) if cells else 0,
         "rows": (max(int(c.get("row", 0)) for c in cells) + 1) if cells else 0,
         "cells": [{"ra": c["ra"], "dec": c["dec"], "width": c["width"], "height": c["height"],
-                   "row": c.get("row", 0), "column": c.get("column", 0)} for c in cells],
+                   "row": c.get("row", 0), "column": c.get("column", 0),
+                   "inside": bool(c.get("inside", True))} for c in cells],
         "seconds": seconds,
         "goals": goals,
+        "footprints": prints,
     }
 
 
@@ -745,14 +824,19 @@ def _progress(project_id: str, payload: dict[str, Any]) -> dict[str, dict[str, f
     grid = _depth_grid(project_id, payload)
     if grid is None or not grid["goals"]:
         return {}
-    count = max(1, len(grid["cells"]))
+    # Progress is over the region the coordinator drew. A single target's
+    # map reaches further, to show the frames around the field, and the sky
+    # outside the box is not part of what was asked for.
+    inside = [i for i, c in enumerate(grid["cells"]) if c.get("inside", True)] \
+        or list(range(len(grid["cells"])))
+    count = max(1, len(inside))
     out: dict[str, dict[str, float]] = {}
     for name, hours in grid["goals"].items():
         goal = float(hours) * 3600.0
         if goal <= 0:
             continue
-        column = grid["seconds"].get(name) or [0.0] * count
-        fractions = [min(1.0, column[i] / goal) for i in range(count)]
+        column = grid["seconds"].get(name) or [0.0] * len(grid["cells"])
+        fractions = [min(1.0, column[i] / goal) for i in inside]
         out[name] = {
             "goalHours": round(float(hours), 2),
             # Within a tenth of the goal counts as there: the outermost sliver

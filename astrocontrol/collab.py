@@ -278,6 +278,76 @@ def overlap_area(first: Region, second: Region) -> float:
     return shared * (high - low)
 
 
+def _clip(polygon: list[tuple[float, float]], axis: int, limit: float,
+          keep_below: bool) -> list[tuple[float, float]]:
+    """Cut a convex polygon by one axis-aligned half-plane (Sutherland-Hodgman)."""
+    out: list[tuple[float, float]] = []
+    if not polygon:
+        return out
+    inside = (lambda p: p[axis] <= limit) if keep_below else (lambda p: p[axis] >= limit)
+    previous = polygon[-1]
+    for point in polygon:
+        if inside(point):
+            if not inside(previous):
+                t = (limit - previous[axis]) / (point[axis] - previous[axis])
+                out.append((previous[0] + (point[0] - previous[0]) * t,
+                            previous[1] + (point[1] - previous[1]) * t))
+            out.append(point)
+        elif inside(previous):
+            t = (limit - previous[axis]) / (point[axis] - previous[axis])
+            out.append((previous[0] + (point[0] - previous[0]) * t,
+                        previous[1] + (point[1] - previous[1]) * t))
+        previous = point
+    return out
+
+
+def frame_corners(shot: Region, about: Region) -> list[tuple[float, float]]:
+    """The four corners of a turned frame on the flat sky about another
+    rectangle's centre: x east in degrees of sky, y north. Position angle
+    is the frame's up, measured from north through east."""
+    cosine = max(math.cos(math.radians((shot.dec + about.dec) / 2.0)), 1e-6)
+    cx = (((shot.ra - about.ra + 180.0) % 360.0) - 180.0) * cosine
+    cy = shot.dec - about.dec
+    angle = math.radians(shot.rotation or 0.0)
+    up = (math.sin(angle), math.cos(angle))
+    across = (math.cos(angle), -math.sin(angle))
+    w, h = abs(shot.width) / 2.0, abs(shot.height) / 2.0
+    return [(cx + u * across[0] + v * up[0], cy + u * across[1] + v * up[1])
+            for u, v in ((-w, -h), (w, -h), (w, h), (-w, h))]
+
+
+def shot_overlap_area(shot: Region, cell: Region) -> float:
+    """Square degrees a frame shot at an angle shares with a north-up cell.
+
+    `overlap_area` treats both rectangles as north-up, which a cell is and
+    a frame is not: a 2 by 1 degree camera at a position angle of 90 covers
+    1 by 2 degrees of sky, and credited north-up it put its seconds on the
+    cells beside the field instead of the ones above and below. The frame's
+    real corners are cut by the cell's four edges and the piece left is
+    measured, so the depth map shows the union of the fields of view as they
+    were really turned. The cardinal angles take the cheap path.
+    """
+    turn = (shot.rotation or 0.0) % 180.0
+    if min(turn, 180.0 - turn) < 0.5:
+        return overlap_area(shot, cell)
+    if abs(turn - 90.0) < 0.5:
+        return overlap_area(Region(ra=shot.ra, dec=shot.dec, width=shot.height,
+                                   height=shot.width), cell)
+    polygon = frame_corners(shot, cell)
+    half_w, half_h = abs(cell.width) / 2.0, abs(cell.height) / 2.0
+    polygon = _clip(polygon, 0, half_w, True)
+    polygon = _clip(polygon, 0, -half_w, False)
+    polygon = _clip(polygon, 1, half_h, True)
+    polygon = _clip(polygon, 1, -half_h, False)
+    if len(polygon) < 3:
+        return 0.0
+    area = 0.0
+    for i, (x1, y1) in enumerate(polygon):
+        x2, y2 = polygon[(i + 1) % len(polygon)]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
+
+
 def footprint(width: float, height: float,
               rotation: float | None) -> tuple[float, float]:
     """How much east-west and north-south sky a turned camera actually spans.
@@ -457,7 +527,7 @@ def coverage(cells: list[dict[str, Any]],
             area = cell.area()
             if area <= 0:
                 continue
-            fraction = min(1.0, overlap_area(shot, cell) / area)
+            fraction = min(1.0, shot_overlap_area(shot, cell) / area)
             if fraction <= 0:
                 continue
             depth[index][name] = depth[index].get(name, 0.0) + seconds * fraction

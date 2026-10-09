@@ -2311,6 +2311,10 @@ label.inline.compact input[type="range"] { width: 150px; margin-top: 0; }
 .depth-filters { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .depth-filters .btn.active { background: var(--accent-dim); border-color: var(--accent-edge); color: var(--accent-text); }
 .depth-canvas { cursor: crosshair; }
+/* Whose field of view is which on the depth map: a swatch and a line each. */
+.depth-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 2px; }
+.depth-key { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.depth-key i { display: inline-block; width: 14px; height: 9px; border-radius: 2px; }
 .plan-framing.framing-inline h4 { margin-top: 0; }
 /* Bandpass beside each filter slot. Narrow, because most filters have none. */
 .slot-nm-input { width: 58px; margin: 0; font-size: 11px; padding: 3px 5px; }

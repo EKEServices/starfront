@@ -1519,6 +1519,11 @@
     stage.appendChild(status);
     wrap.appendChild(stage);
 
+    const legend = document.createElement('div');
+    legend.className = 'depth-legend small';
+    legend.hidden = true;
+    wrap.appendChild(legend);
+
     const caption = document.createElement('p');
     caption.className = 'small muted';
     wrap.appendChild(caption);
@@ -1540,15 +1545,20 @@
 
     /** How wide a sky the picture shows: the region with a margin, in a
      *  3:2 frame, the same shape the survey cutout is asked for. */
+    /** The sky the map covers: on a single target the server reaches out to
+     *  take in every frame shot around the field, so the union of
+     *  everybody's fields of view is in the picture. */
+    function shown() { return grid.extent || grid.region; }
+
     function fieldOfView() {
-      const region = grid.region;
+      const region = shown();
       const across = Math.max(0.5, Math.abs(region.width));
       const down = Math.max(0.5, Math.abs(region.height));
       return Math.min(60, Math.max(across, down * FRAME_W / FRAME_H) * 1.12);
     }
 
     function geometry() {
-      const region = grid.region;
+      const region = shown();
       const ra0 = region.ra, dec0 = region.dec;
       const w = canvas.clientWidth || 600;
       const h = Math.round(w * FRAME_H / FRAME_W);
@@ -1607,7 +1617,10 @@
         const cw = cell.width * g.scale, ch = cell.height * g.scale;
         const seconds = Number(column[index] || 0);
         const fraction = goal > 0 ? seconds / goal : (seconds > 0 ? 1 : 0);
-        ctx.globalAlpha = fraction > 0 ? 0.45 + 0.25 * Math.min(1, fraction) : 0.12;
+        // Sky outside the region is drawn a little fainter: it is depth the
+        // frames made around the field, not depth the project asked for.
+        const outside = cell.inside === false;
+        ctx.globalAlpha = (fraction > 0 ? 0.45 + 0.25 * Math.min(1, fraction) : 0.12) * (outside ? 0.6 : 1);
         ctx.fillStyle = colour(fraction);
         ctx.fillRect(centre[0] - cw / 2, centre[1] - ch / 2, cw + 0.6, ch + 0.6);
         ctx.globalAlpha = 1;
@@ -1617,17 +1630,45 @@
           ctx.strokeRect(centre[0] - cw / 2, centre[1] - ch / 2, cw, ch);
         }
       });
+      // Every camera's field of view, at the angle it was really shot,
+      // over the depth it made - the union of the frames is what the map
+      // around a single target is made of, and a frame turned ninety
+      // degrees puts its depth above and below the field, not beside it.
+      // Each telescope keeps one colour; the filter being looked at is
+      // drawn solid, the others faint.
+      const prints = grid.footprints || [];
+      prints.forEach((print) => {
+        const at = g.toCanvas(print.ra, print.dec);
+        if (!at) return;
+        const w = print.width * g.scale, h = print.height * g.scale;
+        const own = (print.filter || '') === filter;
+        ctx.save();
+        ctx.translate(at[0], at[1]);
+        ctx.rotate(-(print.rotation || 0) * DEG);
+        ctx.strokeStyle = telescopeColour(print.telescope || print.agent, own ? 0.95 : 0.3);
+        ctx.lineWidth = own ? 1.6 : 1;
+        ctx.setLineDash(own ? [] : [3, 3]);
+        ctx.strokeRect(-w / 2, -h / 2, w, h);
+        ctx.setLineDash([]);
+        // A short bar along the frame's top edge says which way is up.
+        if (own) {
+          ctx.fillStyle = telescopeColour(print.telescope || print.agent, 0.9);
+          ctx.fillRect(-w / 2, -h / 2, w, Math.min(4, h * 0.05));
+        }
+        ctx.restore();
+      });
       // The region's edge, dashed. Its width and height are degrees of sky,
-      // so on the tangent plane it is a rectangle about the centre - the
+      // so on the tangent plane it is a rectangle about its centre - the
       // same shape the cells tile. Working its corners out in right
       // ascension with one cosine drew the top edge narrower than the
       // bottom, a trapezoid that no cell agreed with.
       const r = grid.region;
+      const rc = g.toCanvas(r.ra, r.dec) || [g.w / 2, g.h / 2];
       const rw = r.width * g.scale, rh = r.height * g.scale;
       ctx.setLineDash([5, 4]);
       ctx.strokeStyle = 'rgba(200, 210, 230, 0.7)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(g.w / 2 - rw / 2, g.h / 2 - rh / 2, rw, rh);
+      ctx.strokeRect(rc[0] - rw / 2, rc[1] - rh / 2, rw, rh);
       ctx.setLineDash([]);
       // No panels over it. The depth map is about what the collaboration
       // has collected, not where this telescope goes next; the framing on
@@ -1646,19 +1687,44 @@
       ctx.fillText(goal > 0 ? `${(goal / 3600).toFixed(0)}h` : 'shot', 10 + 11 * 12 + 4, g.h - 11);
     }
 
+    /** One colour per telescope, the same every time it is drawn. */
+    function telescopeColour(name, alpha) {
+      let hash = 0;
+      for (const ch of String(name || '')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+      const hue = hash % 360;
+      return `hsla(${hue}, 85%, 68%, ${alpha})`;
+    }
+
     function describe() {
       if (!grid) return;
       const prog = ((grid.progress || {})[filter]) || {};
       const column = (grid.seconds || {})[filter] || [];
-      const total = column.reduce((a, b) => a + Number(b || 0), 0);
-      const cells = Math.max(1, column.length);
+      const inside = grid.cells.map((cell, i) => (cell.inside === false ? null : i)).filter((i) => i !== null);
+      const picked = inside.length ? inside : column.map((_, i) => i);
+      const total = picked.reduce((a, i) => a + Number(column[i] || 0), 0);
       const goalHours = Number((grid.goals || {})[filter] || 0);
       caption.textContent = `${filter}: ${Math.round(Number(prog.average || 0) * 100)}% done`
         + (goalHours ? ` against ${goalHours.toFixed(0)}h at every point` : '')
         + ` · ${Math.round(Number(prog.atGoal || 0) * 100)}% of the field at full depth`
         + ` · thinnest part ${Math.round(Number(prog.thinnest || 0) * 100)}%`
-        + ` · ${(total / cells / 3600).toFixed(2)}h average on a cell`
+        + ` · ${(total / Math.max(1, picked.length) / 3600).toFixed(2)}h average on a cell`
         + ' — everybody’s accepted frames, where they really landed. Hover a cell for its hours.';
+      // Whose fields of view are drawn, at what angle, with how much in
+      // this filter: the key to the outlines on the picture.
+      legend.innerHTML = '';
+      const prints = (grid.footprints || []).filter((p) => (p.filter || '') === filter);
+      for (const print of prints) {
+        const item = document.createElement('span');
+        item.className = 'depth-key';
+        const swatch = document.createElement('i');
+        swatch.style.background = telescopeColour(print.telescope || print.agent, 0.95);
+        item.appendChild(swatch);
+        item.appendChild(document.createTextNode(
+          `${print.telescope || 'telescope'} · ${Number(print.rotation || 0).toFixed(0)}°`
+          + ` · ${print.width.toFixed(1)}×${print.height.toFixed(1)}° · ${(print.seconds / 3600).toFixed(1)}h`));
+        legend.appendChild(item);
+      }
+      legend.hidden = !prints.length;
     }
 
     function pick(name) {
