@@ -561,17 +561,21 @@ def remaining_seconds(cell_depth: dict[str, float],
 
 def visit_frames(filters: list["FilterTask"], seconds: float,
                  min_frames: int,
-                 need: dict[str, float] | None = None) -> dict[str, int]:
+                 need: dict[str, Any] | None = None) -> dict[str, int]:
     """How one visit's seconds fall across the filters, as frames.
 
     Without `need`, split in proportion to how deep the project wants each
     filter, and never fewer than `min_frames` of any — a stack is per
     filter, and a filter given two subs on a panel has nothing to stack.
 
-    With `need` — seconds each filter still wants, keyed by canonical name,
-    after what the field already has and what the other rigs are putting in
-    tonight — the visit is poured into the thinnest filter first: the one
-    with the most still wanted gets the seconds until it is level with the
+    With `need` — per canonical filter name, the seconds still wanted
+    (`left`) and the goal in seconds (`goal`), after what the field already
+    has and what the other rigs are putting in tonight — the visit is
+    poured into the thinnest filter first. Thinnest is measured against the
+    goal: a filter at a tenth of what was asked is thinner than one at a
+    third, whatever the hours say, so a project that asks five hundred
+    hours of Ha and a hundred of blue is kept in that proportion. The
+    filter furthest behind gets the seconds until it is level with the
     next, then the two share them, and so on down. A filter the pour never
     reaches is not shot tonight and is not named; one reached for less than
     `min_frames` gets `min_frames`, since fewer will not stack. The frames
@@ -585,11 +589,20 @@ def visit_frames(filters: list["FilterTask"], seconds: float,
     usable = [f for f in filters if f.exposure > 0]
     frames: dict[str, int] = {}
     if need is not None:
-        left_for = {f.filter: max(0.0, float(need.get(_key(f.filter), 0.0))) for f in usable}
+        left_for: dict[str, float] = {}
+        goal_of: dict[str, float] = {}
+        for f in usable:
+            entry = need.get(_key(f.filter))
+            if isinstance(entry, dict):
+                left_for[f.filter] = max(0.0, float(entry.get("left") or 0.0))
+                goal_of[f.filter] = max(float(entry.get("goal") or 0.0), left_for[f.filter], 1.0)
+            else:
+                left_for[f.filter] = max(0.0, float(entry or 0.0))
+                goal_of[f.filter] = max(left_for[f.filter], 1.0)
         order = sorted((f for f in usable if left_for[f.filter] > 0),
-                       key=lambda f: (-left_for[f.filter], usable.index(f)))
+                       key=lambda f: (-left_for[f.filter] / goal_of[f.filter], usable.index(f)))
         while order:
-            given = _pour(order, left_for, max(0.0, seconds))
+            given = _pour(order, left_for, goal_of, max(0.0, seconds))
             # A filter the pour reached for less than a stack's worth is
             # dropped and the pour run again without it, so its seconds go
             # to the filters above it rather than being rounded up into
@@ -614,23 +627,27 @@ def visit_frames(filters: list["FilterTask"], seconds: float,
 
 
 def _pour(order: list["FilterTask"], left_for: dict[str, float],
-          budget: float) -> dict[str, float]:
-    """Water-fill `budget` seconds into filters sorted by how much each
-    still wants, most first: the first takes seconds until it is level with
-    the second, then both share until level with the third, and so on."""
+          goal_of: dict[str, float], budget: float) -> dict[str, float]:
+    """Water-fill `budget` seconds into filters sorted by how far behind
+    their goal each is, furthest first. The level is the fraction of the
+    goal still wanted; lowering a filter's level by some amount costs that
+    amount times its goal, so a filter with a big goal takes more seconds
+    to move. The first takes seconds until it is level with the second,
+    then both share until level with the third, and so on."""
     given = {f.filter: 0.0 for f in order}
     group: list["FilterTask"] = []
     waiting = list(order)
-    remaining = lambda f: left_for[f.filter] - given[f.filter]      # noqa: E731
+    level = lambda f: (left_for[f.filter] - given[f.filter]) / goal_of[f.filter]   # noqa: E731
     while budget > 1e-9 and (group or waiting):
-        if not group or (waiting and remaining(waiting[0]) >= remaining(group[0]) - 1e-9):
+        if not group or (waiting and level(waiting[0]) >= level(group[0]) - 1e-12):
             group.append(waiting.pop(0))
             continue
-        step = max(0.0, remaining(group[0]) - (remaining(waiting[0]) if waiting else 0.0))
-        portion = min(budget, step * len(group)) if step > 0 else budget
-        per = portion / len(group)
+        step = max(0.0, level(group[0]) - (level(waiting[0]) if waiting else 0.0))
+        weight = sum(goal_of[f.filter] for f in group)
+        portion = min(budget, step * weight) if step > 0 else budget
+        drop = portion / weight
         for f in group:
-            given[f.filter] += per
+            given[f.filter] += drop * goal_of[f.filter]
         budget -= portion
         if waiting:
             group.append(waiting.pop(0))
@@ -721,6 +738,14 @@ def choose_filter(filters: list["FilterTask"], goals: dict[str, float],
     demand = filter_demand(cells, wanted, depth)
     left = {f.filter: demand.get(_key(f.filter), 0.0) - spoken.get(_key(f.filter), 0.0)
             for f in usable}
+    # Behind is measured against the goal, as on a single field: a filter
+    # at a tenth of what was asked is thinner than one at a third, so a
+    # project asking five times the Ha keeps its Ha five times as deep.
+    goal_seconds = {_key(name): float(hours) * 3600.0 * max(1, len(cells))
+                    for name, hours in wanted.items()}
+    for f in usable:
+        goal = goal_seconds.get(_key(f.filter), 0.0)
+        left[f.filter] = left[f.filter] / goal if goal > 0 else left[f.filter]
 
     candidates = [f for f in usable if left[f.filter] > 0] or list(usable)
     badness = moon_badness(moon)
@@ -835,17 +860,25 @@ def night_need(filters: list["FilterTask"], goals: dict[str, float],
         if not any(_key(name) == _key(f.filter) for name in wanted):
             wanted[f.filter] = f.hours
     demand = filter_demand(cells, wanted, depth)
-    need = {_key(f.filter): max(0.0, demand.get(_key(f.filter), 0.0)
-                                - spoken.get(_key(f.filter), 0.0))
-            for f in filters if f.exposure > 0}
+    goal_seconds = {_key(name): float(hours) * 3600.0 * max(1, len(cells))
+                    for name, hours in wanted.items()}
+    need: dict[str, Any] = {}
+    for f in filters:
+        if f.exposure <= 0:
+            continue
+        key = _key(f.filter)
+        left = max(0.0, demand.get(key, 0.0) - spoken.get(key, 0.0))
+        need[key] = {"left": left, "goal": goal_seconds.get(key, 0.0)}
     badness = moon_badness(moon)
     if badness is not None:
-        wanting = [key for key, value in need.items() if value > 0]
+        wanting = [key for key, value in need.items() if value["left"] > 0]
         tolerant = [key for key in wanting if key in MOON_TOLERANT]
         sensitive = [key for key in wanting if key not in MOON_TOLERANT]
         preferred = tolerant if badness >= MOON_BRIGHT else sensitive
         if preferred:
-            need = {key: (value if key in preferred else 0.0) for key, value in need.items()}
+            for key, value in need.items():
+                if key not in preferred:
+                    value["left"] = 0.0
     return need
 
 

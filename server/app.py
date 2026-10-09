@@ -1284,6 +1284,8 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
         if asked is None and held and dealing:
             continue
         depth, mine = collab.coverage(cells, shot)
+        if _sync_task_filters(task, wants, goals, profile):
+            task["version"] = int(task.get("version") or 1) + 1
         filters = [collab.FilterTask.read(f) for f in (task.get("filters") or [])]
         # Only what this rig can shoot. A telescope with one filter in a
         # drawer carries exactly that filter tonight, and dealing it OIII
@@ -1352,6 +1354,49 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
         store.set_task(task)
         commit(task)
     return changed
+
+
+def _sync_task_filters(task: dict[str, Any], wants: collab.Requirements,
+                       goals: dict[str, float], profile: collab.RigProfile) -> bool:
+    """Bring a task's filters up to date with its project's.
+
+    A task's filters were fixed the night the rig joined, so a project
+    that added luminance a week later never dealt it to anyone already on
+    it: every rig's list went on saying H, O, R, G and B until it left and
+    joined again. The project's filters the rig carries are what it holds
+    now - added at the rig's own exposure for that filter, or the middle
+    of what the project takes - and a filter the project dropped is
+    dropped. True when anything changed.
+    """
+    names = list(wants.filters) or list(goals)
+    if not names:
+        return False
+    carried = {collab._key(name) for name in (profile.filters or {})}
+    wanted = [name for name in names
+              if not carried or collab._key(name) in carried]
+    if not wanted:
+        return False
+    held = list(task.get("filters") or [])
+    by_key = {collab._key(f.get("filter")): f for f in held}
+    fallback = float(held[0].get("exposure") or 0.0) if held else 0.0
+    fallback = fallback or _middle_exposure(wants)
+    fresh = []
+    for name in wanted:
+        key = collab._key(name)
+        if key in by_key:
+            fresh.append(by_key[key])
+            continue
+        exposure = float((profile.exposures or {}).get(key) or 0.0) or fallback
+        if wants.minExposure is not None and exposure < wants.minExposure:
+            exposure = float(wants.minExposure)
+        if wants.maxExposure is not None and exposure > wants.maxExposure:
+            exposure = float(wants.maxExposure)
+        fresh.append(collab.FilterTask(filter=name, exposure=exposure,
+                                       hours=float(goals.get(name) or 1.0)).payload())
+    if [collab._key(f.get("filter")) for f in fresh] == list(by_key):
+        return False
+    task["filters"] = fresh
+    return True
 
 
 def _middle_exposure(wants: collab.Requirements) -> float:
