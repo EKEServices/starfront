@@ -1349,6 +1349,34 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
     return {"project": updated}
 
 
+@app.post("/api/v1/projects/{project_id}/redeal")
+def redeal_project(project_id: str,
+                   who: dict[str, Any] = Depends(person_from)) -> dict[str, Any]:
+    """Deal every rig on the project afresh the next time it asks.
+
+    A list dealt for a night holds for that night, and rightly: nothing
+    moves under a rig that is shooting. The coordinator is the exception.
+    When the rules of the deal change - as they did the day the thinnest
+    filter started coming first - the lists already made for tonight were
+    made the old way, and holding them is a night lost. This forgets which
+    night each live list was made for, so each rig's next poll is dealt
+    afresh for its own night. A rig that never polls keeps the list it
+    has, so nothing is pulled out from under anyone mid-run.
+    """
+    _require_project_owner(who, project_id)
+    forgotten = 0
+    for task in store.tasks_in(project_id):
+        if task.get("state") not in ("offered", "accepted"):
+            continue
+        if not task.get("assignedNight") and not task.get("assignedAt"):
+            continue
+        task["assignedNight"] = ""
+        task["assignedAt"] = 0.0
+        store.set_task(task)
+        forgotten += 1
+    return {"project": project_id, "forgotten": forgotten}
+
+
 @app.get("/api/v1/projects")
 def list_projects() -> dict[str, Any]:
     """Open to anyone: browsing is how people find a collab to join."""

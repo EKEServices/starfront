@@ -1462,6 +1462,21 @@ case("a long night still starts with blue and gives it the most, then levels the
      and len(long_frames) > 1 and all(n >= 10 for n in long_frames.values()),
      str(long_frames))
 
+# The coordinator can make every rig's list for tonight be dealt afresh:
+# the day the dealing rules changed, the lists already made for that night
+# held, made the old way, and would have held all night.
+status, _ = call("POST", f"/api/v1/projects/{LOPSIDED}/redeal", {}, token=deep_token)
+case("a telescope cannot make a project deal everyone afresh", status == 401)
+status, forgotten = call("POST", f"/api/v1/projects/{LOPSIDED}/redeal", {}, token=ADMIN)
+case("the coordinator can, and every live list's night is forgotten",
+     status == 200 and forgotten.get("forgotten") == 3, str(forgotten))
+_, again_night = call("GET", f"/api/v1/agent/task?night=2026-10-09&project={LOPSIDED}",
+                      token=long_token)
+again_task = next(t for t in again_night["tasks"] if t["project"] == LOPSIDED)
+case("...and a rig's next ask is dealt again for its night",
+     again_task.get("assignedNight") == "2026-10-09" and list(again_task["visit"]["frames"])[0] == "B",
+     f'{again_task.get("assignedNight")} {again_task["visit"]["frames"]}')
+
 # ------------------------------------------------- who is on the sky
 # Every check-in may say where the telescope points and what it is doing;
 # the group sees each other on the chart, and each project says how many
