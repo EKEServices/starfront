@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.14
+
+- Each field starts guiding after it is centred, as a target container does, when a guider is connected. N.I.N.A.'s *Center* only resumes guiding it stopped itself, so a sequence that starts the guider inside each of its own targets rather than in its Start area reached the Starfront container with the guider idle: one tester's 23 Blue subs were shot unguided at 5–7″ with every dither a no-op.
+- A sub whose stars are larger than the project's star-size limit is not credited, and the log says so. The server judges a night by its mean star size, so a night of good subs with a trailed hour in it passed or failed as a whole; now only the subs that meet the rule are reported.
+
 ## 1.0.0.13
 
 - The drift trigger the container builds inside each field is named *Center After Drift* again instead of "MISSING LABEL Lbl_SequenceTrigger_Platesolving_CenterAfterDriftTrigger_Name". The label key was wrong, and the fallback did not recognise N.I.N.A.'s "MISSING LABEL" answer as missing.

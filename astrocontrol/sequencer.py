@@ -137,6 +137,11 @@ class Sequencer:
         # The warnings board, for the things only the run can see happen: a
         # flip that did not flip, a solver that keeps failing. Optional.
         self.warnings: Any = None
+        # A collaboration's rules by project id, and the image scale in
+        # arcseconds per pixel, from the collaboration client. Set by whoever
+        # builds both; without them every sub is credited as before.
+        self.collab_rules: Any = None
+        self.collab_scale: Any = None
         self._solve_failures = 0
         # Told when the first plate solve on a collaboration target measures
         # the camera at an angle other than the one its panels were laid at.
@@ -2502,8 +2507,15 @@ class Sequencer:
                 telescope=rig.name)
         # And to the panel it landed on. A mosaic's panels are different sky,
         # and a collaboration counts depth per point of sky - so this is what
-        # gets reported, panel by panel, rather than the target's total.
-        if not guide_lost:
+        # gets reported, panel by panel, rather than the target's total. A sub
+        # the project's star-size rule would refuse is not credited at all:
+        # the server judges a night by its mean, and a night of good subs with
+        # a trailed hour in it used to pass or fail as a whole.
+        refused = None if guide_lost else self._over_star_limit(entry, entry_row["hfr"])
+        if refused:
+            entry_row["refused"] = refused
+            self._say(f"{rig.name}: {refused}", "warn")
+        if not guide_lost and not refused:
             with contextlib.suppress(Exception):
                 self.targets.add_panel_integration(
                     entry["targetId"], rig.capture.night_name(),
@@ -2513,6 +2525,31 @@ class Sequencer:
         with self._lock:
             self._frames_log.append(entry_row)
             del self._frames_log[:-FRAME_HISTORY]
+
+    def _over_star_limit(self, entry: dict[str, Any], hfr_px: float | None) -> str | None:
+        """Why a sub fails its collaboration's star-size rule, or None.
+
+        None as well when there is no rule, no measurement, no scale or no
+        collaboration: a sub is only ever refused on a rule the project set.
+        """
+        if hfr_px is None or self.collab_rules is None or self.collab_scale is None:
+            return None
+        try:
+            target = self.targets.get(entry.get("targetId") or "") or {}
+            project = (target.get("collab") or {}).get("project")
+            if not project:
+                return None
+            limit = (self.collab_rules(project) or {}).get("maxHfr")
+            scale = self.collab_scale()
+            if not limit or not scale:
+                return None
+            arcsec = float(hfr_px) * float(scale)
+            if arcsec <= float(limit):
+                return None
+            return (f'not credited to the collaboration — stars {arcsec:.2f}" '
+                    f'against the project\'s {float(limit):g}" limit')
+        except Exception:                        # noqa: BLE001 - never stop a run for this
+            return None
 
     def _guide_rms(self) -> float | None:
         """Total guide RMS in arcseconds right now, or None when not guiding."""

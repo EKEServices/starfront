@@ -119,6 +119,10 @@ sequencer.safety = safety_watcher
 # of the "warning" notifications.
 warning_board = warnings.WarningBoard(log=rigs.log, notifier=notifier)
 sequencer.warnings = warning_board
+# The run refuses a sub the collaboration's star-size rule would refuse, so
+# it needs the rules and the scale the report is made in.
+sequencer.collab_rules = collab_client.requirements_for
+sequencer.collab_scale = collab_client.scale
 
 
 def _night_bounds() -> tuple[float | None, float | None] | None:

@@ -18,6 +18,7 @@ using NINA.Sequencer.Conditions;
 using NINA.Sequencer.Container;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.SequenceItem.FilterWheel;
+using NINA.Sequencer.SequenceItem.Guider;
 using NINA.Sequencer.SequenceItem.Imaging;
 using NINA.Sequencer.SequenceItem.Platesolving;
 using NINA.Sequencer.Trigger;
@@ -575,6 +576,7 @@ namespace Starfront.Collab.Sequencer {
                 },
                 Scale = scale, FocalLength = focal > 0 ? focal : null, Colour = settings.Colour,
                 Bandpass = Filters.Bandpass(plan.Filters.First().WheelName ?? ""),
+                MaxHfr = Runtime.Session.RequirementsFor(plan.Deal.Project)?.MaxHfr,
             });
 
             panel.Add(new AltitudeGate(panel, profileService, Runtime.Session.Run));
@@ -599,6 +601,22 @@ namespace Starfront.Collab.Sequencer {
             center.Attempts = 2;
             panel.Add(center);
             panel.Add(new NoteCameraAngle(center, panel, Runtime.Host, settings, reporter));
+
+            // Guiding, the way a target container starts it after its centre.
+            // N.I.N.A.'s Center resumes guiding only if it stopped it, so a
+            // sequence that starts the guider inside each of its own targets
+            // rather than in its Start area arrived here with the guider idle,
+            // and one tester's 23 Blue subs were shot unguided at 5-7" with
+            // every dither a no-op. Only with a guider connected: Start Guiding
+            // on a rig without one fails the panel.
+            if (guiderMediator.GetInfo().Connected) {
+                var guide = HostItems.Make<StartGuiding>(guiderMediator);
+                guide.ForceCalibration = false;
+                guide.Name = Icons.Label("Lbl_SequenceItem_Guider_StartGuiding_Name", "Start guiding");
+                guide.Icon = Icons.Find("GuiderSVG");
+                guide.Category = "Starfront";
+                panel.Add(guide);
+            }
 
             foreach (var block in plan.Filters) {
                 if (block.WheelName != null) {

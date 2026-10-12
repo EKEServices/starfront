@@ -21,6 +21,8 @@ namespace Starfront.Collab.Services {
         public double? FocalLength { get; init; }
         public bool Colour { get; init; }
         public double? Bandpass { get; init; }
+        /// <summary>The project's star-size limit in arcseconds, if it set one; a frame over it is not credited.</summary>
+        public double? MaxHfr { get; init; }
     }
 
     /// <summary>
@@ -95,6 +97,17 @@ namespace Starfront.Collab.Services {
                 double? rms = null;
                 var recorded = metadata.Image.RecordedRMS;
                 if (recorded != null && recorded.DataPoints > 0 && recorded.Total > 0) rms = recorded.Total * recorded.Scale;
+
+                // The project's star-size rule, frame by frame. The server judges
+                // a night by its mean, and a night of good subs with a trailed
+                // hour in the middle used to pass as a whole or fail as a whole;
+                // a sub over the limit is simply not credited, so the night's
+                // report carries only the frames that meet the rule.
+                if (context.MaxHfr is double limit && limit > 0 && hfr is double measured && measured > limit) {
+                    Logger.Warning($"Starfront: {context.TargetName} {filter} +{seconds:0}s not credited - HFR {measured:0.00}\" is over the "
+                                   + $"project's {limit:0.0}\" limit");
+                    return;
+                }
 
                 ledger.Credit(night, context.ProjectId, context.TaskId, context.PanelNumber.ToString(), filter, seconds,
                               hfr, rms, context.Footprint, context.Scale, context.FocalLength, context.Colour, context.Bandpass);

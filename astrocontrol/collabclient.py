@@ -354,6 +354,16 @@ class CollabClient:
         value = status.get("rmsTotal")
         return round(float(value), 2) if value else None
 
+    def requirements_for(self, project_id: str) -> dict[str, Any]:
+        """A project's rules as last heard from the server, by project id."""
+        with self._lock:
+            wants = self._by_project.get(project_id or "")
+            return dict(wants or {})
+
+    def scale(self) -> float | None:
+        """The master camera's image scale in arcseconds per pixel."""
+        return self._scale()
+
     def _scale(self) -> float | None:
         optics = self.rigs.master.config.section("optics")
         focal = optics.get("focalLength")
