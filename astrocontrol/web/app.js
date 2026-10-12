@@ -2647,11 +2647,15 @@ function applyStatus(status) {
   if (mine || anyNew) {
     // A new frame is pulled into the view only while the viewer is following
     // the camera. Somebody stepping back through the night's frames keeps
-    // the one they are on; Newest brings them back.
+    // the one they are on; Newest brings them back. Following is what the
+    // operator last asked for, not where the frame on view happens to sit
+    // in the list — every new sub pushes the one on view down a place, and
+    // reading that as "browsing" is how the viewer stopped following the
+    // camera after the first sub of every night.
     refreshImages().then(() => {
       // While the stack is on view a new sub updates the stack, not the
       // viewer; `livestack.js` redraws it when the stack says it has grown.
-      if (mine && !state.browsing && !stackView.on) selectImage(latest, true);
+      if (mine && !state.browsing && !stackView.on) selectImage(latest, true, false);
       else updateFramePosition();
     });
   }
@@ -2843,7 +2847,7 @@ function updateRigViews() {
         selectRig(rig.id);
         const now = rigList().find((one) => one.id === rig.id) || {};
         const shot = (now.capture || {}).latestImageId;
-        if (shot) selectImage(shot);
+        if (shot) selectImage(shot, false, false);
       });
       host.appendChild(card);
     }
@@ -5069,7 +5073,11 @@ function frameIndex() {
   return steppableImages().findIndex((image) => image.id === state.currentId);
 }
 
-/** "3 / 41" on the toolbar, and whether the viewer is following the camera. */
+/** "3 / 41" on the toolbar, and the Newest button while the viewer is looking
+ *  back. `state.browsing` itself is set where a frame is chosen — this only
+ *  reports it. Deriving it from the frame's place in the list was the bug:
+ *  each new sub moved the one on view to second place, so the viewer
+ *  decided it was browsing and never followed the camera again. */
 function updateFramePosition() {
   const subs = steppableImages();
   const index = frameIndex();
@@ -5077,10 +5085,8 @@ function updateFramePosition() {
   if (!label) return;
   if (!subs.length || index < 0) {
     label.textContent = subs.length ? `${subs.length} sub${subs.length === 1 ? '' : 's'}` : '';
-    state.browsing = false;
   } else {
     label.textContent = `${subs.length - index} / ${subs.length}`;
-    state.browsing = index > 0;
   }
   $('btnPrevFrame').disabled = !subs.length || index >= subs.length - 1;
   $('btnNextFrame').disabled = index <= 0;
@@ -5095,17 +5101,22 @@ function stepFrame(delta) {
   const index = frameIndex();
   const next = index < 0 ? 0 : Math.max(0, Math.min(subs.length - 1, index + delta));
   if (next === index) return;
-  selectImage(subs[next].id, true);
+  // Stepping back is browsing; stepping forward onto the newest sub is
+  // following the camera again.
+  selectImage(subs[next].id, true, next > 0);
 }
 
 function newestFrame() {
   const images = state.images || [];
   if (!images.length) return;
-  state.browsing = false;
-  selectImage(images[0].id, true);
+  selectImage(images[0].id, true, false);
 }
 
-async function selectImage(imageId, keepView = false) {
+/** Show a frame. `browse` says whether the operator is now looking back
+ *  through the night (true), following the camera (false), or — left out, as
+ *  from a click on the list — whichever the frame's place in the list says:
+ *  the newest sub, or a focus frame, is following; anything older is not. */
+async function selectImage(imageId, keepView = false, browse = undefined) {
   if (!imageId) return;
   // Picking a frame is leaving the stack: the list and the arrow keys mean
   // "show me that sub", and the stack button brings the stack back.
@@ -5122,6 +5133,7 @@ async function selectImage(imageId, keepView = false) {
   state.currentId = imageId;
   state.currentRecord = record;
   state.currentStats = payload.stats;
+  state.browsing = browse === undefined ? frameIndex() > 0 : !!browse;
 
   if ($('chkAuto').checked) setStretchSliders(payload.autoStretch);
   drawHistogram(payload.stats);
