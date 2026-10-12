@@ -38,7 +38,7 @@
                         Margin="12,0,0,0"
                         VerticalAlignment="Center"
                         Opacity="0.8"
-                        Text="Only members of the Starfront Discord server can take part; join it first if you are not in it. A browser window opens; come back here when it says you are signed in." TextWrapping="Wrap" MaxWidth="400" />
+                        Text="You have to be in the Starfront Discord server to take part; you do not have to be a Starfront customer. Anyone in the server can join and start collaborations. A browser window opens; come back here when it says you are signed in." TextWrapping="Wrap" MaxWidth="400" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenTrue}}">
                     <TextBlock VerticalAlignment="Center">

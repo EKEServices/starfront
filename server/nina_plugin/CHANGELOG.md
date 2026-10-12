@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.25
+
+- Beside *Join the Starfront Discord*, on the plugin's page and in the guide, it says plainly that you do not have to be a Starfront customer: anyone in the server, anywhere, can join and start collaborations.
+
 ## 1.0.0.24
 
 - The plugin's page says plainly that you have to be in the Starfront Discord server to take part, with the invitation first in the description and among the links at its top; its homepage is the observatory's website. The button on the Imaging-tab panel is gone; the one beside the sign-in button on the options page stays.
