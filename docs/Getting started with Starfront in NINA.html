@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Getting started with Starfront in N.I.N.A.</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 10.5pt; line-height: 1.5; color: #1a1d24; max-width: 174mm; margin: 0 auto; }
+  h1 { font-size: 24pt; margin: 0 0 2px; }
+  .sub { color: #5c6470; margin: 0 0 18px; font-size: 10.5pt; }
+  h2 { font-size: 14pt; margin: 24px 0 8px; border-bottom: 1px solid #d6dae2; padding-bottom: 4px; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14px 0 4px; page-break-after: avoid; }
+  p { margin: 0 0 8px; }
+  ul, ol { margin: 0 0 8px 22px; padding: 0; }
+  li { margin: 0 0 4px; }
+  b { color: #0b0e14; }
+  code { font-family: Consolas, monospace; font-size: 9.5pt; background: #f1f4f8; padding: 1px 4px; border-radius: 3px; }
+  pre { font-family: Consolas, monospace; font-size: 9.5pt; background: #f1f4f8; padding: 8px 10px; border-radius: 4px; white-space: pre-wrap; margin: 6px 0 10px; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; font-size: 10pt; page-break-inside: avoid; }
+  th, td { text-align: left; vertical-align: top; padding: 5px 8px; border-bottom: 1px solid #e3e6ec; }
+  th { background: #f1f4f8; font-weight: 600; }
+  .note { background: #eef8f2; border-left: 3px solid #7ee7a5; padding: 7px 11px; margin: 10px 0; }
+  .warn { background: #fdf3e7; border-left: 3px solid #d9a03d; padding: 7px 11px; margin: 10px 0; }
+  .toc { columns: 2; column-gap: 24px; font-size: 10pt; margin: 0 0 6px; }
+  .toc li { break-inside: avoid; }
+  .step { margin: 0 0 10px; }
+  .step b.n { display: inline-block; min-width: 1.6em; color: #2a6f4a; }
+</style>
+</head>
+<body>
+<h1>Getting started with Starfront in N.I.N.A.</h1>
+<p class="sub">A first-night walk-through for people who have not used N.I.N.A.'s Advanced Sequencer before. For plugin 1.0.0.29, October 2026. The full reference is the companion guide <i>Starfront Collaboration for N.I.N.A.</i></p>
+
+<ol class="toc">
+  <li>What you are building</li>
+  <li>Ten minutes on the Advanced Sequencer</li>
+  <li>Before the first night</li>
+  <li>Build the sequence, step by step</li>
+  <li>Save it so you never build it again</li>
+  <li>Run it</li>
+  <li>The next morning</li>
+  <li>Mistakes everybody makes once</li>
+</ol>
+
+<h2>1. What you are building</h2>
+<p>By the end of this you will have one saved sequence that, every clear night, cools the camera, unparks the mount, shoots whatever the Starfront server dealt your telescope for the collaborations you have joined, then parks and warms up. You load it, press start, and go to bed. Nothing about <i>how</i> you shoot changes: your exposures, your gain, your guider, your autofocus and your meridian flip all stay yours.</p>
+<p>The piece that does the work is a single instruction the plugin adds to N.I.N.A., called <b>Starfront collaboration</b>. It sits in the sequence where a target would go. When the sequence reaches it, it asks the server what tonight's share is and shoots it with N.I.N.A.'s own slew, centre, filter and exposure instructions, one field or panel at a time.</p>
+
+<h2>2. Ten minutes on the Advanced Sequencer</h2>
+<p>N.I.N.A. has two sequencers. The <b>simple sequencer</b> is a form: one target, a table of exposures. The <b>Advanced Sequencer</b> is a list of instructions you assemble yourself, and it is the only one the plugin works in. It looks complicated the first time; it is four ideas.</p>
+<h3>The three areas</h3>
+<p>Every sequence has three boxes, top to bottom:</p>
+<ul>
+  <li><b>Start</b>: what to do once at the beginning. Cool the camera, unpark the mount.</li>
+  <li><b>Targets</b>: the imaging. Normally one <i>Deep Sky Object Instruction Set</i> per target; for Starfront, the Starfront collaboration container goes here instead.</li>
+  <li><b>End</b>: what to do once at the end. Warm the camera, park the mount.</li>
+</ul>
+<h3>Instructions, conditions, triggers</h3>
+<p>Everything you drop into those boxes is one of three kinds, and the palette on the right of the screen (the <b>Instructions</b> sidebar) is sorted by equipment: Camera, Telescope, Filter Wheel, Focuser, Guider, Utility, and so on, plus a <b>Starfront</b> category once the plugin is installed.</p>
+<ul>
+  <li>An <b>instruction</b> does one thing and then the next one runs: <i>Cool Camera</i>, <i>Unpark Scope</i>, <i>Take Many Exposures</i>. Most of the palette is instructions.</li>
+  <li>A <b>condition</b> (<i>Loop Until Time</i>, <i>Loop until Altitude Below</i>) is attached to a box and makes the box repeat its contents for as long as the condition holds. The Starfront container needs none.</li>
+  <li>A <b>trigger</b> (<i>Meridian Flip</i>, <i>AF After HFR Increase</i>, <i>AF After Time</i>) is attached to a box and watches while the box runs, firing between exposures when its moment comes. Triggers are how your meridian flip and autofocus keep working with Starfront.</li>
+</ul>
+<h3>How things get into the boxes</h3>
+<p>Drag an item from the palette and drop it into a box. Instructions land in the box's list; a condition or a trigger lands in the box's own <i>Conditions</i> or <i>Triggers</i> row, which appears when there is something in it. You can also press the <b>+</b> on a box to pick an item from a menu. Drag an item up or down to reorder it, and use the small bin icon on an item to remove it. An item inside a box only applies to that box and what is in it.</p>
+<h3>The buttons at the bottom</h3>
+<p>Along the bottom of the sequencer are <b>Save Sequence</b>, <b>Save Sequence as new file</b>, <b>Load Sequence</b>, a reset, and on the right the <b>Start Sequence</b> play button (which becomes <b>Cancel Sequence</b> while running). A sequence is a file; you build it once and load it on later nights.</p>
+<div class="note">If the Sequencer tab opens on the simple one-target form, press the <b>Advanced Sequencer</b> button at the top right of it. N.I.N.A. remembers which one you used last.</div>
+
+<h2>3. Before the first night</h2>
+<p>Do these once, in the afternoon, with the gear powered up. Each is covered in detail in the companion guide; this is the checklist.</p>
+<ol>
+  <li><b>Install the plugin.</b> Options &gt; General &gt; Plugin Repositories &gt; <b>+</b>, enter <code>https://collab.starfront.space/nina</code>, then Plugins &gt; Available &gt; <b>Starfront</b> &gt; Install, and restart N.I.N.A.</li>
+  <li><b>Join the Starfront Discord</b> if you have not: <a href="https://discord.com/invite/3ut6a7pfsY">discord.com/invite/3ut6a7pfsY</a>. You do not have to be a Starfront customer. Then Options &gt; Plugins &gt; Starfront &gt; <b>Sign in with Discord</b>.</li>
+  <li><b>Connect your camera, filter wheel and mount</b> on the Equipment tab, the way you do for any night. The plugin reads the sensor size and pixel size from the connected camera, and the focal length from Options &gt; Equipment &gt; Telescope; the server needs all three to know what your camera covers. If you try to join before the camera has been connected, the plugin says to connect it first.</li>
+  <li><b>Fill in the exposure table.</b> On the plugin's options page, under <i>Your exposures</i>, each filter in your wheel has a <i>Delivers</i> column (check the guess once: Ha delivers Ha, a colour camera's clear filter delivers OSC-RGB) and a <i>Seconds per sub</i> column. Type the sub length you normally use for each filter you want to contribute. Leave blank any filter you do not.</li>
+  <li><b>Join a collaboration.</b> Imaging tab &gt; switch on the <b>Starfront</b> panel in the panel list at the top &gt; click a collaboration's line to open its card &gt; <b>Join</b>. The card's green line says you can take part and with which filters; an orange one says why not. The panel's <b>Tonight</b> line will show your share once it is dark.</li>
+</ol>
+
+<h2>4. Build the sequence, step by step</h2>
+<p>Open the <b>Sequencer</b> tab in Advanced mode. If there is already something in it, press the reset button at the bottom to start from the three empty boxes. Then work top to bottom.</p>
+
+<h3>Start box</h3>
+<p class="step"><b class="n">1.</b> In the palette, open <b>Camera</b> and drag <b>Cool Camera</b> into <i>Start</i>. On it, type the temperature you normally cool to (for example -10) and a duration in minutes to get there (5 is kind to the camera).</p>
+<p class="step"><b class="n">2.</b> Open <b>Telescope</b> and drag <b>Unpark Scope</b> under it.</p>
+<p class="step"><b class="n">3.</b> Optional: open <b>Focuser</b> and drag <b>Run Autofocus</b> under that, so the night begins in focus. The Starfront container does not focus for you; your triggers (next) keep it there.</p>
+<p>You do not need <i>Start Guiding</i> here. Every field the container shoots starts the guider itself after it is centred, as a normal target does. Having it here as well does no harm.</p>
+
+<h3>Targets box</h3>
+<p class="step"><b class="n">4.</b> In the palette, open the <b>Starfront</b> category and drag <b>Starfront collaboration</b> into <i>Targets</i>. Drop it <b>straight into the Targets box</b>, not inside a Deep Sky Object Instruction Set.</p>
+<p class="step"><b class="n">5.</b> On the container, <b>Collaboration</b> is a drop-down: leave it on <i>Every collaboration I have joined</i>, or pick one.</p>
+<p class="step"><b class="n">6.</b> Give it your <b>meridian flip</b>: open <b>Telescope</b> in the palette and drag <b>Meridian Flip</b> onto the Starfront container. It lands in the container's <i>Triggers</i> row. Its settings are the ones from Options &gt; Imaging &gt; Meridian Flip, as always.</p>
+<p class="step"><b class="n">7.</b> Give it your <b>autofocus</b>: open <b>Focuser</b> and drag <b>AF After HFR Increase</b> (and <b>AF After Time</b> if you use it) onto the container too. They join the same <i>Triggers</i> row and fire between the container's exposures.</p>
+<p class="step"><b class="n">8.</b> <b>Do not</b> add <i>Dither after Exposures</i> or <i>Center After Drift</i> to it. The container dithers and recentres each field itself (the interval and the drift limit are on the plugin's options page). While it runs you will see a Center After Drift trigger inside each field it builds; that one is the plugin's own and stays.</p>
+<p class="step"><b class="n">9.</b> Leave the container's <i>Conditions</i> row empty. It shoots tonight's deal once and finishes on its own; a <i>Loop Until Time</i> would only ever stop it early, never make it shoot the deal twice.</p>
+<p>Under the container, one line tells you what the last check-in dealt and flags anything missing: not signed in, no exposures set, camera or mount not connected. If the line is orange, fix what it names before the night.</p>
+
+<h3>End box</h3>
+<p class="step"><b class="n">10.</b> From <b>Camera</b> drag <b>Warm Camera</b> into <i>End</i>, and from <b>Telescope</b> drag <b>Park Scope</b> under it. If you use a guider, <b>Guider</b> &gt; <b>Stop Guiding</b> before the park is tidy.</p>
+
+<p>The whole thing, read top to bottom:</p>
+<pre>Start
+  Cool Camera (-10 °C, 5 min)
+  Unpark Scope
+  Run Autofocus            (optional)
+Targets
+  Starfront collaboration  — Collaboration: Every collaboration I have joined
+      Triggers: Meridian Flip, AF After HFR Increase
+End
+  Stop Guiding
+  Warm Camera
+  Park Scope</pre>
+
+<h2>5. Save it so you never build it again</h2>
+<ol>
+  <li>Press <b>Save Sequence as new file</b> at the bottom of the sequencer and name it, for example <i>Starfront night</i>. It is saved as a <code>.json</code> file in your sequence folder.</li>
+  <li>On any later night, press <b>Load Sequence</b> and pick it. Everything, including the triggers, comes back.</li>
+  <li>Optional: open the <b>Templates</b> tab of the sidebar and drag the Starfront container (with its triggers) into it. From then on it is one drag from the Templates list into any sequence you build, for example a night that has your own target first and Starfront after.</li>
+</ol>
+<div class="note">The sequence does not store which collaborations you are on; the server does. Join or leave on the Starfront panel whenever you like, and the same saved sequence shoots whatever you are on tonight.</div>
+
+<h2>6. Run it</h2>
+<ol>
+  <li>Connect everything on the Equipment tab: camera, filter wheel, mount, focuser, guider, rotator if you have one. Unconnected gear shows as a red mark on the instructions that need it.</li>
+  <li>Open the Imaging tab and look at the Starfront panel's <b>Tonight</b> line. Once it is dark it reads something like <i>M31: the field, 14 x Ha, 10 x OIII</i>. Before dark, or if nothing is dealt, it says so; the container will still ask again when it runs.</li>
+  <li>Back on the Sequencer tab, press the <b>Start Sequence</b> play button at the bottom right.</li>
+</ol>
+<p>Watch it for the first field. The container appears in the sequencer with one sub-container per field or panel, each holding <i>is it up?</i>, <i>Slew and center</i>, <i>Start guiding</i>, <i>Switch filter</i> and <i>Take many exposures</i>, and the running one is highlighted. The Starfront panel on the Imaging tab lists the same fields with where each has got to: shooting frame 4 of 12, waiting to rise, skipped and why. After that, go to bed; the End box runs when the deal is done.</p>
+<p>To stop early, press <b>Cancel Sequence</b>. Frames already shot are kept and credited; if you start the sequence again the same night it carries on where it left off.</p>
+
+<h2>7. The next morning</h2>
+<ul>
+  <li>Your lights are in your usual image folder, saved by N.I.N.A. like any others. The target name on them is the collaboration's name (plus <i>panel 7</i> on a mosaic), so a file pattern with <code>$$TARGETNAME$$</code> sorts them into their own folder.</li>
+  <li>Every light was credited to the sky it covered and sent to the server at the next check-in, with its star size and guiding error. The Starfront panel's <b>Frames reported</b> list shows them, and whether the server accepted the night against the collaboration's rules. If the server was unreachable overnight, the frames go the next time it answers.</li>
+  <li>Nothing else to do. Tomorrow's deal is made from what everyone really collected; the next clear night you load the sequence and press start.</li>
+</ul>
+
+<h2>8. Mistakes everybody makes once</h2>
+<table>
+  <tr><th>What happened</th><th>Why</th><th>Fix</th></tr>
+  <tr><td>The Starfront category is not in the palette</td><td>The plugin is not installed, or N.I.N.A. was not restarted after installing it</td><td>Plugins &gt; Installed should list Starfront; restart N.I.N.A.</td></tr>
+  <tr><td>The mount slewed to the wrong target in the middle of the run</td><td>The Starfront container was dropped inside a Deep Sky Object Instruction Set, or a Center After Drift trigger was placed above it; triggers take their coordinates from the container they sit on</td><td>Put the container straight into Targets, and leave recentring to the plugin</td></tr>
+  <tr><td>The flip routine ran the moment the container started, or the sequence looped</td><td>A condition on the container, or an old plugin</td><td>Clear the container's Conditions row; update the plugin</td></tr>
+  <tr><td>"set an exposure for Ha in the exposure table first"</td><td>A filter the collaboration wants has no seconds against it</td><td>Options &gt; Plugins &gt; Starfront &gt; Your exposures</td></tr>
+  <tr><td>"connect your camera first"</td><td>The plugin has not yet seen the camera, so the server does not know what it covers</td><td>Connect the camera, then press Join again</td></tr>
+  <tr><td>"Nothing dealt to this telescope tonight"</td><td>It is not dark yet, you have not joined anything, or your part is finished</td><td>Join on the Starfront panel; check Tonight after dark</td></tr>
+  <tr><td>The container finished in a minute and the End box ran</td><td>Nothing was dealt, or every field is below the altitude floor for the next twelve hours</td><td>The Starfront panel says which; the log under <code>%LOCALAPPDATA%\NINA\Logs</code> has the lines beginning <code>Starfront:</code></td></tr>
+  <tr><td>Frames were shot unguided</td><td>The guider was not connected when the sequence started</td><td>Connect it on the Equipment tab; each field starts guiding itself</td></tr>
+</table>
+<p><b>Where to ask:</b> the Starfront Discord server. Say which telescope and paste the <code>Starfront:</code> lines from that night's log.</p>
+</body>
+</html>

@@ -1853,6 +1853,18 @@ def nina_guide():
                         content_disposition_type="inline")
 
 
+@app.get("/nina/start")
+def nina_getting_started():
+    """The first-night walk-through for people new to N.I.N.A.'s Advanced
+    Sequencer, staged beside the releases like the guide."""
+    path = NINA_DIR / "Getting started with Starfront in NINA.pdf"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no guide")
+    return FileResponse(path, media_type="application/pdf",
+                        filename="Getting started with Starfront in NINA.pdf",
+                        content_disposition_type="inline")
+
+
 @app.get("/nina/changelog")
 def nina_changelog():
     """The plugin's change log, which its manifests link to. A copy of
