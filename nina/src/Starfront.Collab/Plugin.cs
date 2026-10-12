@@ -60,7 +60,6 @@ namespace Starfront.Collab {
             SignInCommand = new AsyncRelayCommand(SignInAsync, () => !Runtime.Session.Busy);
             SignOutCommand = new AsyncRelayCommand(SignOutAsync, () => !Runtime.Session.Busy);
             RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !Runtime.Session.Busy);
-            OpenServerCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(OpenServer);
             JoinDiscordCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(OpenDiscord);
             Runtime.Session.PropertyChanged += (_, e) => {
                 if (e.PropertyName == nameof(Services.StarfrontSession.Busy)) {
@@ -95,7 +94,6 @@ namespace Starfront.Collab {
         public AsyncRelayCommand SignInCommand { get; }
         public AsyncRelayCommand SignOutCommand { get; }
         public AsyncRelayCommand RefreshCommand { get; }
-        public ICommand OpenServerCommand { get; }
         public ICommand JoinDiscordCommand { get; }
 
         private async Task SignInAsync() {
@@ -123,12 +121,5 @@ namespace Starfront.Collab {
             }
         }
 
-        private void OpenServer() {
-            try {
-                Process.Start(new ProcessStartInfo(Runtime.Settings.ServerUrl) { UseShellExecute = true });
-            } catch (Exception ex) {
-                Logger.Error(ex);
-            }
-        }
     }
 }

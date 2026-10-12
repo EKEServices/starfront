@@ -98,7 +98,7 @@ namespace Starfront.Collab.Services {
 
         private void Tick() {
             if (!settings.Enrolled) return;
-            if (DateTime.UtcNow - lastAttemptUtc < TimeSpan.FromMinutes(settings.PollMinutes)) return;
+            if (DateTime.UtcNow - lastAttemptUtc < TimeSpan.FromMinutes(StarfrontSettings.PollMinutes)) return;
             _ = PollSafeAsync();
         }
 
@@ -447,7 +447,7 @@ namespace Starfront.Collab.Services {
                 }
             }
             var body = new JObject {
-                ["hours"] = settings.HoursPerNight,
+                ["hours"] = 0.0,   // the server sizes the share to the project's goals
                 ["exposure"] = 0.0,
                 ["exposures"] = JObject.FromObject(settings.Exposures),
                 ["night"] = Tonight,

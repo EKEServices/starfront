@@ -27,7 +27,7 @@
 </head>
 <body>
 <h1>Starfront Collaboration for N.I.N.A.</h1>
-<p class="sub">How to take part in a Starfront collaboration from N.I.N.A. with the Starfront plugin. For plugin 1.0.0.25, October 2026.</p>
+<p class="sub">How to take part in a Starfront collaboration from N.I.N.A. with the Starfront plugin. For plugin 1.0.0.26, October 2026.</p>
 
 <ol class="toc">
   <li>Before you start</li>
@@ -100,11 +100,10 @@
 <table>
   <tr><th>Setting</th><th>What it does</th></tr>
   <tr><td>Name on the chart</td><td>How your telescope is listed to everyone else; your profile's name unless you type one</td></tr>
-  <tr><td>Hours a night to give</td><td>How much of a night the deal is sized to; 0 lets the server assume six. A one-hour night gets about one hour's frames</td></tr>
   <tr><td>Show where I point</td><td>Sends your mount's RA and Dec and what it is doing to the others' sky charts. Never your location</td></tr>
-  <tr><td>Check in every (minutes)</td><td>How often the plugin talks to the server; 10 is fine</td></tr>
-  <tr><td>Server</td><td>Leave as it is</td></tr>
+  <tr><td>Bortle class of the sky</td><td>1 is the darkest sky, 9 an inner city; 0 is not rated. A collaboration may ask for a sky no worse than a given class</td></tr>
 </table>
+<p>How much of a night you give is not a setting: the sequence decides. The server deals a share sized to a full night, and the container shoots as much of it as the time you give it allows, in your own conditions and loop limits. The plugin checks in with the server every ten minutes on its own.</p>
 
 <h2>5. Join a collaboration</h2>
 <p>Joining is done from the <b>Starfront</b> panel on the Imaging tab, and it is a decision you make; nothing is ever shot for a project you have not joined.</p>
@@ -190,7 +189,7 @@ End
 <p><b>I set one hour but it dealt me more.</b> That was a flaw in the server's dealing, fixed on 9 October 2026. A one-hour night now gets about an hour of one filter, the one the project needs most.</p>
 <p><b>Will it move my rotator?</b> Only if one is connected and <i>Rotate to the project's angle</i> is ticked. Without a rotator it shoots at the angle the camera sits and tells the server, so your panels are laid along your camera's axes.</p>
 <p><b>What if clouds stop the night halfway?</b> Whatever was shot is credited and reported. The next night's deal starts from what everyone really collected, so nothing has to be made up by hand.</p>
-<p><b>Can I run my own targets the same night?</b> Yes. Put them before or after the container in the Targets area, with their own conditions. The container only takes the hours the deal is sized to.</p>
+<p><b>Can I run my own targets the same night?</b> Yes. Put them before or after the container in the Targets area, with their own conditions. The container takes the time your sequence gives it and no more.</p>
 <p><b>Does it see my location?</b> No. The server is told your focal length, pixel size, sensor size, filters, exposures and, if you allow it, where the mount points. Your site, horizon and local times stay on your PC; that is why the plugin works out the Moon and altitudes itself.</p>
 <p><b>I have Starfront and N.I.N.A. on different telescopes.</b> That is fine. Both talk to the same server, and the same person can own telescopes of either kind.</p>
 <p><b>Who do I ask?</b> The Starfront Discord server, where the people running the collaborations are. Say which telescope, and paste the <code>Starfront:</code> lines from the log for the night in question, or the whole log file.</p>

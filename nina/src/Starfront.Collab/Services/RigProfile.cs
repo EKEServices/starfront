@@ -101,7 +101,10 @@ namespace Starfront.Collab.Services {
                 ["typicalGuideRms"] = Number(ledger.TypicalGuideRms()),
                 ["exposures"] = exposures,
                 ["rotation"] = rotation,
-                ["hoursPerNight"] = settings.HoursPerNight > 0 ? new JValue(settings.HoursPerNight) : JValue.CreateNull(),
+                // How much of a night this telescope gives is the sequence's
+                // business, not a setting: the server sizes the deal to its
+                // default and the sequence shoots as much of it as it has time for.
+                ["hoursPerNight"] = JValue.CreateNull(),
                 ["bortle"] = settings.Bortle > 0 ? new JValue(settings.Bortle) : JValue.CreateNull(),
                 ["windowFrom"] = "",
                 ["windowTo"] = "",

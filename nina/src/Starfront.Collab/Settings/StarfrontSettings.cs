@@ -59,7 +59,7 @@ namespace Starfront.Collab.Settings {
             public string AgentId { get; set; } = "";
             public string AgentName { get; set; } = "";
             public bool SharePosition { get; set; } = true;
-            public int PollMinutes { get; set; } = 10;
+            public int PollMinutes { get; set; } = 10;   // no longer read; kept so older files load
         }
 
         public void Load() {
@@ -148,10 +148,8 @@ namespace Starfront.Collab.Settings {
             set { global.SharePosition = value; Save(); RaisePropertyChanged(); }
         }
 
-        public int PollMinutes {
-            get => Math.Max(1, global.PollMinutes);
-            set { global.PollMinutes = Math.Max(1, value); Save(); RaisePropertyChanged(); }
-        }
+        /// <summary>How often the plugin talks to the server, in minutes. Fixed; it was a setting once and nobody needed to change it.</summary>
+        public const int PollMinutes = 10;
 
         /// <summary>Forget the sign-in and the telescope token on this PC.</summary>
         public void ForgetCredentials() {
@@ -258,12 +256,6 @@ namespace Starfront.Collab.Settings {
                 if (Sky.Filters.Canonical(kv.Key).ToLowerInvariant() == wanted) return kv.Value;
             }
             return null;
-        }
-
-        /// <summary>Hours a night this telescope gives collaborations; 0 lets the server assume its default.</summary>
-        public double HoursPerNight {
-            get => options.GetValueDouble(nameof(HoursPerNight), 0.0);
-            set { options.SetValueDouble(nameof(HoursPerNight), Math.Max(0.0, Math.Min(24.0, value))); RaisePropertyChanged(); }
         }
 
         /// <summary>Dither after this many frames of a panel; 0 leaves dithering to the triggers around the container.</summary>

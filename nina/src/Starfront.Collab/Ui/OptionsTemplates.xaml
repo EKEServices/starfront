@@ -164,33 +164,19 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-
-                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Bortle class of the sky" />
-                    <TextBox Grid.Row="5" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Bortle, ValidatesOnExceptions=True}" />
-                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="1 is the darkest sky, 9 an inner city; 0 is not rated. A project may ask for a dark sky." TextWrapping="Wrap" />
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Name on the chart" />
                     <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4" Text="{Binding Settings.TelescopeName}" />
                     <TextBlock Grid.Row="0" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the profile's name unless you type one" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Hours a night to give" />
-                    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Text="{Binding Settings.HoursPerNight, ValidatesOnExceptions=True}" />
-                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="0 lets the server assume six; the deal is sized to this" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Show where I point" />
+                    <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.SharePosition}" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the mount's RA and Dec and what it is doing, for the others' charts; never your site" TextWrapping="Wrap" />
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Show where I point" />
-                    <CheckBox Grid.Row="2" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.SharePosition}" />
-                    <TextBlock Grid.Row="2" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the mount's RA and Dec and what it is doing, for the others' charts; never your site" TextWrapping="Wrap" />
-
-                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Check in every (minutes)" />
-                    <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Text="{Binding Settings.PollMinutes, ValidatesOnExceptions=True}" />
-
-                    <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Server" />
-                    <TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Text="{Binding Settings.ServerUrl}" />
-                    <Button Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" Padding="10,2" HorizontalAlignment="Left" Command="{Binding OpenServerCommand}" Content="Open" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Bortle class of the sky" />
+                    <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Bortle, ValidatesOnExceptions=True}" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="1 is the darkest sky, 9 an inner city; 0 is not rated. A project may ask for a dark sky." TextWrapping="Wrap" />
                 </Grid>
             </StackPanel>
         </ScrollViewer>

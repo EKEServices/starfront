@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.26
+
+- *This telescope* under Options > Plugins > Starfront is down to what matters: the name on the chart, whether to show where you point, and the Bortle class. *Hours a night to give* is gone, because the sequence already decides how long the container runs; the server deals a full night's share and the container shoots what it has time for. *Check in every* is gone, fixed at ten minutes. The *Server* box and its *Open* button are gone.
+
 ## 1.0.0.25
 
 - Beside *Join the Starfront Discord*, on the plugin's page and in the guide, it says plainly that you do not have to be a Starfront customer: anyone in the server, anywhere, can join and start collaborations.
