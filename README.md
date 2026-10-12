@@ -506,9 +506,19 @@ the next target, stops, or stops and parks, as you choose.
   apart — so a failed frame is retried, and a camera that keeps failing is
   disconnected and brought back up on its remembered driver. Only the telescope
   that failed is retried, so a working camera never shoots the same slot twice.
+* **A driver that never answers.** A camera gone from the USB bus leaves its
+  driver's call sitting inside the SDK for good, and every ASCOM call for that
+  telescope runs on the one thread that call is holding. A call stuck for more
+  than a minute is declared dead: everything queued behind it fails at once
+  instead of each waiting its own three minutes, the telescope gets a fresh
+  driver thread for the reconnect, and the device reports itself disconnected
+  with a message that says to reconnect it or power-cycle it. Before this the
+  status feed waited on the dead thread and the window went dark for twenty
+  minutes.
 
 All of it is in **Equipment → Recovery**, and `python tools/check_recovery.py`
-exercises every path against stub devices that fail on purpose.
+exercises every path against stub devices that fail on purpose;
+`python tools/check_com_executor.py` does the same for the stuck driver call.
 
 ### Warnings: what is quietly wrong
 

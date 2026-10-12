@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import logging
 import threading
 import time
 from concurrent.futures import Future
-from queue import PriorityQueue, Queue
+from concurrent.futures import TimeoutError as FutureTimeout
+from queue import Empty, PriorityQueue, Queue
 from typing import Any, Callable
 
 import numpy as np
@@ -32,6 +34,16 @@ except Exception:                       # pragma: no cover
     _HAVE_PYWIN32 = False
 
 
+LOG = logging.getLogger("astrocontrol.devices")
+
+#: A call that has been running this long has not been slow, it has stopped:
+#: nothing a driver does legitimately takes a minute without returning — an
+#: ImageArray download is seconds, a Dispatch is seconds, a StartExposure is
+#: instant — but a driver whose USB device has gone sits inside the SDK
+#: forever, and every call queued behind it sits with it.
+WEDGE_SECONDS = 60.0
+
+
 class _ComExecutor:
     """Runs every COM call on a single STA thread.
 
@@ -41,11 +53,27 @@ class _ComExecutor:
     That was a hand-controller press arriving at the mount ten seconds
     late.  An urgent call goes to the front: a jog, a stop, a park, an
     abort - the things a person is waiting on with their hand on a button.
+
+    And one way out.  A driver call that never returns — the ZWO SDK with
+    the camera gone from the bus — would otherwise hold this thread, and
+    the queue behind it, until the program exits: the status feed waited
+    three minutes per property for a camera that was never going to
+    answer, and the window went dead for twenty minutes.  A caller that
+    times out behind a call stuck for longer than `WEDGE_SECONDS` declares
+    the executor dead: everything queued fails at once, the channel gets a
+    fresh thread for the reconnect, and the devices opened on this one
+    report themselves disconnected rather than waiting again.  The stuck
+    thread is left where it is; it is a daemon and dies with the process.
     """
 
-    def __init__(self, name: str = "ascom-com") -> None:
+    def __init__(self, name: str = "ascom-com", channel: str = "default") -> None:
+        self.channel = channel
+        self.dead = False
+        self.dead_reason = ""
         self._queue: PriorityQueue = PriorityQueue()
         self._order = itertools.count()
+        self._running: tuple[str, float] | None = None
+        self._lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, daemon=True, name=name)
         self._thread.start()
 
@@ -53,22 +81,61 @@ class _ComExecutor:
         pythoncom.CoInitialize()
         try:
             while True:
-                _lane, _seq, job, future = self._queue.get()
+                _lane, _seq, job, future, label = self._queue.get()
                 if job is None:
                     return
+                if self.dead:
+                    future.set_exception(DeviceError(self.dead_reason))
+                    continue
                 if future.set_running_or_notify_cancel():
+                    self._running = (label, time.monotonic())
                     try:
                         future.set_result(job())
                     except Exception as exc:       # noqa: BLE001 - relayed to caller
                         future.set_exception(exc)
+                    finally:
+                        self._running = None
         finally:
             pythoncom.CoUninitialize()
 
     def call(self, job: Callable[[], Any], timeout: float = 180.0,
-             urgent: bool = False) -> Any:
+             urgent: bool = False, label: str = "a driver call") -> Any:
+        if self.dead:
+            raise DeviceError(self.dead_reason)
         future: Future = Future()
-        self._queue.put((0 if urgent else 1, next(self._order), job, future))
-        return future.result(timeout=timeout)
+        self._queue.put((0 if urgent else 1, next(self._order), job, future, label))
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeout:
+            running = self._running
+            if (running is not None and not self.dead
+                    and time.monotonic() - running[1] > WEDGE_SECONDS):
+                self._declare_dead(running[0], time.monotonic() - running[1])
+                raise DeviceError(self.dead_reason) from None
+            raise DeviceError(f"no answer within {timeout:g}s") from None
+
+    def _declare_dead(self, label: str, stuck_for: float) -> None:
+        with self._lock:
+            if self.dead:
+                return
+            self.dead = True
+            self.dead_reason = (
+                f"the driver has stopped answering — {label} has been stuck for "
+                f"{stuck_for:.0f}s. The device must be reconnected; if that fails, "
+                f"power-cycle it and check its USB link")
+        LOG.error("%s: %s", self.channel, self.dead_reason)
+        with _executor_lock:
+            if _executors.get(self.channel) is self:
+                del _executors[self.channel]
+        # Everything waiting behind the stuck call fails now rather than each
+        # after its own three minutes.
+        while True:
+            try:
+                _lane, _seq, _job, future, _label = self._queue.get_nowait()
+            except Empty:
+                break
+            with contextlib.suppress(Exception):
+                future.set_exception(DeviceError(self.dead_reason))
 
 
 # One apartment thread per channel.  A channel is a telescope: its devices are
@@ -83,10 +150,10 @@ _executor_lock = threading.Lock()
 def _com(channel: str = "default") -> _ComExecutor:
     with _executor_lock:
         existing = _executors.get(channel)
-        if existing is None:
+        if existing is None or existing.dead:
             if not _HAVE_PYWIN32:
                 raise DeviceError("pywin32 is not installed; ASCOM is unavailable")
-            existing = _ComExecutor(name=f"ascom-com-{channel}")
+            existing = _ComExecutor(name=f"ascom-com-{channel}", channel=channel)
             _executors[channel] = existing
         return existing
 
@@ -189,41 +256,63 @@ class _AscomDevice:
     #: never opened from sharing one dict with every other.
     _cache: dict[str, tuple[Any, float]] | None = None
 
+    #: The apartment thread this wrapper's driver object lives on.  A COM
+    #: object belongs to the thread that created it, so once that thread is
+    #: declared dead the object is unreachable - a call from any other
+    #: thread would marshal back to the stuck one and stick with it - and
+    #: the only way on is a fresh Dispatch on a fresh thread, which is what
+    #: `connect` does.
+    _executor: _ComExecutor | None = None
+
     def _open(self, prog_id: str) -> None:
         self._cache = {}
-        self._driver = _com(self._channel).call(
-            lambda: win32com.client.Dispatch(prog_id), timeout=60)
+        self._executor = _com(self._channel)
+        self._driver = self._executor.call(
+            lambda: win32com.client.Dispatch(prog_id), timeout=60, label="opening the driver")
+
+    def _exec(self) -> _ComExecutor:
+        executor = self._executor
+        if executor is None:
+            return _com(self._channel)
+        if executor.dead:
+            # The thread this driver lived on is gone with it.  Say so once
+            # on the device's own state: the status panel shows it
+            # disconnected, and the sequencer's reconnect is what brings it
+            # back, on a new thread.
+            self._connected = False
+            raise DeviceError(executor.dead_reason)
+        return executor
 
     def _get(self, name: str, default: Any = None) -> Any:
         try:
-            return _com(self._channel).call(lambda: getattr(self._driver, name))
+            return self._exec().call(lambda: getattr(self._driver, name), label=name)
         except Exception:
             return default
 
     def _need(self, name: str) -> Any:
         try:
-            return _com(self._channel).call(lambda: getattr(self._driver, name))
+            return self._exec().call(lambda: getattr(self._driver, name), label=name)
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
 
     def _set(self, name: str, value: Any) -> None:
         try:
-            _com(self._channel).call(lambda: setattr(self._driver, name, value))
+            self._exec().call(lambda: setattr(self._driver, name, value), label=name)
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
 
     def _invoke(self, name: str, *args: Any, urgent: bool = False) -> Any:
         try:
-            return _com(self._channel).call(lambda: getattr(self._driver, name)(*args),
-                                            urgent=urgent)
+            return self._exec().call(lambda: getattr(self._driver, name)(*args),
+                                     urgent=urgent, label=name)
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
 
     def _set_urgent(self, name: str, value: Any) -> None:
         """A property write that jumps the polling queue."""
         try:
-            _com(self._channel).call(lambda: setattr(self._driver, name, value),
-                                     urgent=True)
+            self._exec().call(lambda: setattr(self._driver, name, value),
+                              urgent=True, label=name)
         except Exception as exc:
             raise DeviceError(f"{name}: {exc}") from exc
 
@@ -567,7 +656,7 @@ class AscomMount(_AscomDevice, Mount):
                         item = collection.Item(index)
                         found.append((float(item.Minimum), float(item.Maximum)))
                     return found
-                ranges = _com(self._channel).call(read)
+                ranges = self._exec().call(read, label="AxisRates")
                 if ranges:
                     rates[axis] = sorted(ranges)
             except Exception:                     # noqa: BLE001 - optional in ASCOM
