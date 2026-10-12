@@ -20,6 +20,7 @@ person's login should never be able to drive a mount.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import os
@@ -1240,11 +1241,16 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
     def commit(task: dict[str, Any]) -> None:
         visit = task.get("visit") or {}
         panels = len(task.get("share") or [])
-        exposures = {collab._key(f.get("filter")): float(f.get("exposure") or 0.0)
-                     for f in (task.get("filters") or [])}
+        entries = {collab._key(f.get("filter")): collab.FilterTask.read(f)
+                   for f in (task.get("filters") or [])}
         for name, count in (visit.get("frames") or {}).items():
             key = collab._key(name)
-            spoken[key] = spoken.get(key, 0.0) + int(count) * exposures.get(key, 0.0) * panels
+            entry = entries.get(key)
+            seconds = int(count) * (entry.exposure if entry else 0.0) * panels
+            # A sub through a dual-band filter is a sub in each of its
+            # channels, so it is spoken for in both.
+            for channel in (entry.keys() if entry else [key]):
+                spoken[channel] = spoken.get(channel, 0.0) + seconds
 
     for task in tasks:
         cells = task.get("cells") or []
@@ -1305,8 +1311,10 @@ def _redeal(project_id: str, nights: dict[str, str] | None = None,
                                           moon if asked is not None else None)
             if chosen is not None:
                 filters = [chosen]
+                # The goals of the channels the chosen filter delivers: a
+                # dual-band night is measured against Ha and OIII both.
                 night_goals = {name: value for name, value in goals.items()
-                               if collab._key(name) == collab._key(chosen.filter)}
+                               if collab._key(name) in chosen.keys()}
                 if not night_goals:
                     night_goals = {chosen.filter: chosen.hours}
         elif len(filters) > 1:
@@ -1368,29 +1376,79 @@ def _sync_task_filters(task: dict[str, Any], wants: collab.Requirements,
     names = list(wants.filters) or list(goals)
     if not names:
         return False
-    carried = {collab._key(name) for name in (profile.filters or {})}
-    wanted = [name for name in names
-              if not carried or collab._key(name) in carried]
-    if not wanted:
-        return False
+    # The channels the project wants, with their bandpass limits; a goal
+    # with no filter entry wants its channel with no limit.
+    wanted = collab.wanted_channels(wants) if wants.filters else {
+        collab._key(name): None for name in goals}
+    goal_of = {collab._key(name): float(hours) for name, hours in goals.items()}
     held = list(task.get("filters") or [])
     by_key = {collab._key(f.get("filter")): f for f in held}
     fallback = float(held[0].get("exposure") or 0.0) if held else 0.0
     fallback = fallback or _middle_exposure(wants)
-    fresh = []
-    for name in wanted:
-        key = collab._key(name)
-        if key in by_key:
-            fresh.append(by_key[key])
-            continue
-        exposure = float((profile.exposures or {}).get(key) or 0.0) or fallback
+
+    def clamp(exposure: float) -> float:
         if wants.minExposure is not None and exposure < wants.minExposure:
             exposure = float(wants.minExposure)
         if wants.maxExposure is not None and exposure > wants.maxExposure:
             exposure = float(wants.maxExposure)
-        fresh.append(collab.FilterTask(filter=name, exposure=exposure,
-                                       hours=float(goals.get(name) or 1.0)).payload())
-    if [collab._key(f.get("filter")) for f in fresh] == list(by_key):
+        return exposure
+
+    fresh = []
+    if profile.filters or profile.colour:
+        # One entry per filter the rig carries that delivers something the
+        # project wants, named as the rig names it - "H" on a mono wheel,
+        # "L-eXtreme" on a colour camera - with the channels a sub through
+        # it counts towards. A filter wider than the project's limit for a
+        # channel does not deliver that channel here.
+        own = dict(profile.filters or {})
+        if profile.colour and not own:
+            own = {"RGB": None}
+        for name, band in own.items():
+            letters = []
+            for letter in profile.delivers(name):
+                limit = wanted.get(collab._key(letter), "absent")
+                if limit == "absent":
+                    continue
+                if limit is not None and (band is None or band > limit):
+                    continue
+                letters.append(letter)
+            if not letters:
+                continue
+            key = collab._key(name)
+            hours = max((goal_of.get(collab._key(c), 0.0) for c in letters), default=0.0) or 1.0
+            if key in by_key:
+                kept = dict(by_key[key])
+                kept["channels"] = letters
+                kept["hours"] = hours
+                fresh.append(kept)
+                continue
+            exposure = clamp(float((profile.exposures or {}).get(name)
+                                   or (profile.exposures or {}).get(key) or 0.0) or fallback)
+            fresh.append(collab.FilterTask(filter=name, exposure=exposure, hours=hours,
+                                           channels=letters).payload())
+    else:
+        # A rig that has said nothing about its filters is offered the lot,
+        # one entry per channel, as before.
+        for key in wanted:
+            name = key.upper() if key.upper() in collab.CHANNELS else key
+            if key in by_key:
+                fresh.append(by_key[key])
+                continue
+            exposure = clamp(float((profile.exposures or {}).get(key) or 0.0) or fallback)
+            fresh.append(collab.FilterTask(filter=name, exposure=exposure,
+                                           hours=goal_of.get(key) or 1.0,
+                                           channels=[name] if name in collab.CHANNELS else []).payload())
+    if not fresh:
+        return False
+    # In the project's order, whatever order the rig lists its filters in:
+    # a deal that has nothing else to go on - equal progress, no Moon -
+    # ties to the first, and the first is the coordinator's to choose.
+    order = list(wanted)
+    fresh.sort(key=lambda f: min((order.index(collab._key(c)) for c in (f.get("channels") or [])
+                                  if collab._key(c) in order), default=len(order)))
+    if [collab._key(f.get("filter")) for f in fresh] == list(by_key) \
+            and all(sorted(f.get("channels") or []) == sorted(by_key[collab._key(f.get("filter"))].get("channels") or [])
+                    for f in fresh):
         return False
     task["filters"] = fresh
     return True
@@ -1446,11 +1504,31 @@ def report(body: ReportRequest,
         project = store.project(entry.project) if entry.project else None
         wants = collab.Requirements.read(
             (project or {}).get("payload", {}).get("requirements", {}))
+        # The channels the night carries. A client that said nothing sent a
+        # mono filter by its letter, which is its one channel; a filter the
+        # table knows - an L-eXtreme - is its lines. A night through a
+        # filter that carries two channels is recorded once per channel,
+        # each with the whole night's seconds, so the depth map and the
+        # progress count it in both, and the filter it really came through
+        # travels with each row.
+        letters = list(entry.channels) or collab.filter_channels(entry.filterName, entry.colour)
+        rows = []
+        if len(letters) <= 1 and (not letters or collab._key(letters[0]) == collab._key(entry.filterName)):
+            if letters and not entry.channels:
+                entry.channels = letters
+            rows.append(entry)
+        else:
+            for letter in letters:
+                rows.append(dataclasses.replace(entry, filterName=letter, channels=[letter],
+                                                sourceFilter=entry.sourceFilter or entry.filterName))
         verdict = collab.judge(entry, wants)
-        row_id = collab.new_id()
-        stored, fresh = store.add_contribution(row_id, entry.payload(), verdict)
-        results.append({"id": stored["id"], "accepted": stored["accepted"],
-                        "duplicate": not fresh, "verdict": stored["verdict"]})
+        first = None
+        for row in rows:
+            stored, fresh = store.add_contribution(collab.new_id(), row.payload(), verdict)
+            if first is None:
+                first = {"id": stored["id"], "accepted": stored["accepted"],
+                         "duplicate": not fresh, "verdict": stored["verdict"]}
+        results.append(first)
     return {"recorded": results}
 
 

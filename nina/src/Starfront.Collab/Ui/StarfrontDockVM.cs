@@ -21,6 +21,9 @@ using Starfront.Collab.Sky;
 
 namespace Starfront.Collab.Ui {
 
+    /// <summary>One channel's depth on a collaboration, for the bar on its card.</summary>
+    public sealed record FilterProgressVM(string Name, double Percent, string Text, bool Met);
+
     /// <summary>One open collaboration, as the panel lists it.</summary>
     public sealed class ProjectRowVM : BaseINPC {
         public const int ThumbWidth = 320;
@@ -112,9 +115,48 @@ namespace Starfront.Collab.Ui {
             get {
                 var progress = Listing.Progress ?? new Dictionary<string, ProgressFigures>();
                 var collected = (Listing.Collected ?? new Dictionary<string, double>()).Values.Sum();
-                if (progress.Count == 0) return collected > 0 ? $"{collected:0.0} h collected" : "nothing collected yet";
+                if (progress.Count == 0) return collected > 0 ? $"{collected:0.0} h collected in all" : "nothing collected yet";
                 var done = progress.Values.Average(p => p.AtGoal);
-                return $"{done * 100:0}% done · {collected:0.0} h collected";
+                return $"{done * 100:0}% of the field at full depth · {collected:0.0} h collected in all";
+            }
+        }
+
+        /// <summary>One line per channel the project wants: how deep it is against its goal, as a bar.</summary>
+        public List<FilterProgressVM> FilterProgress {
+            get {
+                var goals = Listing.Goals ?? new Dictionary<string, double>();
+                var collected = Listing.Collected ?? new Dictionary<string, double>();
+                var progress = Listing.Progress ?? new Dictionary<string, ProgressFigures>();
+                var names = goals.Keys.Concat(collected.Keys).Distinct()
+                    .OrderBy(n => { var i = Array.IndexOf(Sky.Filters.Channels, n); return i < 0 ? 99 : i; }).ThenBy(n => n).ToList();
+                var rows = new List<FilterProgressVM>();
+                foreach (var name in names) {
+                    goals.TryGetValue(name, out var goal);
+                    collected.TryGetValue(name, out var hours);
+                    progress.TryGetValue(name, out var figures);
+                    // Done is the field's depth against the goal, averaged over
+                    // the region: ten hours on one panel of fifteen is a
+                    // fifteenth done, and one hundred means every part has its goal.
+                    var fraction = figures != null ? figures.Average : (goal > 0 ? Math.Min(1.0, hours / goal) : (hours > 0 ? 1.0 : 0.0));
+                    var text = goal > 0 ? $"{hours:0.0} of {goal:0.#} h · {fraction * 100:0}% done" : $"{hours:0.0} h, no goal";
+                    rows.Add(new FilterProgressVM(Sky.Filters.Label(name), Math.Max(0, Math.Min(100, fraction * 100)), text, fraction >= 0.999));
+                }
+                return rows;
+            }
+        }
+
+        /// <summary>Whether this telescope can take part, in one line.</summary>
+        public bool FitOk => Listing.Compatibility?.Ok == true;
+        public string FitText {
+            get {
+                var fit = Listing.Compatibility;
+                if (fit == null) return "";
+                if (fit.Ok) {
+                    var filters = fit.Checks?.FirstOrDefault(c => c.Check == "filters")?.Detail ?? "";
+                    return "Your telescope can take part" + (filters.Length > 0 ? $": {filters}" : "");
+                }
+                var why = string.Join("; ", (fit.Checks ?? new List<CompatibilityCheck>()).Where(c => c.Ok == false).Select(c => c.Detail));
+                return "Your telescope cannot take part" + (why.Length > 0 ? $": {why}" : (fit.Summary.Length > 0 ? $": {fit.Summary}" : ""));
             }
         }
 

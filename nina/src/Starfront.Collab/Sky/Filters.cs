@@ -60,5 +60,65 @@ namespace Starfront.Collab.Sky {
             "S" => "SII",
             _ => canonical ?? "",
         };
+
+        /// <summary>The seven channels a collaboration can ask for, in the order they are shown.</summary>
+        public static readonly string[] Channels = { "L", "R", "G", "B", "H", "O", "S" };
+
+        /// <summary>
+        /// What a filter delivers, by code: one letter for a mono filter, "RGB" for
+        /// a colour camera's broadband, "HO" / "SO" / "HS" / "HOS" for the dual and
+        /// tri-band filters, and "-" for a filter that gives a collaboration nothing
+        /// (a dark, a diffraction grating). The same table as the server's.
+        /// </summary>
+        public static readonly (string Code, string Label)[] Deliveries = {
+            ("L", "Luminance / clear (mono)"),
+            ("R", "Red"), ("G", "Green"), ("B", "Blue"),
+            ("H", "Ha"), ("O", "OIII"), ("S", "SII"),
+            ("RGB", "Colour: red, green and blue in one sub (OSC, no filter or UV/IR cut)"),
+            ("HO", "Ha + OIII dual-band (L-eXtreme, L-eNhance, L-Ultimate, ALP-T, NBZ, D1…)"),
+            ("SO", "SII + OIII dual-band (Askar D2, NB3…)"),
+            ("HS", "Ha + SII dual-band"),
+            ("HOS", "Ha + OIII + SII tri/quad-band (Triad Ultra, Quad…)"),
+            ("-", "Nothing a collaboration wants"),
+        };
+
+        private static readonly Dictionary<string, string> Multi = Build(new Dictionary<string, string[]> {
+            ["HO"] = new[] { "lextreme", "lxtreme", "lenhance", "lultimate", "optolonglextreme", "optolonglenhance", "optolonglultimate",
+                             "alpt", "antliaalpt", "duo", "dual", "duoband", "dualband", "duonarrowband", "dualnarrowband", "dualnb", "duonb",
+                             "haoiii", "oiiiha", "hao3", "o3ha", "haoiii7nm", "ho", "oh", "nbz", "idasnbz", "nb1", "idasnb1", "sv220", "svbonysv220",
+                             "d1", "colourmagicd1", "colormagicd1", "askard1", "askarcolourmagicd1", "zwoduoband", "zwoduo", "duoband7nm", "nebulabooster",
+                             "triad", "tri", "triband" },
+            ["SO"] = new[] { "d2", "colourmagicd2", "colormagicd2", "askard2", "askarcolourmagicd2", "siioiii", "oiiisii", "s2o3", "o3s2", "so", "os", "nb3", "idasnb3" },
+            ["HS"] = new[] { "hasii", "siiha", "has2", "s2ha", "hs", "sh" },
+            ["HOS"] = new[] { "triadultra", "quad", "quadband", "lquad", "quadnarrowband", "quadbandultra", "hos", "haoiiisii", "antliaquadband", "altairquadband", "nbx" },
+        });
+        private static readonly HashSet<string> Broadband = new() { "lpro", "optolonglpro", "cls", "clsccd", "uhc", "uhcs", "lps", "lpsd1", "lpsd2", "lpsp2", "lpsv4", "idaslps", "lightpollution", "lp", "lpf", "skyglow", "cityglow", "nightsky", "uvircut", "l3", "l2" };
+        private static readonly HashSet<string> ColourWords = new() { "rgb", "osc", "colour", "color", "oneshotcolour", "oneshotcolor", "bayer", "nofilter", "open", "empty" };
+        private static readonly Regex LooseSeparators = new(@"[\s_\-/+&().,]+", RegexOptions.Compiled);
+
+        /// <summary>The delivery code a filter's name says it is, or "" when the name says nothing.</summary>
+        public static string GuessDelivery(string name, bool colour) {
+            var letter = Canonical(name);
+            if (Channels.Contains(letter)) return colour && letter == "L" ? "RGB" : letter;
+            var text = BandpassSuffix.Replace(name ?? "", "").Trim();
+            var key = LooseSeparators.Replace(text, "").ToLowerInvariant();
+            if (key.Length == 0) return "";
+            if (ColourWords.Contains(key)) return "RGB";
+            if (Multi.TryGetValue(key, out var code)) return code;
+            if (Broadband.Contains(key)) return colour ? "RGB" : "L";
+            return "";
+        }
+
+        /// <summary>The channels a delivery code stands for: "HO" → H, O; "RGB" → R, G, B; "-" or "" → none.</summary>
+        public static List<string> ChannelsOf(string code) {
+            var clean = (code ?? "").Trim().ToUpperInvariant();
+            if (clean.Length == 0 || clean == "-") return new List<string>();
+            return clean.Select(c => c.ToString()).Where(c => Channels.Contains(c)).Distinct().ToList();
+        }
+
+        public static string DeliveryLabel(string code) {
+            foreach (var (c, label) in Deliveries) if (c == code) return label;
+            return code ?? "";
+        }
     }
 }

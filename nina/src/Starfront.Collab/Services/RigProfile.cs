@@ -72,9 +72,14 @@ namespace Starfront.Collab.Services {
             var pixel = settings.PixelSize > 0 ? settings.PixelSize : profile.CameraSettings.PixelSize;
 
             var filters = new JObject();
+            // What a sub through each filter delivers, as chosen in the
+            // options or read from the name: the server deals and credits
+            // by channel, so a colour camera's L-eXtreme is Ha and OIII.
+            var channels = new JObject();
             foreach (var name in FilterNames(settings)) {
                 var bandpass = Filters.Bandpass(name);
                 filters[name] = bandpass.HasValue ? new JValue(bandpass.Value) : JValue.CreateNull();
+                channels[name] = new JArray(settings.ChannelsFor(name));
             }
             var exposures = new JObject();
             foreach (var kv in settings.Exposures) exposures[kv.Key] = kv.Value;
@@ -90,6 +95,7 @@ namespace Starfront.Collab.Services {
                 ["sensorHeight"] = settings.SensorHeight > 0 ? new JValue(settings.SensorHeight) : JValue.CreateNull(),
                 ["binning"] = (int)settings.Binning,
                 ["filters"] = filters,
+                ["channels"] = channels,
                 ["colour"] = settings.Colour,
                 ["typicalHfr"] = Number(ledger.TypicalHfr()),
                 ["typicalGuideRms"] = Number(ledger.TypicalGuideRms()),

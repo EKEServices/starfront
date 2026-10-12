@@ -135,8 +135,18 @@ namespace Starfront.Collab.Ui {
             RequireCalibrated = false; AcceptColour = true;
             Filters.Clear();
             if (Runtime.Ready) {
+                // The project asks for channels, not the names in this wheel: a
+                // colour camera with an L-eXtreme offers Ha and OIII, and a
+                // mono wheel its letters. Nothing delivered, every channel.
+                var delivered = new List<string>();
                 foreach (var filter in RigProfile.FilterNames(Runtime.Settings)) {
-                    if (filter != "none") Filters.Add(new FilterGoalRow(filter));
+                    foreach (var letter in Runtime.Settings.ChannelsFor(filter)) {
+                        if (!delivered.Contains(letter)) delivered.Add(letter);
+                    }
+                }
+                if (delivered.Count == 0) delivered.AddRange(Sky.Filters.Channels);
+                foreach (var letter in Sky.Filters.Channels) {
+                    if (delivered.Contains(letter)) Filters.Add(new FilterGoalRow(letter));
                 }
                 var field = RigProfile.Field(Runtime.Host, Runtime.Settings);
                 if (field is (double w, double h)) {

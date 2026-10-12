@@ -26,7 +26,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .filters import canonical as _canonical
+from .filters import CHANNELS, canonical as _canonical, channels as _channels
 
 
 def _key(name: Any) -> str:
@@ -731,27 +731,25 @@ def choose_filter(filters: list["FilterTask"], goals: dict[str, float],
         return filters[0] if filters else None
     if len(usable) == 1:
         return usable[0]
-    wanted = dict(goals)
-    for f in usable:
-        if not any(_key(name) == _key(f.filter) for name in wanted):
-            wanted[f.filter] = f.hours
+    wanted = _goals_for(usable, goals)
     demand = filter_demand(cells, wanted, depth)
-    left = {f.filter: demand.get(_key(f.filter), 0.0) - spoken.get(_key(f.filter), 0.0)
-            for f in usable}
-    # Behind is measured against the goal, as on a single field: a filter
-    # at a tenth of what was asked is thinner than one at a third, so a
-    # project asking five times the Ha keeps its Ha five times as deep.
     goal_seconds = {_key(name): float(hours) * 3600.0 * max(1, len(cells))
                     for name, hours in wanted.items()}
+    # Behind is measured against the goal, as on a single field: a filter
+    # at a tenth of what was asked is thinner than one at a third, so a
+    # project asking five times the Ha keeps its Ha five times as deep. A
+    # filter that delivers two channels is as far behind as the one of them
+    # that is furthest behind.
+    left: dict[str, float] = {}
     for f in usable:
-        goal = goal_seconds.get(_key(f.filter), 0.0)
-        left[f.filter] = left[f.filter] / goal if goal > 0 else left[f.filter]
+        want, goal = _filter_need(f, demand, spoken, goal_seconds)
+        left[f.filter] = want / goal if goal > 0 else want
 
     candidates = [f for f in usable if left[f.filter] > 0] or list(usable)
     badness = moon_badness(moon)
     if badness is not None:
-        tolerant = [f for f in candidates if _key(f.filter) in MOON_TOLERANT]
-        sensitive = [f for f in candidates if _key(f.filter) not in MOON_TOLERANT]
+        tolerant = [f for f in candidates if _moon_tolerant(f)]
+        sensitive = [f for f in candidates if not _moon_tolerant(f)]
         preferred = tolerant if badness >= MOON_BRIGHT else sensitive
         if preferred:
             candidates = preferred
@@ -761,6 +759,39 @@ def choose_filter(filters: list["FilterTask"], goals: dict[str, float],
         if best is None or left[f.filter] > left[best.filter] + 1e-6:
             best = f
     return best
+
+
+def _goals_for(filters: list["FilterTask"], goals: dict[str, float]) -> dict[str, float]:
+    """The project's goals, plus a task's own hours for any channel it
+    delivers that the project set no goal for."""
+    wanted = dict(goals)
+    have = {_key(name) for name in wanted}
+    for f in filters:
+        for key in f.keys():
+            if key not in have:
+                wanted[key.upper() if key.upper() in CHANNELS else f.filter] = f.hours
+                have.add(key)
+    return wanted
+
+
+def _filter_need(f: "FilterTask", demand: dict[str, float], spoken: dict[str, float],
+                 goal_seconds: dict[str, float]) -> tuple[float, float]:
+    """Seconds a filter still wants and the goal they are measured against:
+    of the channels it delivers, the one furthest behind its goal."""
+    best: tuple[float, float] | None = None
+    for key in f.keys():
+        want = max(0.0, demand.get(key, 0.0) - spoken.get(key, 0.0))
+        goal = goal_seconds.get(key, 0.0)
+        fraction = want / goal if goal > 0 else want
+        if best is None or fraction > (best[0] / best[1] if best[1] > 0 else best[0]) + 1e-9:
+            best = (want, goal)
+    return best or (0.0, 0.0)
+
+
+def _moon_tolerant(f: "FilterTask") -> bool:
+    """Whether a filter can be shot under a bright Moon: any narrowband line
+    it passes is, and a dual-band's Ha half is worth the night."""
+    return any(key in MOON_TOLERANT for key in f.keys())
 
 
 def assign(cells: list[dict[str, Any]], goals: dict[str, float],
@@ -855,25 +886,25 @@ def night_need(filters: list["FilterTask"], goals: dict[str, float],
     nothing of the preferred kind is left the rest stand. A filter the
     project sets no goal for wants the task's own hours of it.
     """
-    wanted = dict(goals)
-    for f in filters:
-        if not any(_key(name) == _key(f.filter) for name in wanted):
-            wanted[f.filter] = f.hours
+    wanted = _goals_for(filters, goals)
     demand = filter_demand(cells, wanted, depth)
     goal_seconds = {_key(name): float(hours) * 3600.0 * max(1, len(cells))
                     for name, hours in wanted.items()}
     need: dict[str, Any] = {}
+    tolerant_keys: set[str] = set()
     for f in filters:
         if f.exposure <= 0:
             continue
         key = _key(f.filter)
-        left = max(0.0, demand.get(key, 0.0) - spoken.get(key, 0.0))
-        need[key] = {"left": left, "goal": goal_seconds.get(key, 0.0)}
+        left, goal = _filter_need(f, demand, spoken, goal_seconds)
+        need[key] = {"left": left, "goal": goal}
+        if _moon_tolerant(f):
+            tolerant_keys.add(key)
     badness = moon_badness(moon)
     if badness is not None:
         wanting = [key for key, value in need.items() if value["left"] > 0]
-        tolerant = [key for key in wanting if key in MOON_TOLERANT]
-        sensitive = [key for key in wanting if key not in MOON_TOLERANT]
+        tolerant = [key for key in wanting if key in tolerant_keys]
+        sensitive = [key for key in wanting if key not in tolerant_keys]
         preferred = tolerant if badness >= MOON_BRIGHT else sensitive
         if preferred:
             for key, value in need.items():
@@ -1035,6 +1066,12 @@ class RigProfile:
     binning: int = 1
     #: Filter name -> bandpass in nm, or None where it is not known.
     filters: dict[str, float | None] = field(default_factory=dict)
+    #: Filter name -> the channels a sub through it delivers. A mono Ha
+    #: delivers ["H"]; a colour camera's clear filter ["R", "G", "B"]; an
+    #: L-eXtreme on a colour camera ["H", "O"], and a night through it is
+    #: credited to both. Sent by a program whose operator chose, or read
+    #: from the name here for one that did not.
+    channels: dict[str, list[str]] = field(default_factory=dict)
     #: A one-shot colour camera: a Bayer matrix and, usually, no wheel. Its
     #: frames are broadband RGB whatever is in front of it, which is what a
     #: project has to know before it lets one in.
@@ -1091,9 +1128,27 @@ class RigProfile:
     def payload(self) -> dict[str, Any]:
         return {**asdict(self), "scale": self.scale(), "field": self.field()}
 
+    def delivers(self, name: str) -> list[str]:
+        """The channels a sub through one of this rig's filters gives."""
+        key = _key(name)
+        for own, letters in self.channels.items():
+            if _key(own) == key:
+                return list(letters)
+        return _channels(name, self.colour)
+
     @classmethod
     def read(cls, data: dict[str, Any]) -> "RigProfile":
         data = data or {}
+        colour = bool(data.get("colour", False))
+        filters = {(_canonical(name) or str(name)): _number(value)
+                   for name, value in (data.get("filters") or {}).items()}
+        channels: dict[str, list[str]] = {}
+        for name, letters in (data.get("channels") or {}).items():
+            clean = [str(c).upper() for c in (letters or []) if str(c).upper() in CHANNELS]
+            channels[_canonical(name) or str(name)] = clean
+        for name in filters:
+            if name not in channels:
+                channels[name] = _channels(name, colour)
         return cls(
             name=str(data.get("name") or ""),
             focalLength=_number(data.get("focalLength")),
@@ -1101,9 +1156,9 @@ class RigProfile:
             sensorWidth=_int(data.get("sensorWidth")),
             sensorHeight=_int(data.get("sensorHeight")),
             binning=_int(data.get("binning")) or 1,
-            filters={(_canonical(name) or str(name)): _number(value)
-                     for name, value in (data.get("filters") or {}).items()},
-            colour=bool(data.get("colour", False)),
+            filters=filters,
+            channels=channels,
+            colour=colour,
             typicalHfr=_number(data.get("typicalHfr")),
             typicalGuideRms=_number(data.get("typicalGuideRms")),
             exposures={(_canonical(name) or str(name)): float(value)
@@ -1127,6 +1182,38 @@ def _int(value: Any) -> int | None:
 #: camera's frame is all three channels at once; "RGB" is what everybody
 #: calls that, and the others are the ways people spell it.
 COLOUR_FILTERS = {"rgb", "osc", "colour", "color", "one-shot colour", "one-shot color"}
+
+
+def filter_channels(name: str, colour: bool = False) -> list[str]:
+    """The channels a filter delivers, read from its name; see `filters.channels`."""
+    return _channels(name, colour)
+
+
+def wanted_channels(wants: "Requirements") -> dict[str, float | None]:
+    """The channels a project asks for, as compared, each with its bandpass
+    limit. "RGB" in a project's list is the three colour channels."""
+    out: dict[str, float | None] = {}
+    for name, limit in (wants.filters or {}).items():
+        if str(name).strip().lower() in COLOUR_FILTERS:
+            for letter in ("R", "G", "B"):
+                out.setdefault(letter.lower(), limit)
+        else:
+            out[_key(name)] = limit
+    return out
+
+
+def _delivered(profile: "RigProfile") -> dict[str, list[tuple[str, float | None]]]:
+    """Channel (as compared) -> the rig's filters that deliver it, with bandpass."""
+    out: dict[str, list[tuple[str, float | None]]] = {}
+    if profile.colour and not profile.filters:
+        # A colour camera with nothing in front of it shoots RGB, and says so
+        # without anybody typing a filter name for a wheel it does not have.
+        for letter in ("R", "G", "B"):
+            out.setdefault(letter.lower(), []).append(("the camera", None))
+    for name, band in profile.filters.items():
+        for letter in profile.delivers(name):
+            out.setdefault(_key(letter), []).append((name, band))
+    return out
 
 
 def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
@@ -1199,21 +1286,9 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
     # Matched without regard to case. "Ha", "ha" and "HA" are one filter, and
     # a coordinator who typed it in lowercase was refusing every rig on the
     # server for a difference nobody could see.
-    wanted = set(wants.filters)
+    wanted = wanted_channels(wants)
     usable: list[str] = []
-    if wanted and profile.colour and not profile.filters:
-        # A colour camera with nothing in front of it shoots RGB, and says so
-        # without anybody typing a filter name for a wheel it does not have.
-        # A project that wants one lists "RGB" among its filters.
-        usable = [name for name in wants.filters
-                  if str(name).strip().lower() in COLOUR_FILTERS]
-        if usable:
-            note("filters", True, "can shoot RGB")
-        else:
-            note("filters", False,
-                 "a one-shot colour camera shoots RGB, and this project asks for "
-                 + ", ".join(sorted(wanted)) + " only")
-    elif wanted and not profile.filters:
+    if wanted and not profile.filters and not profile.colour:
         # Not "no Ha; no R; no G; no B" - the rig has said nothing at all, and
         # the fix is one setting, not four filters. A wheel that is switched
         # off cannot be asked, so the names have to be typed in once; a
@@ -1224,23 +1299,42 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
              "in its light path (Equipment > Filters > What is in each "
              "telescope; Run asks the same question every night)")
     elif wanted:
-        carried = {_key(name): value for name, value in profile.filters.items()}
+        # What the project wants are channels; what the rig has are filters,
+        # each delivering one or more of them. A mono wheel's Ha delivers Ha.
+        # A colour camera's clear filter delivers red, green and blue in one
+        # sub, and its L-eXtreme delivers Ha and OIII at once, so an OSC rig
+        # on a project wanting the lot can give it five of seven - which is
+        # what the compatibility used to deny it, having no idea what an
+        # "L-eXtreme" was. A filter nobody could name delivers nothing, and
+        # the fix is the delivery table in the program's options.
+        delivered = _delivered(profile)
         missing, why = [], []
-        for name, limit in wants.filters.items():
-            key = _key(name)
-            if key not in carried:
-                missing.append(name)
+        through: dict[str, list[str]] = {}
+        for key, limit in wanted.items():
+            shown = key.upper()
+            options = delivered.get(key) or []
+            if not options:
+                missing.append(shown)
                 continue
-            have = carried.get(key)
-            if limit is not None and have is not None and have > limit:
-                why.append(f"{name} is {have:g} nm, wants {limit:g} nm or narrower")
+            fit = [name for name, band in options
+                   if limit is None or (band is not None and band <= limit)]
+            if fit:
+                usable.append(shown)
+                if not any(_key(name) == key for name in fit):
+                    through.setdefault(fit[0], []).append(shown)
                 continue
-            if limit is not None and have is None:
-                why.append(f"{name} bandpass not set, wants {limit:g} nm or narrower")
-                continue
-            usable.append(name)
+            wide = [f"{name} is {band:g} nm" for name, band in options if band is not None]
+            unknown = [name for name, band in options if band is None]
+            if wide:
+                why.append(f"{shown}: {'; '.join(wide)}, wants {limit:g} nm or narrower")
+            elif unknown:
+                why.append(f"{shown}: {unknown[0]} bandpass not set, wants {limit:g} nm or narrower")
         if missing:
             why.insert(0, "no " + ", ".join(missing))
+        unnamed = [name for name in profile.filters if not profile.delivers(name)]
+        if unnamed and not usable:
+            why.append("nothing known about " + ", ".join(unnamed)
+                       + " - say what each delivers under the program's filter settings")
         # A rig that carries some of what the project wants can contribute
         # those: the server deals a rig only the filters it carries, on a
         # single field as on a mosaic, so an RGB rig on a project that also
@@ -1249,8 +1343,10 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
         # filters it lacked, which turned "can help with three of five" into
         # "cannot help".
         if usable:
+            via = "; ".join(f"{name} gives {', '.join(letters)}" for name, letters in through.items())
             note("filters", True,
                  "can shoot " + ", ".join(usable)
+                 + (f" ({via})" if via else "")
                  + (f" ({'; '.join(why)}: left to the others)" if why else ""))
         else:
             note("filters", False, "; ".join(why) or "none of the wanted filters")
@@ -1311,20 +1407,36 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
 
 @dataclass
 class FilterTask:
-    """One filter's share of a task: how long a sub, and how much of it."""
+    """One filter's share of a task: how long a sub, and how much of it.
+
+    The filter is the rig's own - "H" on a mono wheel, "L-eXtreme" on a
+    colour camera - and `channels` says what the project gets from a sub
+    through it. Empty means the one channel the name is.
+    """
 
     filter: str
     exposure: float
     hours: float
+    channels: list[str] = field(default_factory=list)
 
     def payload(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def read(cls, data: dict[str, Any]) -> "FilterTask":
-        return cls(filter=_canonical(data["filter"]) or str(data["filter"]),
+        name = _canonical(data["filter"]) or str(data["filter"])
+        letters = [str(c).upper() for c in (data.get("channels") or [])
+                   if str(c).upper() in CHANNELS]
+        if not letters:
+            letters = _channels(name)
+        return cls(filter=name,
                    exposure=float(data.get("exposure") or 0.0),
-                   hours=float(data.get("hours") or 0.0))
+                   hours=float(data.get("hours") or 0.0),
+                   channels=letters)
+
+    def keys(self) -> list[str]:
+        """The channels this filter's seconds count towards, as compared."""
+        return [c.lower() for c in self.channels] or [_key(self.filter)]
 
     def frames(self) -> int:
         """How many subs that is, rounded up: a part-frame is not a frame."""
@@ -1413,6 +1525,12 @@ class Contribution:
     task: str = ""
     night: str = ""
     filterName: str = ""
+    #: The channels the frames carry. A mono Ha night is ["H"]; a colour
+    #: camera's night through an L-eXtreme is ["H", "O"], and the server
+    #: records it once per channel, each with the whole night's seconds,
+    #: with `sourceFilter` naming the filter it really came through.
+    channels: list[str] = field(default_factory=list)
+    sourceFilter: str = ""
     #: Which panel of the rig's mosaic this is, as the rig numbers them. Blank
     #: for a single-frame chunk. Part of what makes a night's report unique:
     #: twelve panels shot through Ha on one night are twelve contributions, not
@@ -1449,6 +1567,9 @@ class Contribution:
             task=str(data.get("task") or ""),
             night=str(data.get("night") or ""),
             filterName=_canonical(data.get("filterName") or data.get("filter") or ""),
+            channels=[str(c).upper() for c in (data.get("channels") or [])
+                      if str(c).upper() in CHANNELS],
+            sourceFilter=str(data.get("sourceFilter") or ""),
             panel=str(data.get("panel") if data.get("panel") is not None else ""),
             frames=_int(data.get("frames")) or 0,
             seconds=float(data.get("seconds") or 0.0),
@@ -1481,9 +1602,11 @@ def judge(contribution: Contribution, wants: Requirements) -> dict[str, Any]:
             reasons.append(reason)
 
     # The same comparison as `compatibility`, and for the same reason: "Ha" and
-    # "ha" are one filter, and a night is not thrown away over a capital.
-    asked = {_key(name): limit for name, limit in wants.filters.items()}
-    shot = _key(contribution.filterName)
+    # "ha" are one filter, and a night is not thrown away over a capital. A
+    # project's filters are channels; a night carries one or more of them.
+    asked = wanted_channels(wants)
+    carried = [_key(c) for c in contribution.channels] or [_key(contribution.filterName)]
+    shown = contribution.sourceFilter or contribution.filterName
     if contribution.colour and not wants.acceptColour:
         reasons.append("shot on a one-shot colour camera; this project wants "
                        "mono cameras with filters")
@@ -1493,13 +1616,14 @@ def judge(contribution: Contribution, wants: Requirements) -> dict[str, Any]:
               f"the Moon was {contribution.moonIllumination * 100:.0f}% lit, and "
               "a one-shot colour camera's night counts only under "
               f"{wants.colourMaxMoon * 100:.0f}%")
-    if wants.filters and shot not in asked:
-        reasons.append(f"{contribution.filterName} is not a filter this project wants")
+    if asked and not any(key in asked for key in carried):
+        reasons.append(f"{shown} is not a filter this project wants")
     else:
-        limit = asked.get(shot)
+        limits = [asked[key] for key in carried if asked.get(key) is not None]
+        limit = min(limits) if limits else None
         if limit is not None and contribution.bandpass is not None:
             check(contribution.bandpass <= limit,
-                  f"{contribution.filterName} is {contribution.bandpass:g} nm, "
+                  f"{shown} is {contribution.bandpass:g} nm, "
                   f"project wants {limit:g} nm or narrower")
 
     if wants.minFocalLength is not None or wants.maxFocalLength is not None:

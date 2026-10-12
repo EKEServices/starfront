@@ -67,6 +67,78 @@ def canonical(name: Any) -> str:
     return text
 
 
+#: The seven channels a collaboration can ask for, in the order they are
+#: shown. A project wants channels; a filter on a rig *delivers* one or
+#: more of them, which is the whole difference between a mono camera with
+#: a wheel and a one-shot colour camera behind a dual-band filter.
+CHANNELS = ("L", "R", "G", "B", "H", "O", "S")
+
+#: Filters that pass more than one line at once, by the names people give
+#: them, compared after lowering and stripping spaces, hyphens, underscores,
+#: slashes, pluses and the bandpass. An L-eXtreme in front of a colour
+#: camera records Ha and OIII in one sub, and the server credits both.
+_MULTI: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("H", "O"): ("lextreme", "lxtreme", "lenhance", "lultimate", "lultimate",
+                 "optolonglextreme", "optolonglenhance", "optolonglultimate",
+                 "alpt", "antliaalpt", "duo", "dual", "duoband", "dualband",
+                 "duonarrowband", "dualnarrowband", "dualnb", "duonb",
+                 "haoiii", "oiiiha", "hao3", "o3ha", "haoiii7nm", "ho", "oh",
+                 "nbz", "idasnbz", "nb1", "idasnb1", "sv220", "svbonysv220",
+                 "d1", "colourmagicd1", "colormagicd1", "askard1", "askarcolourmagicd1",
+                 "zwoduoband", "zwoduo", "duoband7nm", "nebulabooster",
+                 "triad", "tri", "triband"),
+    ("S", "O"): ("d2", "colourmagicd2", "colormagicd2", "askard2", "askarcolourmagicd2",
+                 "siioiii", "oiiisii", "s2o3", "o3s2", "so", "os", "nb3", "idasnb3"),
+    ("H", "S"): ("hasii", "siiha", "has2", "s2ha", "hs", "sh"),
+    ("H", "O", "S"): ("triadultra", "quad", "quadband", "lquad", "quadnarrowband",
+                      "quadbandultra", "hos", "haoiiisii", "antliaquadband",
+                      "altairquadband", "nbx"),
+}
+_MULTI_LOOKUP = {alias: letters for letters, aliases in _MULTI.items() for alias in aliases}
+
+#: Broadband filters that are a light-pollution cut rather than a colour: in
+#: front of a mono camera they are luminance, in front of a colour camera they
+#: are red, green and blue in one sub, like no filter at all.
+_BROADBAND = ("lpro", "optolonglpro", "cls", "clsccd", "uhc", "uhcs", "lps", "lpsd1",
+              "lpsd2", "lpsp2", "lpsv4", "idaslps", "lightpollution", "lp", "lpf",
+              "skyglow", "cityglow", "nightsky", "uvircut", "l3", "l2")
+_COLOUR_WORDS = ("rgb", "osc", "colour", "color", "oneshotcolour", "oneshotcolor",
+                 "bayer", "nofilter", "open", "empty")
+
+
+def channels(name: Any, colour: bool = False) -> list[str]:
+    """Which of the seven channels a filter delivers, in a camera's sub.
+
+    "Ha" is ["H"]; "L-eXtreme" is ["H", "O"]; "UV/IR cut" is ["L"] on a mono
+    camera and ["R", "G", "B"] on a colour one, where a clear filter still
+    records three colours; "RGB" is ["R", "G", "B"] whatever the camera. A
+    name nobody here knows is [], which is "say what it delivers", not a
+    guess.
+    """
+    letter = canonical(name)
+    if letter in CHANNELS:
+        if colour and letter == "L":
+            return ["R", "G", "B"]
+        return [letter]
+    text = _BANDPASS.sub("", str(name if name is not None else "")).strip()
+    key = re.sub(r"[\s_\-/+&().,]+", "", text).lower()
+    if not key:
+        return []
+    if key in _COLOUR_WORDS:
+        return ["R", "G", "B"]
+    letters = _MULTI_LOOKUP.get(key)
+    if letters:
+        return list(letters)
+    if key in _BROADBAND:
+        return ["R", "G", "B"] if colour else ["L"]
+    return []
+
+
+def channel_label(letter: Any) -> str:
+    """"H" -> "Ha", "O" -> "OIII", "S" -> "SII"; the rest are their own name."""
+    return {"H": "Ha", "O": "OIII", "S": "SII"}.get(str(letter or ""), str(letter or ""))
+
+
 def canonical_list(names: Any) -> list[str]:
     """A list of names, each canonical, blanks dropped."""
     out = []

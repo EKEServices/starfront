@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0.18
+
+- One-shot colour cameras take part properly. Under Options > Plugins > Starfront each filter in your wheel has a *Delivers* choice: a mono Ha delivers Ha; a colour camera's clear or UV/IR cut delivers red, green and blue in one sub; an L-eXtreme, L-eNhance, L-Ultimate, ALP-T, NBZ or Askar D1 delivers Ha and OIII at once; a D2 delivers SII and OIII; a Triad Ultra or quad-band all three. The guess from the name is usually right. The server deals you the filters that deliver what a project wants and credits a dual-band night to both its lines.
+- Browsing collaborations shows, on every card, each channel's depth against its goal as a bar with the hours, the total collected, and in one coloured line whether your telescope can take part and with which filters.
+- Starting a collaboration lists the channels your filters deliver, rather than your wheel's names.
+
 ## 1.0.0.17
 
 - *From Framing Assistant* takes the rectangle as drawn: its centre after dragging, its panels and overlap, its rotation. It took the view's zoom for the width, so a test mosaic came out thirty-nine degrees across.

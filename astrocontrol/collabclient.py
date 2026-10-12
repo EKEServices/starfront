@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from . import collab
+from . import collab, filters
 from .capture import CaptureService
 
 #: Short: this is a poll of a few hundred bytes, and a request that hangs is a
@@ -234,6 +234,10 @@ class CollabClient:
             sensorHeight=height,
             binning=int(rig.config.get("camera", "binning", 1) or 1),
             filters={name: bandpasses.get(name) for name in names},
+            # What a sub through each delivers: a colour camera's clear
+            # filter is red, green and blue at once; a dual-band is its
+            # two lines. Read from the names; the server does the same.
+            channels={name: filters.channels(name, colour) for name in names},
             colour=colour,
             typicalHfr=self._typical_hfr(),
             typicalGuideRms=self._typical_guiding(),
@@ -521,6 +525,9 @@ class CollabClient:
                     "hfr": (hfr_px * scale) if (hfr_px is not None and scale) else None,
                     "guideRms": (row["rmsSum"] / row["rmsCount"]) if row.get("rmsCount") else None,
                     "bandpass": bandpasses.get(row["filter"]),
+                    # The channels the frames carry; a night through a
+                    # dual-band filter on a colour camera is two of them.
+                    "channels": filters.channels(row["filter"], colour),
                 })
             answer = self.report(batch)
             for row, recorded in zip(pending, answer.get("recorded") or []):

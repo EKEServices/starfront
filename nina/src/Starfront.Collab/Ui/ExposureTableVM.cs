@@ -7,18 +7,41 @@ using Starfront.Collab.Sky;
 
 namespace Starfront.Collab.Ui {
 
-    /// <summary>One filter and the sub length this telescope shoots it at.</summary>
+    /// <summary>A choice of what a filter delivers, for the table's drop-down.</summary>
+    public sealed record DeliveryChoice(string Code, string Label);
+
+    /// <summary>One filter: what it delivers, and the sub length this telescope shoots it at.</summary>
     public sealed class FilterExposureRow : BaseINPC {
+        public static readonly IReadOnlyList<DeliveryChoice> Choices =
+            Filters.Deliveries.Select(d => new DeliveryChoice(d.Code, d.Label)).ToList();
+
         private readonly StarfrontSettings settings;
         private string seconds;
+        private string delivers;
 
         public FilterExposureRow(StarfrontSettings settings, string name, double? value) {
             this.settings = settings;
             Name = name;
             seconds = value.HasValue ? value.Value.ToString("0.###", CultureInfo.InvariantCulture) : "";
+            delivers = settings.DeliveryFor(name);
+            if (delivers.Length == 0) delivers = "-";
         }
 
         public string Name { get; }
+
+        /// <summary>The delivery code: what a collaboration gets from a sub through this filter.</summary>
+        public string Delivers {
+            get => delivers;
+            set {
+                var code = (value ?? "").Trim().ToUpperInvariant();
+                if (code.Length == 0) code = "-";
+                delivers = code;
+                settings.SetDelivery(Name, code);
+                RaisePropertyChanged();
+            }
+        }
+
+        public IReadOnlyList<DeliveryChoice> DeliveryChoices => Choices;
 
         /// <summary>Text, so that a half-typed number is not coerced into something else; blank means unset.</summary>
         public string Seconds {
@@ -58,7 +81,7 @@ namespace Starfront.Collab.Ui {
 
         public string Hint => Rows.Count == 0
             ? "No filters are set up in this profile yet."
-            : "The length you normally shoot each filter at, by the names in your filter wheel. Your share of a collaboration is dealt at these, so every light calibrates against your own darks.";
+            : "Each filter by the name in your wheel: what a collaboration gets from a sub through it, and the length you normally shoot it at. A mono Ha delivers Ha; a colour camera's UV/IR cut delivers red, green and blue in one sub; an L-eXtreme on a colour camera delivers Ha and OIII at once, and a night through it is credited to both. The guess from the name is usually right - check it. Your share of a collaboration is dealt at these lengths, so every light calibrates against your own darks.";
 
         private void OnProfileChanged(object sender, EventArgs e) => Dispatch.OnUi(Rebuild);
 

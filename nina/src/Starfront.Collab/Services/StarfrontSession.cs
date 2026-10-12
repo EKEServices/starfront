@@ -210,7 +210,7 @@ namespace Starfront.Collab.Services {
             return sent;
         }
 
-        private static JObject ToContribution(LedgerRow row) {
+        private JObject ToContribution(LedgerRow row) {
             var body = new JObject {
                 ["project"] = row.Project,
                 ["task"] = row.Task,
@@ -227,6 +227,9 @@ namespace Starfront.Collab.Services {
                 ["hfr"] = row.MeanHfr.HasValue ? new JValue(Math.Round(row.MeanHfr.Value, 3)) : JValue.CreateNull(),
                 ["guideRms"] = row.MeanRms.HasValue ? new JValue(Math.Round(row.MeanRms.Value, 3)) : JValue.CreateNull(),
                 ["bandpass"] = row.Bandpass.HasValue ? new JValue(row.Bandpass.Value) : JValue.CreateNull(),
+                // The channels the frames carry: a night through a dual-band
+                // filter on a colour camera is credited to both its lines.
+                ["channels"] = new JArray(settings.ChannelsFor(row.Filter)),
             };
             return body;
         }

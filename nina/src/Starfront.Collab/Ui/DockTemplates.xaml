@@ -238,13 +238,39 @@
                                         <Image Source="{Binding Transit}" Stretch="Uniform" />
                                     </Border>
                                     <TextBlock Opacity="0.6" FontSize="11" Text="{Binding TransitText}" TextWrapping="Wrap" Visibility="{Binding TransitText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
-                                    <TextBlock Opacity="0.85" Text="{Binding ProgressText}" />
+                                    <!--  Depth per channel against the goal, the total, and whether this telescope can help: the three things somebody browsing wants to know.  -->
+                                    <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding FilterProgress}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,1">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="44" />
+                                                        <ColumnDefinition Width="110" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding Name}" />
+                                                    <ProgressBar Grid.Column="1" Height="8" VerticalAlignment="Center" Maximum="100" Minimum="0" Value="{Binding Percent, Mode=OneWay}" />
+                                                    <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center" Opacity="0.85" Text="{Binding Text}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Margin="0,2,0,0" FontWeight="SemiBold" Opacity="0.9" Text="{Binding ProgressText}" />
                                     <TextBlock Opacity="0.7" Text="{Binding PeopleText}" TextWrapping="Wrap" />
                                     <TextBlock
-                                        Opacity="0.85"
-                                        Text="{Binding CompatibilityText}"
+                                        Margin="0,4,0,0"
+                                        FontWeight="SemiBold"
+                                        Foreground="#7EE7A5"
+                                        Text="{Binding FitText}"
                                         TextWrapping="Wrap"
-                                        Visibility="{Binding Joined, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
+                                        Visibility="{Binding FitOk, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                    <TextBlock
+                                        Margin="0,4,0,0"
+                                        FontWeight="SemiBold"
+                                        Foreground="#F0A070"
+                                        Text="{Binding FitText}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{Binding FitOk, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
                                     <TextBlock Text="{Binding TonightText}" TextWrapping="Wrap" Visibility="{Binding TonightText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                                     <StackPanel Margin="0,4,0,0" Orientation="Horizontal">
                                         <Button

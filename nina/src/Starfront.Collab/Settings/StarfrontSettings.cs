@@ -195,6 +195,50 @@ namespace Starfront.Collab.Settings {
             }
         }
 
+        /// <summary>
+        /// What each filter delivers, by the wheel's name for it: a delivery
+        /// code from <see cref="Sky.Filters.Deliveries"/>. Only what somebody
+        /// chose by hand is stored; a filter not here is read from its name.
+        /// </summary>
+        public Dictionary<string, string> FilterMap {
+            get {
+                var text = options.GetValueString(nameof(FilterMap), "{}");
+                try {
+                    return JsonConvert.DeserializeObject<Dictionary<string, string>>(text) ?? new Dictionary<string, string>();
+                } catch (Exception) {
+                    return new Dictionary<string, string>();
+                }
+            }
+            set {
+                var clean = (value ?? new Dictionary<string, string>()).Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                    .ToDictionary(kv => kv.Key.Trim(), kv => kv.Value.Trim().ToUpperInvariant());
+                options.SetValueString(nameof(FilterMap), JsonConvert.SerializeObject(clean));
+                RaisePropertyChanged();
+            }
+        }
+
+        public void SetDelivery(string filter, string code) {
+            var table = FilterMap;
+            var clean = (code ?? "").Trim().ToUpperInvariant();
+            if (clean.Length > 0) table[filter.Trim()] = clean; else table.Remove(filter.Trim());
+            FilterMap = table;
+        }
+
+        /// <summary>The delivery code for a filter: chosen by hand, or read from its name, or "" when neither says.</summary>
+        public string DeliveryFor(string filter) {
+            var name = (filter ?? "").Trim();
+            if (name.Length == 0) return "";
+            var table = FilterMap;
+            if (table.TryGetValue(name, out var chosen) && chosen.Length > 0) return chosen;
+            foreach (var kv in table) {
+                if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase)) return kv.Value;
+            }
+            return Sky.Filters.GuessDelivery(name, Colour);
+        }
+
+        /// <summary>The channels a filter delivers in a sub: ["H", "O"] for an L-eXtreme, ["R", "G", "B"] for a colour camera's clear filter.</summary>
+        public List<string> ChannelsFor(string filter) => Sky.Filters.ChannelsOf(DeliveryFor(filter));
+
         public void SetExposure(string filter, double? seconds) {
             var table = Exposures;
             if (seconds is > 0) table[filter.Trim()] = seconds.Value; else table.Remove(filter.Trim());

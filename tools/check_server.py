@@ -1876,6 +1876,86 @@ for wrong in ("secrets.txt", "..%2Fcollab.sqlite", "Starfront-Setup-9.9.9.exe", 
         break
 case("...and nothing but installers is served from the folder", status == 404, f"{wrong} -> {status}")
 
+# ======================================== a colour camera with a dual-band filter
+print("\n-- a colour camera with a dual-band filter --")
+
+# A project wants channels; a filter delivers one or more of them. A one-shot
+# colour camera behind a UV/IR cut delivers red, green and blue in one sub,
+# and behind an L-eXtreme delivers Ha and OIII at once. It used to be told it
+# carried none of the wanted filters, because nothing knew what an
+# "L-eXtreme" was, and a night through it would have counted for one
+# unknown filter.
+_, osc_made = call("POST", "/api/v1/agents", {"name": "osc"}, token=ADMIN)
+OSC_TOKEN = osc_made["token"]
+status, _ = call("POST", "/api/v1/agent/hello", {
+    "protocol": collab.PROTOCOL,
+    "profile": {"name": "osc", "focalLength": 400.0, "pixelSize": 3.76, "sensorWidth": 6248,
+                "sensorHeight": 4176, "binning": 1, "colour": True, "hoursPerNight": 4.0,
+                "filters": {"UV/IR cut": None, "L-eXtreme": 7.0},
+                "channels": {"UV/IR cut": ["R", "G", "B"], "L-eXtreme": ["H", "O"]},
+                "exposures": {"UV/IR cut": 120.0, "L-eXtreme": 300.0}}},
+    token=OSC_TOKEN)
+case("a colour camera says what each of its filters delivers", status == 200)
+_, started = call("POST", "/api/v1/projects", {
+    "name": "Veil in everything", "kind": "single",
+    "region": {"ra": 313.0, "dec": 31.0, "width": 2.0, "height": 1.5},
+    "requirements": {"filters": {"H": 7.0, "O": 7.0, "S": 7.0, "R": None, "G": None, "B": None}},
+    "goals": {"H": 10.0, "O": 10.0, "S": 10.0, "R": 4.0, "G": 4.0, "B": 4.0}}, token=ADMIN)
+EVERYTHING = started["project"]["id"]
+_, browse = call("GET", "/api/v1/agent/projects", token=OSC_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == EVERYTHING)
+filters_check = next(c for c in listing["compatibility"]["checks"] if c["check"] == "filters")
+case("...and is told it can take part in five of the six channels, and through which filters",
+     listing["compatibility"]["ok"] and "L-eXtreme gives H, O" in filters_check["detail"]
+     and "UV/IR cut gives R, G, B" in filters_check["detail"] and "no S" in filters_check["detail"],
+     filters_check["detail"])
+status, joined = call("POST", f"/api/v1/agent/projects/{EVERYTHING}/join", {"night": "2026-10-12"},
+                      token=OSC_TOKEN)
+dealt = joined["task"]
+by_name = {f["filter"]: f for f in dealt["filters"]}
+case("joining deals it its own filters, each with the channels it delivers, at its own exposures",
+     status == 200 and sorted(by_name) == ["L-eXtreme", "UV/IR cut"]
+     and sorted(by_name["L-eXtreme"]["channels"]) == ["H", "O"]
+     and sorted(by_name["UV/IR cut"]["channels"]) == ["B", "G", "R"]
+     and by_name["L-eXtreme"]["exposure"] == 300.0 and by_name["UV/IR cut"]["exposure"] == 120.0,
+     str(dealt["filters"]))
+frames = (dealt.get("visit") or {}).get("frames") or {}
+case("...and tonight's frames are named by those filters",
+     bool(frames) and set(frames) <= {"L-eXtreme", "UV/IR cut"}, str(frames))
+
+NIGHT = {"task": dealt["id"], "night": "2026-10-12", "panel": "1", "filterName": "L-eXtreme",
+         "channels": ["H", "O"], "frames": 12, "seconds": 3600, "exposure": 300,
+         "footprint": {"ra": 313.0, "dec": 31.0, "width": 2.0, "height": 1.5},
+         "scale": 1.94, "focalLength": 400.0, "colour": True, "bandpass": 7.0, "hfr": 3.0}
+status, answer = call("POST", "/api/v1/agent/report", {"contributions": [NIGHT]}, token=OSC_TOKEN)
+case("a night through the dual-band is accepted",
+     status == 200 and answer["recorded"][0]["accepted"], str(answer["recorded"][0]["verdict"]))
+_, browse = call("GET", "/api/v1/agent/projects", token=OSC_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == EVERYTHING)
+got = listing["collected"]
+case("...and is credited to Ha and OIII both, the whole hour each, and not to SII",
+     abs(got.get("H", 0) - 1.0) < 0.01 and abs(got.get("O", 0) - 1.0) < 0.01 and not got.get("S"),
+     str(got))
+case("...with the progress measured per channel",
+     listing["progress"]["H"]["average"] > 0 and listing["progress"]["O"]["average"] > 0
+     and listing["progress"]["S"]["average"] == 0,
+     str({k: v["average"] for k, v in listing["progress"].items()}))
+status, answer = call("POST", "/api/v1/agent/report",
+                      {"contributions": [{**NIGHT, "frames": 24, "seconds": 7200}]}, token=OSC_TOKEN)
+_, browse = call("GET", "/api/v1/agent/projects", token=OSC_TOKEN)
+got = next(p for p in browse["projects"] if p["id"] == EVERYTHING)["collected"]
+case("...reported again as the night grew, it is the larger figure in each channel and not the sum",
+     abs(got.get("H", 0) - 2.0) < 0.01 and abs(got.get("O", 0) - 2.0) < 0.01, str(got))
+strict = call("POST", "/api/v1/projects", {
+    "name": "Narrow only", "kind": "single",
+    "region": {"ra": 313.0, "dec": 31.0, "width": 2.0, "height": 1.5},
+    "requirements": {"filters": {"H": 5.0, "O": 5.0}}, "goals": {"H": 10.0, "O": 10.0}}, token=ADMIN)[1]
+_, browse = call("GET", "/api/v1/agent/projects", token=OSC_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == strict["project"]["id"])
+case("a project wanting 5 nm turns the 7 nm dual-band away, naming it",
+     not listing["compatibility"]["ok"] and "L-eXtreme is 7 nm" in listing["compatibility"]["summary"],
+     listing["compatibility"]["summary"])
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
