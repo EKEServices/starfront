@@ -436,10 +436,24 @@ namespace Starfront.Collab.Services {
                 var wants = listing.Requirements ?? new Requirements();
                 var names = wants.Filters?.Keys.ToList() ?? new List<string>();
                 if (names.Count == 0) names = listing.Goals?.Keys.ToList() ?? new List<string>();
+                // Only the channels this telescope's own filters deliver are its
+                // business: a mono rig is not asked for an OSC-RGB exposure
+                // because the project also takes colour data, and a colour rig
+                // is not asked for SII. The server deals the rest to others.
+                var mine = RigProfile.FilterNames(settings)
+                    .Select(f => (name: f, bands: settings.ChannelsFor(f)))
+                    .Where(t => t.bands.Count > 0)
+                    .ToList();
                 foreach (var filterName in names) {
-                    var label = settings.FilterName(filterName);
-                    var seconds = settings.ExposureFor(filterName);
-                    if (seconds == null && settings.Colour) seconds = settings.ExposureFor("RGB");
+                    var canon = Filters.Canonical(filterName);
+                    var givers = mine.Where(t => t.bands.Any(b => Covers(b, canon))).Select(t => t.name).ToList();
+                    if (givers.Count == 0) continue;
+                    double? seconds = null;
+                    var label = settings.FilterName(givers[0]);
+                    foreach (var giver in givers) {
+                        seconds = settings.ExposureFor(giver);
+                        if (seconds != null) { label = settings.FilterName(giver); break; }
+                    }
                     if (seconds == null) {
                         throw new InvalidOperationException($"set an exposure for {label} in the exposure table first (Options > Plugins > Starfront)");
                     }
@@ -489,6 +503,13 @@ namespace Starfront.Collab.Services {
             if (answer.Task?.Share?.Count > 0) message += $" Tonight: {Describe(answer.Task)}.";
             Logger.Info("Starfront: " + message);
             return message;
+        }
+
+        /// <summary>Whether a band this rig delivers gives a wanted channel: "H" gives H, mono "Ha+OIII" gives H and O, "OSC-RGB" gives only OSC-RGB.</summary>
+        private static bool Covers(string band, string wantedCanonical) {
+            if (string.Equals(band, wantedCanonical, StringComparison.OrdinalIgnoreCase)) return true;
+            if (Filters.IsOsc(band)) return false;
+            return band.Split('+').Any(part => string.Equals(Filters.Canonical(part), wantedCanonical, StringComparison.OrdinalIgnoreCase));
         }
 
         public async Task LeaveAsync(string taskId, CancellationToken token) {

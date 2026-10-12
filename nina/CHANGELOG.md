@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.29
+
+- A mono telescope is no longer told to "set an exposure for OSC-RGB" before joining a collaboration that also takes colour data. Before joining, the plugin checks exposures only for the channels its own filters deliver; the rest is the server's to deal to others.
+
 ## 1.0.0.28
 
 - Joining with the camera just connected works. The server judged a join by the profile from the last check-in, up to ten minutes old and from before the camera was connected, so it refused with "this telescope has not said what it can see" although the camera was on; a join now reads the camera and sends the profile first.
