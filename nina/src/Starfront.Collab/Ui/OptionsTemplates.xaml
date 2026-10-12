@@ -28,11 +28,17 @@
                         Padding="12,6"
                         Command="{Binding SignInCommand}"
                         Content="Sign in with Discord" />
+                    <Button
+                        Margin="8,0,0,0"
+                        Padding="10,6"
+                        Command="{Binding JoinDiscordCommand}"
+                        Content="Join the Starfront Discord"
+                        ToolTip="Opens the invitation in your browser. You need to be in the server to sign in." />
                     <TextBlock
                         Margin="12,0,0,0"
                         VerticalAlignment="Center"
                         Opacity="0.8"
-                        Text="Only members of the Starfront Discord server can take part. A browser window opens; come back here when it says you are signed in." TextWrapping="Wrap" MaxWidth="440" />
+                        Text="Only members of the Starfront Discord server can take part; join it first if you are not in it. A browser window opens; come back here when it says you are signed in." TextWrapping="Wrap" MaxWidth="400" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenTrue}}">
                     <TextBlock VerticalAlignment="Center">

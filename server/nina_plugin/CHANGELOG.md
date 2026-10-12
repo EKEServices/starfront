@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.23
+
+- A *Join the Discord* button on the Starfront panel and beside the sign-in button on the options page opens the invitation to the Starfront Discord server, which signing in needs.
+
 ## 1.0.0.22
 
 - *Telescopes online* folds away, with the count in its heading; it opens on a click and stays as left.

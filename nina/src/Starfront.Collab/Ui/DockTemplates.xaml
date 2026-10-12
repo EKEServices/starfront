@@ -22,6 +22,12 @@
                         Command="{Binding SignInCommand}"
                         Content="Sign in with Discord"
                         Visibility="{Binding Enrolled, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
+                    <Button
+                        Margin="6,0,0,0"
+                        Padding="8,2"
+                        Command="{Binding JoinDiscordCommand}"
+                        Content="Join the Discord"
+                        ToolTip="The Starfront Discord server, where the collaborations are talked about. You need to be in it to sign in." />
                 </StackPanel>
                 <TextBlock Margin="0,2,0,0" Opacity="0.7" Text="{Binding OnlineText}" Visibility="{Binding OnlineText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <TextBlock

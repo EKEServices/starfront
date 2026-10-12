@@ -342,6 +342,7 @@ namespace Starfront.Collab.Ui {
             RefreshCommand = new AsyncRelayCommand(RefreshAsync);
             SignInCommand = new AsyncRelayCommand(SignInAsync);
             ClearSearchCommand = new RelayCommand(() => Search = "");
+            JoinDiscordCommand = new RelayCommand(Plugin.OpenDiscord);
             Start = new StartCollabVM(framingAssistant, RefreshAsync);
             Projects = new ObservableCollection<ProjectRowVM>();
             Tonight = new ObservableCollection<string>();
@@ -384,6 +385,7 @@ namespace Starfront.Collab.Ui {
         public AsyncRelayCommand RefreshCommand { get; }
         public AsyncRelayCommand SignInCommand { get; }
         public RelayCommand ClearSearchCommand { get; }
+        public RelayCommand JoinDiscordCommand { get; }
 
         /// <summary>A word or two; every card with all of them somewhere stays in the list.</summary>
         public string Search { get => search; set { search = value ?? ""; RaisePropertyChanged(); Refilter(); } }

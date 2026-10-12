@@ -30,6 +30,18 @@ namespace Starfront.Collab {
     public class Plugin : PluginBase {
         internal static event Action ShuttingDown;
 
+        /// <summary>The invitation to the Starfront Discord server, as the website gives it. Signing in needs membership.</summary>
+        public const string DiscordInvite = "https://discord.com/invite/3ut6a7pfsY";
+
+        /// <summary>Open the Discord invitation in the browser.</summary>
+        internal static void OpenDiscord() {
+            try {
+                Process.Start(new ProcessStartInfo(DiscordInvite) { UseShellExecute = true });
+            } catch (Exception ex) {
+                Logger.Error(ex);
+            }
+        }
+
         private readonly ExposureTableVM exposures;
 
         [ImportingConstructor]
@@ -49,6 +61,7 @@ namespace Starfront.Collab {
             SignOutCommand = new AsyncRelayCommand(SignOutAsync, () => !Runtime.Session.Busy);
             RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !Runtime.Session.Busy);
             OpenServerCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(OpenServer);
+            JoinDiscordCommand = new CommunityToolkit.Mvvm.Input.RelayCommand(OpenDiscord);
             Runtime.Session.PropertyChanged += (_, e) => {
                 if (e.PropertyName == nameof(Services.StarfrontSession.Busy)) {
                     Ui.Dispatch.OnUi(() => {
@@ -83,6 +96,7 @@ namespace Starfront.Collab {
         public AsyncRelayCommand SignOutCommand { get; }
         public AsyncRelayCommand RefreshCommand { get; }
         public ICommand OpenServerCommand { get; }
+        public ICommand JoinDiscordCommand { get; }
 
         private async Task SignInAsync() {
             try {
