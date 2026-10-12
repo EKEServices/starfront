@@ -411,9 +411,12 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <!--  Everybody online, as a table: the shooting ones first.  -->
-                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="{Binding TelescopesText}" Visibility="{Binding TelescopesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
-                <Grid Grid.IsSharedSizeScope="True" Visibility="{Binding TelescopesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}">
+                <!--  Everybody online, as a table, the shooting ones first; folded away until wanted.  -->
+                <Expander Margin="0,12,0,0" IsExpanded="{Binding TelescopesOpen, Mode=TwoWay}" Visibility="{Binding TelescopesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}">
+                    <Expander.Header>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding TelescopesText}" />
+                    </Expander.Header>
+                <Grid Margin="4,4,0,0" Grid.IsSharedSizeScope="True">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -451,6 +454,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Grid>
+                </Expander>
 
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Frames reported" Visibility="{Binding Verdicts, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <ItemsControl ItemsSource="{Binding Verdicts}">

@@ -408,6 +408,9 @@ namespace Starfront.Collab.Ui {
         /// <summary>Every telescope online right now, as a table: who, doing what, on which collaboration.</summary>
         public ObservableCollection<TelescopeRowVM> Telescopes { get; }
         public string TelescopesText => Telescopes.Count == 0 ? "" : $"Telescopes online ({Telescopes.Count})";
+        private bool telescopesOpen;
+        /// <summary>Whether the table of telescopes online is unfolded; folded until asked, and kept as left across check-ins.</summary>
+        public bool TelescopesOpen { get => telescopesOpen; set { telescopesOpen = value; RaisePropertyChanged(); } }
         public ObservableCollection<string> Verdicts { get; }
 
         public bool Enrolled => Runtime.Ready && Runtime.Settings.Enrolled;

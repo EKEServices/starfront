@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.22
+
+- *Telescopes online* folds away, with the count in its heading; it opens on a click and stays as left.
+
 ## 1.0.0.21
 
 - The list's controls are two plain drop-downs: *Show* (all, ones I can join, ones I am on) and *Sort* (most active, least done, highest now, newest, by name). The ones you are on come first whatever the sort.
