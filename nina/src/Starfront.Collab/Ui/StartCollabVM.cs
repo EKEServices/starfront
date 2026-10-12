@@ -1,0 +1,391 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using CommunityToolkit.Mvvm.Input;
+using RelayCommand = CommunityToolkit.Mvvm.Input.RelayCommand;
+using Newtonsoft.Json.Linq;
+using NINA.Core.Utility;
+using NINA.Core.Utility.Notification;
+using NINA.WPF.Base.Interfaces.ViewModel;
+using Starfront.Collab.Server;
+using Starfront.Collab.Services;
+
+namespace Starfront.Collab.Ui {
+
+    /// <summary>One filter a collaboration wants: how deep, and how narrow the filter may be.</summary>
+    public sealed class FilterGoalRow : BaseINPC {
+        private string name;
+        private string hours;
+        private string bandpass;
+
+        public FilterGoalRow(string name, string hours = "", string bandpass = "") {
+            this.name = name ?? "";
+            this.hours = hours ?? "";
+            this.bandpass = bandpass ?? "";
+        }
+
+        public string Name { get => name; set { name = (value ?? "").Trim(); RaisePropertyChanged(); } }
+        /// <summary>Hours of depth wanted at every point, as text so a half-typed number is left alone; blank is no goal.</summary>
+        public string Hours { get => hours; set { hours = value ?? ""; RaisePropertyChanged(); } }
+        /// <summary>The widest bandpass accepted, in nm; blank takes any filter of that name.</summary>
+        public string Bandpass { get => bandpass; set { bandpass = value ?? ""; RaisePropertyChanged(); } }
+    }
+
+    /// <summary>
+    /// The form that starts a collaboration from N.I.N.A., and edits one you
+    /// started. It fills the same request the Starfront program sends, so a
+    /// project looks the same to the server whichever program started it.
+    /// The target comes from a name the server looks up, from the Framing
+    /// Assistant, or typed as coordinates; a single field is shot at this
+    /// camera's size and a mosaic at the size you give.
+    /// </summary>
+    public sealed class StartCollabVM : BaseINPC {
+        private readonly IFramingAssistantVM framing;
+        private readonly Func<Task> refresh;
+
+        private bool open;
+        private bool busy;
+        private string message = "";
+        private string editingId = "";
+        private string name = "";
+        private string target = "";
+        private string raText = "";
+        private string decText = "";
+        private double rotation;
+        private bool single = true;
+        private string widthText = "";
+        private string heightText = "";
+        private string notes = "";
+        private string minFocal = "", maxFocal = "", maxHfr = "", maxGuideRms = "", minExposure = "", maxExposure = "";
+        private string maxMoon = "", minMoonSeparation = "", minAltitude = "", minFrames = "10";
+        private bool requireCalibrated;
+        private bool acceptColour = true;
+        private string foundText = "";
+
+        public StartCollabVM(IFramingAssistantVM framing, Func<Task> refresh) {
+            this.framing = framing;
+            this.refresh = refresh;
+            Filters = new ObservableCollection<FilterGoalRow>();
+            LookupCommand = new AsyncRelayCommand(LookupAsync, () => !Busy);
+            FromFramingCommand = new RelayCommand(FromFraming, () => !Busy);
+            AddFilterCommand = new RelayCommand(() => Filters.Add(new FilterGoalRow("")));
+            RemoveFilterCommand = new RelayCommand<FilterGoalRow>(row => { if (row != null) Filters.Remove(row); });
+            StartCommand = new AsyncRelayCommand(SubmitAsync, () => !Busy);
+            CancelCommand = new RelayCommand(Reset);
+            Reset();
+        }
+
+        public ObservableCollection<FilterGoalRow> Filters { get; }
+        public AsyncRelayCommand LookupCommand { get; }
+        public RelayCommand FromFramingCommand { get; }
+        public RelayCommand AddFilterCommand { get; }
+        public RelayCommand<FilterGoalRow> RemoveFilterCommand { get; }
+        public AsyncRelayCommand StartCommand { get; }
+        public RelayCommand CancelCommand { get; }
+
+        public bool Open { get => open; set { open = value; RaisePropertyChanged(); } }
+        public bool Busy { get => busy; private set { busy = value; RaisePropertyChanged(); LookupCommand.NotifyCanExecuteChanged(); StartCommand.NotifyCanExecuteChanged(); FromFramingCommand.NotifyCanExecuteChanged(); } }
+        public string Message { get => message; private set { message = value ?? ""; RaisePropertyChanged(); } }
+        public bool Editing => editingId.Length > 0;
+        public string Title => Editing ? $"Editing \"{name}\"" : "Start a collaboration";
+        public string SubmitLabel => Editing ? "Save changes" : "Start it";
+
+        public string Name { get => name; set { name = value ?? ""; RaisePropertyChanged(); RaisePropertyChanged(nameof(Title)); } }
+        /// <summary>A name to look up: M31, NGC 7000, Sh2-129, or anything Sesame knows.</summary>
+        public string Target { get => target; set { target = value ?? ""; RaisePropertyChanged(); } }
+        public string RaText { get => raText; set { raText = value ?? ""; RaisePropertyChanged(); } }
+        public string DecText { get => decText; set { decText = value ?? ""; RaisePropertyChanged(); } }
+        public string FoundText { get => foundText; private set { foundText = value ?? ""; RaisePropertyChanged(); } }
+        public bool Single { get => single; set { single = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(Mosaic)); RaisePropertyChanged(nameof(SizeHint)); } }
+        public bool Mosaic { get => !single; set { Single = !value; } }
+        public string WidthText { get => widthText; set { widthText = value ?? ""; RaisePropertyChanged(); } }
+        public string HeightText { get => heightText; set { heightText = value ?? ""; RaisePropertyChanged(); } }
+        public string Notes { get => notes; set { notes = value ?? ""; RaisePropertyChanged(); } }
+        public string MinFocal { get => minFocal; set { minFocal = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxFocal { get => maxFocal; set { maxFocal = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxHfr { get => maxHfr; set { maxHfr = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxGuideRms { get => maxGuideRms; set { maxGuideRms = value ?? ""; RaisePropertyChanged(); } }
+        public string MinExposure { get => minExposure; set { minExposure = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxExposure { get => maxExposure; set { maxExposure = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxMoon { get => maxMoon; set { maxMoon = value ?? ""; RaisePropertyChanged(); } }
+        public string MinMoonSeparation { get => minMoonSeparation; set { minMoonSeparation = value ?? ""; RaisePropertyChanged(); } }
+        public string MinAltitude { get => minAltitude; set { minAltitude = value ?? ""; RaisePropertyChanged(); } }
+        public string MinFrames { get => minFrames; set { minFrames = value ?? ""; RaisePropertyChanged(); } }
+        public bool RequireCalibrated { get => requireCalibrated; set { requireCalibrated = value; RaisePropertyChanged(); } }
+        public bool AcceptColour { get => acceptColour; set { acceptColour = value; RaisePropertyChanged(); } }
+
+        public string SizeHint {
+            get {
+                var field = Runtime.Ready ? RigProfile.Field(Runtime.Host, Runtime.Settings) : null;
+                var mine = field is (double w, double h) ? $"{w:0.00}° × {h:0.00}°" : "not known until the camera has connected";
+                return Single
+                    ? $"One field: everybody points at the same spot. Your camera's field is {mine}."
+                    : $"A region to cover: each telescope tiles it with its own camera ({mine}).";
+            }
+        }
+
+        /// <summary>Back to a blank form for a new collaboration, with this rig's filters offered.</summary>
+        public void Reset() {
+            editingId = "";
+            Name = ""; Target = ""; RaText = ""; DecText = ""; rotation = 0; Single = true;
+            WidthText = ""; HeightText = ""; Notes = ""; FoundText = "";
+            MinFocal = ""; MaxFocal = ""; MaxHfr = ""; MaxGuideRms = ""; MinExposure = ""; MaxExposure = "";
+            MaxMoon = ""; MinMoonSeparation = ""; MinAltitude = ""; MinFrames = "10";
+            RequireCalibrated = false; AcceptColour = true;
+            Filters.Clear();
+            if (Runtime.Ready) {
+                foreach (var filter in RigProfile.FilterNames(Runtime.Settings)) {
+                    if (filter != "none") Filters.Add(new FilterGoalRow(filter));
+                }
+                var field = RigProfile.Field(Runtime.Host, Runtime.Settings);
+                if (field is (double w, double h)) {
+                    WidthText = (Math.Round(w * 2, 1)).ToString("0.0", CultureInfo.InvariantCulture);
+                    HeightText = (Math.Round(h * 2, 1)).ToString("0.0", CultureInfo.InvariantCulture);
+                }
+            }
+            Message = "";
+            RaisePropertyChanged(nameof(Editing));
+            RaisePropertyChanged(nameof(Title));
+            RaisePropertyChanged(nameof(SubmitLabel));
+        }
+
+        /// <summary>Load a collaboration you started into the form.</summary>
+        public void BeginEdit(ProjectListing listing) {
+            Reset();
+            editingId = listing.Id;
+            Name = listing.Name;
+            Notes = listing.Notes ?? "";
+            Single = listing.Kind == "single";
+            var region = listing.Region;
+            if (region != null) {
+                RaText = Hms(region.Ra);
+                DecText = Dms(region.Dec);
+                rotation = region.Rotation;
+                WidthText = region.Width.ToString("0.00", CultureInfo.InvariantCulture);
+                HeightText = region.Height.ToString("0.00", CultureInfo.InvariantCulture);
+            }
+            var wants = listing.Requirements ?? new Requirements();
+            MinFocal = Text(wants.MinFocalLength); MaxFocal = Text(wants.MaxFocalLength);
+            MaxHfr = Text(wants.MaxHfr); MaxGuideRms = Text(wants.MaxGuideRms);
+            MinExposure = Text(wants.MinExposure); MaxExposure = Text(wants.MaxExposure);
+            MaxMoon = wants.MaxMoonIllumination.HasValue ? Text(Math.Round(wants.MaxMoonIllumination.Value * 100)) : "";
+            MinMoonSeparation = Text(wants.MinMoonSeparation); MinAltitude = Text(wants.MinAltitude);
+            MinFrames = wants.MinFramesPerVisit.ToString(CultureInfo.InvariantCulture);
+            RequireCalibrated = wants.RequireCalibrated;
+            AcceptColour = wants.AcceptColour;
+            Filters.Clear();
+            var goals = listing.Goals ?? new Dictionary<string, double>();
+            foreach (var kv in wants.Filters ?? new Dictionary<string, double?>()) {
+                goals.TryGetValue(kv.Key, out var hours);
+                Filters.Add(new FilterGoalRow(kv.Key, hours > 0 ? Text(hours) : "", Text(kv.Value)));
+            }
+            foreach (var kv in goals.Where(g => !Filters.Any(f => string.Equals(f.Name, g.Key, StringComparison.OrdinalIgnoreCase)))) {
+                Filters.Add(new FilterGoalRow(kv.Key, Text(kv.Value)));
+            }
+            Open = true;
+            RaisePropertyChanged(nameof(Editing));
+            RaisePropertyChanged(nameof(Title));
+            RaisePropertyChanged(nameof(SubmitLabel));
+        }
+
+        // -- the target ----------------------------------------------------------------
+
+        private async Task LookupAsync() {
+            var query = Target.Trim();
+            if (query.Length == 0) { Message = "Type a name to look up: M31, NGC 7000, Sh2-129."; return; }
+            Busy = true;
+            try {
+                Message = $"Looking up {query}...";
+                var answer = await Runtime.Session.LookupAsync(query, CancellationToken.None);
+                var hit = answer.Results.FirstOrDefault();
+                if (hit == null) {
+                    Message = $"Nothing is known by the name \"{query}\". Try another designation, or type the coordinates.";
+                    return;
+                }
+                RaText = Hms(hit.Ra);
+                DecText = Dms(hit.Dec);
+                rotation = 0;
+                if (Name.Trim().Length == 0) Name = hit.Name.Length > 0 ? hit.Name : hit.Id;
+                var size = hit.SizeArcmin is double arcmin && arcmin > 0 ? $", about {arcmin:0}′ across" : "";
+                FoundText = $"{hit.Name}{(hit.Id.Length > 0 && hit.Id != hit.Name ? $" ({hit.Id})" : "")}: {hit.Type}{size}";
+                if (hit.SizeArcmin is double across && across > 0 && Mosaic) {
+                    var span = Math.Max(0.5, Math.Round(across / 60.0 * 1.4, 1));
+                    WidthText = span.ToString("0.0", CultureInfo.InvariantCulture);
+                    HeightText = Math.Max(0.4, Math.Round(span * 0.75, 1)).ToString("0.0", CultureInfo.InvariantCulture);
+                }
+                Message = "";
+            } catch (Exception ex) {
+                Message = $"Could not look that up: {ex.Message}";
+            } finally {
+                Busy = false;
+            }
+        }
+
+        private void FromFraming() {
+            try {
+                var dso = framing?.DSO;
+                if (dso?.Coordinates == null) { Message = "The Framing Assistant has no target yet."; return; }
+                RaText = Hms(dso.Coordinates.RADegrees);
+                DecText = Dms(dso.Coordinates.Dec);
+                rotation = dso.RotationPositionAngle;
+                if (Name.Trim().Length == 0 && !string.IsNullOrWhiteSpace(dso.Name)) Name = dso.Name;
+                FoundText = $"From the Framing Assistant: {dso.Name} at {RaText} {DecText}, angle {rotation:0}°";
+                var fov = framing.FieldOfView;
+                if (Mosaic && fov > 0.2) {
+                    WidthText = Math.Round(fov, 1).ToString("0.0", CultureInfo.InvariantCulture);
+                    HeightText = Math.Round(fov * 0.75, 1).ToString("0.0", CultureInfo.InvariantCulture);
+                }
+                Message = "";
+            } catch (Exception ex) {
+                Message = $"Could not read the Framing Assistant: {ex.Message}";
+            }
+        }
+
+        // -- the request ---------------------------------------------------------------
+
+        private async Task SubmitAsync() {
+            JObject body;
+            try {
+                body = Body();
+            } catch (ArgumentException ex) {
+                Message = ex.Message;
+                return;
+            }
+            Busy = true;
+            try {
+                if (Editing) {
+                    Message = "Saving...";
+                    await Runtime.Session.UpdateProjectAsync(editingId, body, CancellationToken.None);
+                    Message = $"\"{Name}\" is updated; every telescope on it finds out at its next check-in.";
+                    Notification.ShowSuccess($"Starfront: {Name} updated");
+                } else {
+                    Message = "Starting...";
+                    await Runtime.Session.CreateProjectAsync(body, CancellationToken.None);
+                    Message = $"\"{Name}\" is live. It is in the list below for everybody; join it yourself to shoot your share.";
+                    Notification.ShowSuccess($"Starfront: {Name} is live");
+                }
+                var said = Message;
+                Reset();
+                Message = said;
+                Open = false;
+                if (refresh != null) await refresh();
+            } catch (Exception ex) {
+                Message = (Editing ? "Could not save: " : "Could not start it: ") + ex.Message;
+                Notification.ShowWarning($"Starfront: {ex.Message}");
+            } finally {
+                Busy = false;
+            }
+        }
+
+        /// <summary>The server's request, or an ArgumentException that says what is missing.</summary>
+        public JObject Body() {
+            var title = Name.Trim();
+            if (title.Length == 0) throw new ArgumentException("Give it a name.");
+            var ra = ParseAngle(RaText, hours: true);
+            var dec = ParseAngle(DecText, hours: false);
+            if (ra == null || dec == null) throw new ArgumentException("Where is it? Look the name up, take it from the Framing Assistant, or type RA and Dec.");
+            if (dec < -90 || dec > 90) throw new ArgumentException("Dec is between -90 and +90.");
+
+            double width, height;
+            if (Single) {
+                var field = Runtime.Ready ? RigProfile.Field(Runtime.Host, Runtime.Settings) : null;
+                (width, height) = field ?? (1.0, 0.75);
+            } else {
+                width = Num(WidthText) ?? 0;
+                height = Num(HeightText) ?? 0;
+                if (width <= 0 || height <= 0) throw new ArgumentException("A mosaic needs its width and height in degrees.");
+                if (width > 60 || height > 60) throw new ArgumentException("A region is at most 60° across.");
+            }
+
+            var filters = new JObject();
+            var goals = new JObject();
+            foreach (var row in Filters) {
+                var filter = Sky.Filters.Canonical(row.Name);
+                if (string.IsNullOrEmpty(filter)) continue;
+                var band = Num(row.Bandpass);
+                filters[filter] = band.HasValue ? new JValue(band.Value) : JValue.CreateNull();
+                var hours = Num(row.Hours);
+                if (hours is double h && h > 0) goals[filter] = h;
+            }
+            if (filters.Count == 0) throw new ArgumentException("Name at least one filter the collaboration wants.");
+
+            var moon = Num(MaxMoon);
+            var requirements = new JObject {
+                ["minFocalLength"] = Json(Num(MinFocal)),
+                ["maxFocalLength"] = Json(Num(MaxFocal)),
+                ["maxHfr"] = Json(Num(MaxHfr)),
+                ["maxGuideRms"] = Json(Num(MaxGuideRms)),
+                ["minExposure"] = Json(Num(MinExposure)),
+                ["maxExposure"] = Json(Num(MaxExposure)),
+                ["maxMoonIllumination"] = moon.HasValue ? new JValue(Math.Max(0, Math.Min(1, moon.Value / 100.0))) : JValue.CreateNull(),
+                ["minMoonSeparation"] = Json(Num(MinMoonSeparation)),
+                ["minAltitude"] = Json(Num(MinAltitude)),
+                ["minFramesPerVisit"] = Math.Max(1, (int)Math.Round(Num(MinFrames) ?? 10)),
+                ["requireCalibrated"] = RequireCalibrated,
+                ["acceptColour"] = AcceptColour,
+                ["filters"] = filters,
+            };
+            return new JObject {
+                ["name"] = title,
+                ["kind"] = Single ? "single" : "mosaic",
+                ["notes"] = Notes.Trim(),
+                ["region"] = new JObject {
+                    ["ra"] = Math.Round(ra.Value, 5), ["dec"] = Math.Round(dec.Value, 5),
+                    ["width"] = Math.Round(width, 4), ["height"] = Math.Round(height, 4),
+                    ["rotation"] = Math.Round(rotation, 2),
+                },
+                ["requirements"] = requirements,
+                ["goals"] = goals,
+            };
+        }
+
+        private static JToken Json(double? value) => value.HasValue ? new JValue(value.Value) : JValue.CreateNull();
+
+        private static string Text(double? value) => value.HasValue ? value.Value.ToString("0.###", CultureInfo.InvariantCulture) : "";
+
+        /// <summary>A number typed either way round the decimal point; blank or nonsense is null.</summary>
+        public static double? Num(string text) {
+            var clean = (text ?? "").Trim();
+            if (clean.Length == 0) return null;
+            if (double.TryParse(clean, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) return value;
+            if (double.TryParse(clean, NumberStyles.Float, CultureInfo.CurrentCulture, out value)) return value;
+            return null;
+        }
+
+        private static readonly Regex Parts = new(@"[-+]?\d+(?:[.,]\d+)?", RegexOptions.Compiled);
+
+        /// <summary>
+        /// "00:42:44", "00 42 44.3", "0h42m44s", "10.68" or "+41:16:09", "41° 16' 09"", "-5.4":
+        /// degrees out. A lone number is hours when it is RA and no bigger than 24.
+        /// </summary>
+        public static double? ParseAngle(string text, bool hours) {
+            var clean = (text ?? "").Trim();
+            if (clean.Length == 0) return null;
+            var matches = Parts.Matches(clean);
+            if (matches.Count == 0) return null;
+            var numbers = matches.Select(m => double.Parse(m.Value.Replace(',', '.'), CultureInfo.InvariantCulture)).ToList();
+            var negative = clean.TrimStart().StartsWith("-");
+            if (numbers.Count == 1) {
+                var lone = numbers[0];
+                if (hours) return lone <= 24 && !clean.Contains('°') && !clean.EndsWith("d") ? lone * 15.0 : lone;
+                return lone;
+            }
+            var value = Math.Abs(numbers[0]) + numbers[1] / 60.0 + (numbers.Count > 2 ? numbers[2] / 3600.0 : 0.0);
+            if (negative) value = -value;
+            return hours ? value * 15.0 : value;
+        }
+
+        public static string Hms(double raDegrees) {
+            var h = ((raDegrees % 360 + 360) % 360) / 15.0;
+            var hh = (int)h; var m = (h - hh) * 60; var mm = (int)m; var ss = (m - mm) * 60;
+            return $"{hh:00}:{mm:00}:{ss:00}";
+        }
+
+        public static string Dms(double dec) {
+            var sign = dec < 0 ? "-" : "+";
+            var d = Math.Abs(dec);
+            var dd = (int)d; var m = (d - dd) * 60; var mm = (int)m; var ss = (m - mm) * 60;
+            return $"{sign}{dd:00}:{mm:00}:{ss:00}";
+        }
+    }
+}

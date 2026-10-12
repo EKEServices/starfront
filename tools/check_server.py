@@ -264,8 +264,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 status, info = call("GET", "/api/v1/auth")
-case("the server says Discord sign-in is on, and a role is needed to start",
-     status == 200 and info["discord"] and info["roleRequired"])
+case("the server says Discord sign-in is on, and no role is needed to start one",
+     status == 200 and info["discord"] and info["roleRequired"] is False)
 
 begun, to_discord, landed, polled = sign_in("code-alice")
 case("a sign-in begins with a code and a page to open",
@@ -292,8 +292,8 @@ case("...and that she owns the server, by her Discord id, with no token pasted",
 
 _, _, _, polled = sign_in("code-bob")
 BOB = polled["token"]
-case("a member without the role signs in too, but may not start one",
-     polled["state"] == "done" and polled["user"]["canStart"] is False)
+case("a member without the customer role signs in too, and may start one: being in the server is the gate",
+     polled["state"] == "done" and polled["user"]["canStart"] is True)
 
 _, _, landed, polled = sign_in("code-mallory")
 case("somebody not in the Discord server is turned away, and told so",
@@ -324,10 +324,25 @@ _, browse = call("GET", "/api/v1/agent/projects", token=AGENT_TOKEN)
 case("...and everybody browsing sees whose it is",
      next(p for p in browse["projects"] if p["id"] == VEIL)["ownerId"] == "1001")
 
-status, refused = call("POST", "/api/v1/projects", {
+status, bobs = call("POST", "/api/v1/projects", {
     "name": "Bob's", "region": {"ra": 0, "dec": 0, "width": 1, "height": 1}},
     token=BOB)
-case("a member without the role cannot", status == 403, refused.get("detail"))
+case("a member without the role can start one too", status == 200
+     and bobs["project"]["owner_id"] == "1002" and bobs["project"]["coordinator"] == "Bob",
+     bobs.get("detail") or bobs["project"]["coordinator"])
+status, _ = call("PUT", f"/api/v1/projects/{bobs['project']['id']}", {"status": "closed"}, token=BOB)
+case("...and close it again", status == 200)
+
+# The lookup a program with no catalog of its own starts a collaboration from.
+status, found = call("GET", "/api/v1/lookup?name=m31", token=BOB)
+case("a signed-in member can look an object up by name, in degrees",
+     status == 200 and found["results"] and found["results"][0]["id"] == "M31"
+     and abs(found["results"][0]["ra"] - 10.68) < 0.1
+     and abs(found["results"][0]["dec"] - 41.27) < 0.1
+     and found["results"][0]["sizeArcmin"] == 178,
+     str(found)[:160])
+status, _ = call("GET", "/api/v1/lookup?name=m31", token=AGENT_TOKEN)
+case("...a telescope's token cannot", status == 401)
 
 status, _ = call("PUT", f"/api/v1/projects/{VEIL}", {"notes": "hi"}, token=BOB)
 case("somebody else cannot change Alice's collaboration", status == 403)

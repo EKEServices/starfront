@@ -105,6 +105,20 @@ namespace Starfront.Collab.Server {
         public Task<EnrolAnswer> EnrolTelescopeAsync(string userToken, string name, string owner, CancellationToken token) =>
             Call<EnrolAnswer>(HttpMethod.Post, "/api/v1/agents", new { name, owner }, userToken, token);
 
+        // -- a person starting and running a collaboration --------------------
+
+        public Task<LookupAnswer> LookupAsync(string userToken, string name, CancellationToken token) =>
+            Call<LookupAnswer>(HttpMethod.Get, $"/api/v1/lookup?name={Q(name)}", null, userToken, token);
+
+        public Task<JObject> CreateProjectAsync(string userToken, JObject body, CancellationToken token) =>
+            Call<JObject>(HttpMethod.Post, "/api/v1/projects", body, userToken, token);
+
+        public Task<JObject> UpdateProjectAsync(string userToken, string projectId, JObject body, CancellationToken token) =>
+            Call<JObject>(HttpMethod.Put, $"/api/v1/projects/{Q(projectId)}", body, userToken, token);
+
+        public Task<JObject> RedealProjectAsync(string userToken, string projectId, CancellationToken token) =>
+            Call<JObject>(HttpMethod.Post, $"/api/v1/projects/{Q(projectId)}/redeal", null, userToken, token);
+
         // -- a telescope: the three calls, and the browsing around them ------
 
         public Task<HelloAnswer> HelloAsync(string agentToken, JObject profile, JObject presence, CancellationToken token) {

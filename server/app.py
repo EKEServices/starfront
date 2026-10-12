@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import astrocontrol                                              # noqa: E402
-from astrocontrol import collab, filters                         # noqa: E402
+from astrocontrol import catalog, collab, filters                # noqa: E402
 from astrocontrol.config import data_root                        # noqa: E402
 from server import auth                                          # noqa: E402
 from server.store import Store                                   # noqa: E402
@@ -138,16 +138,16 @@ def require_admin(authorization: str = Header(default="")) -> str:
 
 
 def may_start(who: dict[str, Any]) -> bool:
-    """Whether this person may start collaborations.
+    """Whether this person may start collaborations: anybody signed in.
 
-    The owner always may. A member may when the server has no role
-    requirement, or holds the role. Joining never needs any of this.
+    Being in the Discord server is the whole gate, and signing in already
+    checks it - Discord refuses the member lookup for anyone who is not. A
+    role requirement (DISCORD_ROLE) used to sit on top of that, so only
+    customers could start one; it was dropped on 2026-10-12 so that anyone
+    in the community can, customer or not. The setting is still read and
+    reported, and still means nothing here.
     """
-    if who["admin"]:
-        return True
-    if not DISCORD.role:
-        return True
-    return DISCORD.role in (who.get("roles") or [])
+    return who is not None
 
 
 def owns_project(who: dict[str, Any], project: dict[str, Any]) -> bool:
@@ -178,7 +178,7 @@ def _require_project_owner(who: dict[str, Any], project_id: str) -> dict[str, An
 def auth_status() -> dict[str, Any]:
     """Whether people can sign in here, and what it takes to start a project."""
     return {"discord": DISCORD.configured(), "guild": DISCORD.guild,
-            "roleRequired": bool(DISCORD.role), "publicUrl": DISCORD.public_url}
+            "roleRequired": False, "publicUrl": DISCORD.public_url}
 
 
 @app.post("/api/v1/auth/login")
@@ -238,13 +238,10 @@ def auth_callback(code: str = Query(default=""), state: str = Query(default=""),
     store.upsert_user(identity.id, token, identity.name, identity.avatar,
                       identity.roles)
     store.bind_login(state, identity.id)
-    starter = ("You can start collaborations here."
-               if DISCORD.role in identity.roles or not DISCORD.role
-               else "You can join collaborations; starting one needs a role "
-                    "you do not hold.")
     return HTMLResponse(auth.page(
         f"Signed in as {identity.name}",
-        "Go back to Starfront - it has already noticed. " + starter))
+        "Go back to Starfront - it has already noticed. You can join "
+        "collaborations and start your own."))
 
 
 @app.get("/api/v1/auth/poll")
@@ -1589,6 +1586,34 @@ def list_projects() -> dict[str, Any]:
     return {"projects": store.projects()}
 
 
+@app.get("/api/v1/lookup")
+def lookup_object(name: str = Query(default="", max_length=80),
+                  who: dict[str, Any] = Depends(person_from)) -> dict[str, Any]:
+    """An object by name, for somebody starting a collaboration from a
+    program that has no catalog of its own.
+
+    The bundled table first - the Messier catalog and the usual showpieces
+    - then CDS Sesame for anything else. Right ascension comes back in
+    degrees, as everything about a region does on this server, and the
+    size in arcminutes where the table knows it, which is a fair first
+    guess at how big a single field or a mosaic ought to be.
+    """
+    found = catalog.lookup(name, limit=12)
+    results = []
+    for hit in found.get("results") or []:
+        results.append({
+            "id": hit.get("id") or "",
+            "name": (hit.get("name") or hit.get("id") or "").strip(),
+            "type": hit.get("type") or "",
+            "ra": round(float(hit["ra"]) * 15.0, 5),
+            "dec": round(float(hit["dec"]), 5),
+            "sizeArcmin": hit.get("size"),
+            "constellation": hit.get("constellation") or "",
+            "source": hit.get("source") or found.get("source") or "catalog",
+        })
+    return {"results": results, "source": found.get("source") or "catalog"}
+
+
 @app.get("/api/v1/projects/{project_id}")
 def read_project(project_id: str) -> dict[str, Any]:
     project = store.project(project_id)
@@ -1948,7 +1973,7 @@ def health() -> dict[str, Any]:
             "version": astrocontrol.__version__,
             "adminConfigured": bool(ADMIN_TOKEN),
             "discord": DISCORD.configured(),
-            "roleRequired": bool(DISCORD.role),
+            "roleRequired": False,
             # The N.I.N.A. plugin releases this server offers, so a deploy
             # can be checked from outside.
             "ninaPlugins": [f'{m.get("Name")} {".".join(str(m["Version"][k]) for k in ("Major", "Minor", "Patch", "Build"))}'

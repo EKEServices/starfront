@@ -54,6 +54,144 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!--  Starting one. Anybody signed in may; the form sends the same request the Starfront program does.  -->
+                <Expander
+                    Margin="0,12,0,0"
+                    IsExpanded="{Binding Start.Open, Mode=TwoWay}"
+                    Visibility="{Binding CanStart, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                    <Expander.Header>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Start.Title}" />
+                    </Expander.Header>
+                    <StackPanel Margin="4,6,4,4" MaxWidth="420" HorizontalAlignment="Left" DataContext="{Binding Start}">
+                        <TextBlock Opacity="0.7" TextWrapping="Wrap" Text="Name it, say where it is and what you want collected, and it is open to every telescope on the server that qualifies. You can edit it, close it or deal it afresh from here afterwards." />
+
+                        <TextBlock Margin="0,8,0,2" Text="Name" />
+                        <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Margin="0,8,0,2" Text="Where" />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Margin="6,0,0,0" Padding="8,2" Command="{Binding FromFramingCommand}" Content="From Framing Assistant" ToolTip="Take the target the Framing Assistant is showing, with its angle" />
+                            <Button DockPanel.Dock="Right" Margin="6,0,0,0" Padding="8,2" Command="{Binding LookupCommand}" Content="Look up" />
+                            <TextBox Text="{Binding Target, UpdateSourceTrigger=PropertyChanged}" ToolTip="M31, NGC 7000, Sh2-129, or any name the catalog knows" />
+                        </DockPanel>
+                        <TextBlock Margin="0,2,0,0" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Text="{Binding FoundText}" Visibility="{Binding FoundText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="RA" />
+                            <TextBox Grid.Column="1" Text="{Binding RaText, UpdateSourceTrigger=PropertyChanged}" ToolTip="00:42:44, or hours" />
+                            <TextBlock Grid.Column="2" Margin="10,0,6,0" VerticalAlignment="Center" Text="Dec" />
+                            <TextBox Grid.Column="3" Text="{Binding DecText, UpdateSourceTrigger=PropertyChanged}" ToolTip="+41:16:09, or degrees" />
+                        </Grid>
+
+                        <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                            <RadioButton Content="One field" IsChecked="{Binding Single, Mode=TwoWay}" />
+                            <RadioButton Margin="14,0,0,0" Content="A region to cover (mosaic)" IsChecked="{Binding Mosaic, Mode=TwoWay}" />
+                        </StackPanel>
+                        <TextBlock Margin="0,2,0,0" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Text="{Binding SizeHint}" />
+                        <Grid Margin="0,4,0,0" Visibility="{Binding Mosaic, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="Width °" />
+                            <TextBox Grid.Column="1" Text="{Binding WidthText, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Grid.Column="2" Margin="10,0,6,0" VerticalAlignment="Center" Text="Height °" />
+                            <TextBox Grid.Column="3" Text="{Binding HeightText, UpdateSourceTrigger=PropertyChanged}" />
+                        </Grid>
+
+                        <DockPanel Margin="0,10,0,2">
+                            <Button DockPanel.Dock="Right" Padding="8,1" Command="{Binding AddFilterCommand}" Content="Add a filter" />
+                            <TextBlock VerticalAlignment="Center" Text="Filters wanted" />
+                        </DockPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Opacity="0.7" FontSize="11" Text="filter" />
+                            <TextBlock Grid.Column="1" Opacity="0.7" FontSize="11" Text="hours wanted" ToolTip="Depth wanted at every point of the field. Blank: shoot it, no goal." />
+                            <TextBlock Grid.Column="2" Opacity="0.7" FontSize="11" Text="bandpass ≤ nm" ToolTip="Blank takes any filter by that name; 7 keeps a 12 nm Ha out." />
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding Filters}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="90" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Margin="0,0,4,0" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Grid.Column="1" Margin="0,0,4,0" Text="{Binding Hours, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Grid.Column="2" Margin="0,0,4,0" Text="{Binding Bandpass, UpdateSourceTrigger=PropertyChanged}" />
+                                        <Button
+                                            Grid.Column="3"
+                                            Padding="6,0"
+                                            Command="{Binding DataContext.RemoveFilterCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Content="×" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <Expander Margin="0,8,0,0" Header="Rules (all optional)">
+                            <Grid Margin="4,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Focal length mm" />
+                                <TextBox Grid.Row="0" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MinFocal, UpdateSourceTrigger=PropertyChanged}" ToolTip="shortest allowed" />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="to" />
+                                <TextBox Grid.Row="0" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MaxFocal, UpdateSourceTrigger=PropertyChanged}" ToolTip="longest allowed" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Exposure s" />
+                                <TextBox Grid.Row="1" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MinExposure, UpdateSourceTrigger=PropertyChanged}" ToolTip="shortest sub" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="to" />
+                                <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MaxExposure, UpdateSourceTrigger=PropertyChanged}" ToolTip="longest sub" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Stars ≤ ″" ToolTip="Star size (HFR) a sub may have, in arcseconds; worse subs are not credited" />
+                                <TextBox Grid.Row="2" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MaxHfr, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="Guiding ≤ ″" />
+                                <TextBox Grid.Row="2" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MaxGuideRms, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Moon ≤ %" />
+                                <TextBox Grid.Row="3" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MaxMoon, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="Moon ≥ ° away" />
+                                <TextBox Grid.Row="3" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MinMoonSeparation, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Altitude ≥ °" />
+                                <TextBox Grid.Row="4" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MinAltitude, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="Frames per visit ≥" />
+                                <TextBox Grid.Row="4" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MinFrames, UpdateSourceTrigger=PropertyChanged}" />
+                                <CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,4,0,0" Content="Accept colour cameras" IsChecked="{Binding AcceptColour}" />
+                                <CheckBox Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Margin="8,4,0,0" Content="Calibrated frames only" IsChecked="{Binding RequireCalibrated}" />
+                            </Grid>
+                        </Expander>
+
+                        <TextBlock Margin="0,8,0,2" Text="Notes for the people joining" />
+                        <TextBox AcceptsReturn="True" MinHeight="40" TextWrapping="Wrap" Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                            <Button Padding="12,3" Command="{Binding StartCommand}" Content="{Binding SubmitLabel}" />
+                            <Button Margin="8,0,0,0" Padding="10,3" Command="{Binding CancelCommand}" Content="Clear" />
+                        </StackPanel>
+                        <TextBlock Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding Message}" Visibility="{Binding Message, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                    </StackPanel>
+                </Expander>
+
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Collaborations" />
                 <TextBlock Opacity="0.7" Text="None are open right now." Visibility="{Binding Projects.Count, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
                 <ItemsControl ItemsSource="{Binding Projects}">
@@ -129,6 +267,13 @@
                                             Padding="10,2"
                                             Command="{Binding ShowInFramingCommand}"
                                             Content="Show in Framing Assistant" />
+                                    </StackPanel>
+                                    <!--  Yours: change it, take it off the list, or have everybody dealt afresh.  -->
+                                    <StackPanel Margin="0,4,0,0" Orientation="Horizontal" Visibility="{Binding Mine, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                                        <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Opacity="0.7" FontSize="11" Text="Yours:" />
+                                        <Button Padding="8,1" Command="{Binding EditCommand}" Content="Edit" />
+                                        <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding RedealCommand}" Content="Deal again" ToolTip="Every telescope on it is dealt afresh at its next check-in" />
+                                        <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding CloseCommand}" Content="Close" ToolTip="Off everybody's list; what was collected stays on record" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.15
+
+- Start a collaboration from N.I.N.A. The Starfront panel has a *Start a collaboration* form: name it, look the target up by name (or take it from the Framing Assistant, or type RA and Dec), choose one field or a region to tile, say which filters and how many hours you want, set any rules, and it is live for every telescope on the server. Anybody signed in with Discord may start one; being in the Starfront Discord server is the whole gate.
+- Collaborations you started show *Edit*, *Deal again* and *Close* on their card.
+
 ## 1.0.0.14
 
 - Each field starts guiding after it is centred, as a target container does, when a guider is connected. N.I.N.A.'s *Center* only resumes guiding it stopped itself, so a sequence that starts the guider inside each of its own targets rather than in its Start area reached the Starfront container with the guider idle: one tester's 23 Blue subs were shot unguided at 5–7″ with every dither a no-op.

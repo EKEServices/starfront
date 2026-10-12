@@ -350,6 +350,67 @@ namespace Starfront.Collab.Services {
             }
         }
 
+        // -- starting and running a collaboration ----------------------------------
+
+        /// <summary>The signed-in person's Discord id, which is what a project's owner is recorded as.</summary>
+        public string UserId => settings.UserId ?? "";
+
+        public bool SignedIn => settings.UserToken.Length > 0;
+
+        private string UserTokenOrThrow() {
+            if (settings.UserToken.Length == 0) throw new InvalidOperationException("sign in with Discord first");
+            return settings.UserToken;
+        }
+
+        /// <summary>A person's call, as the three telescope calls are made: a 401 means the sign-in has lapsed.</summary>
+        private async Task<T> AsPersonAsync<T>(Func<string, Task<T>> call) {
+            try {
+                return await call(UserTokenOrThrow()).ConfigureAwait(false);
+            } catch (ServerException ex) when (ex.Status == 401) {
+                throw new InvalidOperationException("the sign-in has expired; sign in with Discord again");
+            }
+        }
+
+        public Task<LookupAnswer> LookupAsync(string name, CancellationToken token) =>
+            AsPersonAsync(userToken => client.LookupAsync(userToken, name, token));
+
+        /// <summary>Start a collaboration. The listing is re-read so the panel shows it at once.</summary>
+        public async Task<string> CreateProjectAsync(JObject body, CancellationToken token) {
+            var answer = await AsPersonAsync(userToken => client.CreateProjectAsync(userToken, body, token)).ConfigureAwait(false);
+            var id = answer["project"]?["id"]?.ToString() ?? "";
+            Logger.Info($"Starfront: started collaboration '{body["name"]}' ({id})");
+            await RefreshQuietlyAsync(token).ConfigureAwait(false);
+            return id;
+        }
+
+        public async Task UpdateProjectAsync(string projectId, JObject body, CancellationToken token) {
+            await AsPersonAsync(userToken => client.UpdateProjectAsync(userToken, projectId, body, token)).ConfigureAwait(false);
+            Logger.Info($"Starfront: updated collaboration {projectId}");
+            await RefreshQuietlyAsync(token).ConfigureAwait(false);
+        }
+
+        public async Task CloseProjectAsync(string projectId, CancellationToken token) {
+            await AsPersonAsync(userToken => client.UpdateProjectAsync(userToken, projectId, new JObject { ["status"] = "closed" }, token)).ConfigureAwait(false);
+            Logger.Info($"Starfront: closed collaboration {projectId}");
+            await RefreshQuietlyAsync(token).ConfigureAwait(false);
+        }
+
+        public async Task<int> RedealProjectAsync(string projectId, CancellationToken token) {
+            var answer = await AsPersonAsync(userToken => client.RedealProjectAsync(userToken, projectId, token)).ConfigureAwait(false);
+            var forgotten = answer["forgotten"]?.ToObject<int>() ?? 0;
+            Logger.Info($"Starfront: collaboration {projectId} will be dealt afresh ({forgotten} list(s) forgotten)");
+            await RefreshQuietlyAsync(token).ConfigureAwait(false);
+            return forgotten;
+        }
+
+        private async Task RefreshQuietlyAsync(CancellationToken token) {
+            try {
+                await PollAsync(token).ConfigureAwait(false);
+            } catch (Exception ex) {
+                StarfrontClient.Log("re-reading the collaborations", ex);
+            }
+        }
+
         // -- joining and leaving ---------------------------------------------------
 
         /// <summary>

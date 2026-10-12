@@ -213,6 +213,23 @@ namespace Starfront.Collab.Server {
         [JsonProperty("recorded")] public List<RecordedRow> Recorded { get; set; } = new();
     }
 
+    /// <summary>An object the server found by name, for the start-a-collaboration form.</summary>
+    public class LookupHit {
+        [JsonProperty("id")] public string Id { get; set; } = "";
+        [JsonProperty("name")] public string Name { get; set; } = "";
+        [JsonProperty("type")] public string Type { get; set; } = "";
+        [JsonProperty("ra")] public double Ra { get; set; }
+        [JsonProperty("dec")] public double Dec { get; set; }
+        [JsonProperty("sizeArcmin")] public double? SizeArcmin { get; set; }
+        [JsonProperty("constellation")] public string Constellation { get; set; } = "";
+        [JsonProperty("source")] public string Source { get; set; } = "";
+    }
+
+    public class LookupAnswer {
+        [JsonProperty("results")] public List<LookupHit> Results { get; set; } = new();
+        [JsonProperty("source")] public string Source { get; set; } = "";
+    }
+
     public class HealthAnswer {
         [JsonProperty("ok")] public bool Ok { get; set; }
         [JsonProperty("protocol")] public int Protocol { get; set; }

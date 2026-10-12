@@ -3,6 +3,7 @@ using System.ComponentModel.Composition;
 using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
+using RelayCommand = CommunityToolkit.Mvvm.Input.RelayCommand;
 using NINA.Astrometry;
 using NINA.Astrometry.Interfaces;
 using NINA.Core.Enum;
@@ -30,9 +31,13 @@ namespace Starfront.Collab.Ui {
         public ProjectRowVM(ProjectListing listing, DealTask task, StarfrontDockVM owner) {
             Listing = listing;
             Task = task;
+            Mine = Runtime.Ready && listing.OwnerId.Length > 0 && listing.OwnerId == Runtime.Session.UserId;
             JoinCommand = new AsyncRelayCommand(() => owner.JoinAsync(listing.Id), () => CanJoin);
             LeaveCommand = new AsyncRelayCommand(() => owner.LeaveAsync(task?.Id), () => task != null);
             ShowInFramingCommand = new AsyncRelayCommand(() => owner.ShowInFramingAsync(listing), () => listing.Region != null);
+            EditCommand = new RelayCommand(() => owner.Start.BeginEdit(listing), () => Mine);
+            CloseCommand = new AsyncRelayCommand(() => owner.CloseAsync(listing), () => Mine);
+            RedealCommand = new AsyncRelayCommand(() => owner.RedealAsync(listing), () => Mine);
         }
 
         public ProjectListing Listing { get; }
@@ -43,9 +48,14 @@ namespace Starfront.Collab.Ui {
         public bool Joined => Listing.Joined || Task != null;
         public bool CanJoin => !Joined && Listing.Compatibility?.Ok == true;
         public bool Compatible => Listing.Compatibility?.Ok == true;
+        /// <summary>Started by the person signed in here, so it can be edited, closed and dealt afresh from this panel.</summary>
+        public bool Mine { get; }
         public AsyncRelayCommand JoinCommand { get; }
         public AsyncRelayCommand LeaveCommand { get; }
         public AsyncRelayCommand ShowInFramingCommand { get; }
+        public RelayCommand EditCommand { get; }
+        public AsyncRelayCommand CloseCommand { get; }
+        public AsyncRelayCommand RedealCommand { get; }
 
         /// <summary>The sky with the region outlined and, once joined, this telescope's panels on it.</summary>
         public ImageSource Framing {
@@ -159,6 +169,7 @@ namespace Starfront.Collab.Ui {
             }
             RefreshCommand = new AsyncRelayCommand(RefreshAsync);
             SignInCommand = new AsyncRelayCommand(SignInAsync);
+            Start = new StartCollabVM(framingAssistant, RefreshAsync);
             Projects = new ObservableCollection<ProjectRowVM>();
             Tonight = new ObservableCollection<string>();
             PlanLines = new ObservableCollection<string>();
@@ -199,6 +210,10 @@ namespace Starfront.Collab.Ui {
 
         public AsyncRelayCommand RefreshCommand { get; }
         public AsyncRelayCommand SignInCommand { get; }
+        /// <summary>The form that starts a collaboration, and edits one of yours.</summary>
+        public StartCollabVM Start { get; }
+        /// <summary>Anybody signed in may start one: being in the Discord server is the whole gate.</summary>
+        public bool CanStart => Runtime.Ready && Runtime.Session.SignedIn;
         public ObservableCollection<ProjectRowVM> Projects { get; }
         public ObservableCollection<string> Tonight { get; }
         public ObservableCollection<string> Telescopes { get; }
@@ -229,7 +244,7 @@ namespace Starfront.Collab.Ui {
         }
 
         private void OnUpdated(object sender, EventArgs e) => Dispatch.OnUi(Rebuild);
-        private void OnSettingsChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) => Dispatch.OnUi(() => RaisePropertyChanged(nameof(Enrolled)));
+        private void OnSettingsChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e) => Dispatch.OnUi(() => { RaisePropertyChanged(nameof(Enrolled)); RaisePropertyChanged(nameof(CanStart)); });
 
         private void Rebuild() {
             if (!initialized) return;
@@ -259,9 +274,38 @@ namespace Starfront.Collab.Ui {
                 Logger.Error("Starfront: the panel could not be refreshed", ex);
             }
             RaisePropertyChanged(nameof(Enrolled));
+            RaisePropertyChanged(nameof(CanStart));
             RaisePropertyChanged(nameof(StatusText));
             RaisePropertyChanged(nameof(OnlineText));
             RebuildPlan();
+        }
+
+        /// <summary>Close one of your collaborations: off everybody's list, the ledger kept.</summary>
+        public async Task CloseAsync(ProjectListing listing) {
+            if (listing == null) return;
+            if (MessageBox.Show($"Close \"{listing.Name}\"? It comes off everybody's list; what was collected stays on record.",
+                                "Starfront", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+            try {
+                Message = "Closing...";
+                await Runtime.Session.CloseProjectAsync(listing.Id, CancellationToken.None);
+                Message = $"\"{listing.Name}\" is closed.";
+            } catch (Exception ex) {
+                Message = $"Could not close it: {ex.Message}";
+            }
+        }
+
+        /// <summary>Deal every telescope on one of your collaborations afresh at its next check-in.</summary>
+        public async Task RedealAsync(ProjectListing listing) {
+            if (listing == null) return;
+            try {
+                Message = "Asking the server to deal it again...";
+                var forgotten = await Runtime.Session.RedealProjectAsync(listing.Id, CancellationToken.None);
+                Message = forgotten == 0
+                    ? $"Nothing was held for tonight on \"{listing.Name}\"; every telescope is dealt afresh at its next check-in anyway."
+                    : $"{forgotten} telescope{(forgotten == 1 ? "" : "s")} on \"{listing.Name}\" will be dealt afresh at their next check-in.";
+            } catch (Exception ex) {
+                Message = $"Could not re-deal: {ex.Message}";
+            }
         }
 
         private async Task RefreshAsync() {
