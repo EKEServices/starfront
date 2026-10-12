@@ -98,8 +98,15 @@ namespace Starfront.Collab.Ui {
         public string RaText { get => raText; set { raText = value ?? ""; RaisePropertyChanged(); } }
         public string DecText { get => decText; set { decText = value ?? ""; RaisePropertyChanged(); } }
         public string FoundText { get => foundText; private set { foundText = value ?? ""; RaisePropertyChanged(); } }
-        public bool Single { get => single; set { single = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(Mosaic)); RaisePropertyChanged(nameof(SizeHint)); } }
+        public bool Single { get => single; set { single = value; RaisePropertyChanged(); RaisePropertyChanged(nameof(Mosaic)); RaisePropertyChanged(nameof(Shape)); RaisePropertyChanged(nameof(SizeHint)); } }
         public bool Mosaic { get => !single; set { Single = !value; } }
+
+        /// <summary>The shape as a drop-down code, "single" or "mosaic": N.I.N.A.'s theme shows no text on a radio button.</summary>
+        public string Shape { get => single ? "single" : "mosaic"; set { Single = value != "mosaic"; } }
+        public IReadOnlyList<DeliveryChoice> ShapeChoices { get; } = new List<DeliveryChoice> {
+            new("single", "One field: everybody points at the same spot"),
+            new("mosaic", "A region to cover: each telescope tiles it"),
+        };
         public string WidthText { get => widthText; set { widthText = value ?? ""; RaisePropertyChanged(); } }
         public string HeightText { get => heightText; set { heightText = value ?? ""; RaisePropertyChanged(); } }
         public string Notes { get => notes; set { notes = value ?? ""; RaisePropertyChanged(); } }

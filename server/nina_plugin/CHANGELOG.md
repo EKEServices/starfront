@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0.21
+
+- The list's controls are two plain drop-downs: *Show* (all, ones I can join, ones I am on) and *Sort* (most active, least done, highest now, newest, by name). The ones you are on come first whatever the sort.
+- Telescopes online is a table: telescope, owner, what it is doing, its target and the collaboration it is on, shooting ones first. Each collaboration's card lists the telescopes on it by name, the ones online marked with what they are doing.
+- Every switch in the form has its label beside it, and the field-or-mosaic choice is a drop-down: N.I.N.A.'s theme draws a tick box as a bare on/off switch and shows no text on it, which left "Take OSC broadband", "Calibrated frames only" and the list's two filters as unlabeled switches.
+
 ## 1.0.0.20
 
 - The collaboration list is built for hundreds. One line per collaboration (name, coordinator, kind and size, filters, how far along, hours collected, who is on it, how high it is in your sky now, and whether you can take part), a search box that matches a word anywhere on the card, switches for *I can take part* and *Joined*, and a sort: what needs you, most active, highest in your sky now, newest, by name. A line opens into the full card; the sky pictures are fetched only for open cards, and the list scrolls on its own, so a thousand rows cost what the visible dozen do.

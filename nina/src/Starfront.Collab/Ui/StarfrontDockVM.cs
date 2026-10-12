@@ -24,6 +24,12 @@ namespace Starfront.Collab.Ui {
     /// <summary>One channel's depth on a collaboration, for the bar on its card.</summary>
     public sealed record FilterProgressVM(string Name, double Percent, string Text, bool Met);
 
+    /// <summary>One telescope online, for the table at the foot of the panel.</summary>
+    public sealed record TelescopeRowVM(string Name, string Owner, string Doing, string Target, string Project);
+
+    /// <summary>One telescope on a collaboration, for the list on its card.</summary>
+    public sealed record ParticipantVM(string Name, bool Online, string Doing);
+
     /// <summary>One open collaboration, as the panel lists it.</summary>
     public sealed class ProjectRowVM : BaseINPC {
         public const int ThumbWidth = 320;
@@ -246,9 +252,24 @@ namespace Starfront.Collab.Ui {
             }
         }
 
-        public string PeopleText =>
-            $"{Listing.Participants} telescope{(Listing.Participants == 1 ? "" : "s")}, {Listing.ParticipantsOnline} online"
-            + (Listing.ParticipantNames?.Count > 0 ? $": {string.Join(", ", Listing.ParticipantNames)}" : "");
+        public string PeopleText => Listing.Participants == 0
+            ? "Nobody is on it yet"
+            : $"{Listing.Participants} telescope{(Listing.Participants == 1 ? "" : "s")} on it, {Listing.ParticipantsOnline} online now";
+
+        /// <summary>Every telescope on it, by name, the ones online marked and what they are doing.</summary>
+        public List<ParticipantVM> Participants {
+            get {
+                var presence = Runtime.Ready ? (Runtime.Session.Presence?.Telescopes ?? new List<TelescopePresence>()) : new List<TelescopePresence>();
+                var rows = new List<ParticipantVM>();
+                foreach (var name in (Listing.ParticipantNames ?? new List<string>()).Distinct().OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)) {
+                    var seen = presence.FirstOrDefault(t => t.Online && string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+                    var doing = seen == null ? "" : seen.State == "imaging" && seen.Project == Listing.Id ? "shooting it now"
+                        : seen.State == "imaging" ? "shooting elsewhere" : seen.State;
+                    rows.Add(new ParticipantVM(name, seen != null, doing));
+                }
+                return rows.OrderByDescending(r => r.Online).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            }
+        }
 
         public string CompatibilityText => Listing.Compatibility?.Summary ?? "";
 
@@ -272,19 +293,24 @@ namespace Starfront.Collab.Ui {
         private List<ProjectRowVM> all = new();
         private readonly HashSet<string> opened = new(StringComparer.Ordinal);
         private string search = "";
-        private bool onlyFit;
-        private bool onlyJoined;
-        private string sortBy = "need";
+        private string show = "all";
+        private string sortBy = "activity";
 
-        /// <summary>A way to sort the list.</summary>
+        /// <summary>A way to sort the list, or a slice of it to show.</summary>
         public sealed record SortChoice(string Code, string Label);
 
         public IReadOnlyList<SortChoice> SortChoices { get; } = new List<SortChoice> {
-            new("need", "Needs me: joined, then ones I can take part in, thinnest first"),
-            new("activity", "Most active: telescopes online, then on it"),
-            new("altitude", "Highest in my sky right now"),
-            new("newest", "Newest first"),
+            new("activity", "Most active"),
+            new("thinnest", "Least done"),
+            new("altitude", "Highest now"),
+            new("newest", "Newest"),
             new("name", "By name"),
+        };
+
+        public IReadOnlyList<SortChoice> ShowChoices { get; } = new List<SortChoice> {
+            new("all", "All collaborations"),
+            new("fit", "Ones I can join"),
+            new("joined", "Ones I am on"),
         };
 
         [ImportingConstructor]
@@ -320,7 +346,7 @@ namespace Starfront.Collab.Ui {
             Projects = new ObservableCollection<ProjectRowVM>();
             Tonight = new ObservableCollection<string>();
             PlanLines = new ObservableCollection<string>();
-            Telescopes = new ObservableCollection<string>();
+            Telescopes = new ObservableCollection<TelescopeRowVM>();
             Verdicts = new ObservableCollection<string>();
             Initialize();
         }
@@ -361,14 +387,14 @@ namespace Starfront.Collab.Ui {
 
         /// <summary>A word or two; every card with all of them somewhere stays in the list.</summary>
         public string Search { get => search; set { search = value ?? ""; RaisePropertyChanged(); Refilter(); } }
-        public bool OnlyFit { get => onlyFit; set { onlyFit = value; RaisePropertyChanged(); Refilter(); } }
-        public bool OnlyJoined { get => onlyJoined; set { onlyJoined = value; RaisePropertyChanged(); Refilter(); } }
-        public string SortBy { get => sortBy; set { sortBy = value ?? "need"; RaisePropertyChanged(); Refilter(); } }
+        /// <summary>Which slice of the list: all, the ones this telescope could join, the ones it is on.</summary>
+        public string Show { get => show; set { show = value ?? "all"; RaisePropertyChanged(); Refilter(); } }
+        public string SortBy { get => sortBy; set { sortBy = value ?? "activity"; RaisePropertyChanged(); Refilter(); } }
         public string ShownText => all.Count == 0 ? "" : (Projects.Count == all.Count ? $"{all.Count} open" : $"{Projects.Count} of {all.Count} open");
         public string EmptyText {
             get {
                 if (all.Count == 0) return "None are open right now.";
-                if (Projects.Count == 0) return "Nothing matches. Clear the search or the switches.";
+                if (Projects.Count == 0) return "Nothing matches. Clear the search, or show all collaborations.";
                 return "";
             }
         }
@@ -379,7 +405,9 @@ namespace Starfront.Collab.Ui {
         public bool CanStart => Runtime.Ready && Runtime.Session.SignedIn;
         public ObservableCollection<ProjectRowVM> Projects { get; }
         public ObservableCollection<string> Tonight { get; }
-        public ObservableCollection<string> Telescopes { get; }
+        /// <summary>Every telescope online right now, as a table: who, doing what, on which collaboration.</summary>
+        public ObservableCollection<TelescopeRowVM> Telescopes { get; }
+        public string TelescopesText => Telescopes.Count == 0 ? "" : $"Telescopes online ({Telescopes.Count})";
         public ObservableCollection<string> Verdicts { get; }
 
         public bool Enrolled => Runtime.Ready && Runtime.Settings.Enrolled;
@@ -424,11 +452,17 @@ namespace Starfront.Collab.Ui {
                 foreach (var deal in session.DealTonight()) Tonight.Add($"{deal.ProjectName}: {StarfrontSession.Describe(deal)}");
                 if (Tonight.Count == 0) Tonight.Add(tasks.Count == 0 ? "No collaboration joined yet." : "Nothing dealt for tonight yet; the deal is read when the sequence runs.");
                 Telescopes.Clear();
-                foreach (var scope in (session.Presence?.Telescopes ?? new List<TelescopePresence>()).Where(t => t.Online)) {
-                    var who = string.IsNullOrEmpty(scope.OwnerName) ? scope.Name : $"{scope.Name} · {scope.OwnerName}";
-                    var doing = string.IsNullOrEmpty(scope.Target) ? scope.State : $"{scope.State} {scope.Target}";
-                    Telescopes.Add($"{who} — {doing}".Trim(' ', '—'));
+                var names = session.Projects.ToDictionary(p => p.Id, p => p.Name);
+                var online = (session.Presence?.Telescopes ?? new List<TelescopePresence>()).Where(t => t.Online)
+                    .OrderByDescending(t => t.State == "imaging").ThenBy(t => t.OwnerName).ThenBy(t => t.Name);
+                foreach (var scope in online) {
+                    names.TryGetValue(scope.Project ?? "", out var onProject);
+                    Telescopes.Add(new TelescopeRowVM(
+                        scope.Name, scope.OwnerName ?? "",
+                        scope.State switch { "imaging" => "shooting", "slewing" => "slewing", "parked" => "parked", _ => "idle" },
+                        scope.Target ?? "", onProject ?? ""));
                 }
+                RaisePropertyChanged(nameof(TelescopesText));
                 Verdicts.Clear();
                 foreach (var verdict in session.LastVerdicts.Take(6)) Verdicts.Add(verdict);
             } catch (Exception ex) {
@@ -445,16 +479,17 @@ namespace Starfront.Collab.Ui {
         private void Refilter() {
             if (!initialized) return;
             IEnumerable<ProjectRowVM> rows = all.Where(r => r.Matches(search));
-            if (onlyFit) rows = rows.Where(r => r.FitOk);
-            if (onlyJoined) rows = rows.Where(r => r.Joined);
+            if (show == "fit") rows = rows.Where(r => r.FitOk || r.Joined);
+            if (show == "joined") rows = rows.Where(r => r.Joined);
+            // The ones this telescope is on come first whatever the sort: they
+            // are the ones its night is made of.
             rows = sortBy switch {
-                "activity" => rows.OrderByDescending(r => r.Listing.ParticipantsOnline).ThenByDescending(r => r.Listing.Participants).ThenBy(r => r.Name),
-                "altitude" => rows.OrderByDescending(r => r.AltitudeNow ?? -90.0).ThenBy(r => r.Name),
-                "newest" => rows.OrderByDescending(r => r.Listing.Created).ThenBy(r => r.Name),
-                "name" => rows.OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase),
-                // What needs me: the ones I am on, then the ones I could be on,
-                // and within each the field furthest from its goal first.
-                _ => rows.OrderByDescending(r => r.Joined).ThenByDescending(r => r.FitOk).ThenBy(r => r.Average).ThenBy(r => r.Name),
+                "thinnest" => rows.OrderByDescending(r => r.Joined).ThenBy(r => r.Average).ThenBy(r => r.Name),
+                "altitude" => rows.OrderByDescending(r => r.Joined).ThenByDescending(r => r.AltitudeNow ?? -90.0).ThenBy(r => r.Name),
+                "newest" => rows.OrderByDescending(r => r.Joined).ThenByDescending(r => r.Listing.Created).ThenBy(r => r.Name),
+                "name" => rows.OrderByDescending(r => r.Joined).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase),
+                _ => rows.OrderByDescending(r => r.Joined).ThenByDescending(r => r.Listing.ParticipantsOnline)
+                         .ThenByDescending(r => r.Listing.Participants).ThenBy(r => r.Name),
             };
             Projects.Clear();
             foreach (var row in rows) {

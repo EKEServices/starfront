@@ -83,10 +83,15 @@
                             <TextBox Grid.Column="3" Text="{Binding DecText, UpdateSourceTrigger=PropertyChanged}" ToolTip="+41:16:09, or degrees" />
                         </Grid>
 
-                        <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
-                            <RadioButton Content="One field" IsChecked="{Binding Single, Mode=TwoWay}" />
-                            <RadioButton Margin="14,0,0,0" Content="A region to cover (mosaic)" IsChecked="{Binding Mosaic, Mode=TwoWay}" />
-                        </StackPanel>
+                        <DockPanel Margin="0,8,0,0">
+                            <TextBlock VerticalAlignment="Center" Text="Shape" />
+                            <ComboBox
+                                Margin="8,0,0,0"
+                                DisplayMemberPath="Label"
+                                ItemsSource="{Binding ShapeChoices}"
+                                SelectedValue="{Binding Shape, Mode=TwoWay}"
+                                SelectedValuePath="Code" />
+                        </DockPanel>
                         <TextBlock Margin="0,2,0,0" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Text="{Binding SizeHint}" />
                         <Grid Margin="0,4,0,0" Visibility="{Binding Mosaic, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
                             <Grid.ColumnDefinitions>
@@ -106,9 +111,12 @@
                             <TextBlock VerticalAlignment="Center" Text="Filters wanted" />
                         </DockPanel>
                         <!--  Colour cameras: their data is its own band, kept apart from the mono channels, and taken only when asked for.  -->
+                        <!--  N.I.N.A.'s theme draws a CheckBox as a bare switch and drops its Content, so every switch gets its label beside it.  -->
                         <StackPanel Margin="0,0,0,4" Orientation="Horizontal">
-                            <CheckBox Content="Take OSC broadband (OSC-RGB)" IsChecked="{Binding AcceptOscRgb}" ToolTip="A colour camera behind a clear or UV/IR cut filter: red, green and blue on one matrix, logged as OSC-RGB" />
-                            <CheckBox Margin="14,0,0,0" Content="Take OSC narrowband (OSC-Ha+OIII)" IsChecked="{Binding AcceptOscNarrowband}" ToolTip="A colour camera behind a dual-band filter: Ha and OIII on one matrix, logged as OSC-Ha+OIII" />
+                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding AcceptOscRgb}" ToolTip="A colour camera behind a clear or UV/IR cut filter: red, green and blue on one matrix, logged as OSC-RGB" />
+                            <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="Take OSC broadband (OSC-RGB)" />
+                            <CheckBox Margin="16,0,0,0" VerticalAlignment="Center" IsChecked="{Binding AcceptOscNarrowband}" ToolTip="A colour camera behind a dual-band filter: Ha and OIII on one matrix, logged as OSC-Ha+OIII" />
+                            <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="Take OSC narrowband (OSC-Ha+OIII)" />
                         </StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -178,7 +186,10 @@
                                 <TextBox Grid.Row="4" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MinFrames, UpdateSourceTrigger=PropertyChanged}" />
                                 <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Sky ≤ Bortle" ToolTip="1 is the darkest sky, 9 an inner city; a rig that has not rated its sky is told, not refused" />
                                 <TextBox Grid.Row="5" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MaxBortle, UpdateSourceTrigger=PropertyChanged}" />
-                                <CheckBox Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Margin="8,4,0,0" Content="Calibrated frames only" IsChecked="{Binding RequireCalibrated}" />
+                                <StackPanel Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Margin="8,4,0,0" Orientation="Horizontal">
+                                    <CheckBox VerticalAlignment="Center" IsChecked="{Binding RequireCalibrated}" />
+                                    <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="Calibrated frames only" />
+                                </StackPanel>
                             </Grid>
                         </Expander>
 
@@ -201,22 +212,28 @@
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Collaborations" />
                 <DockPanel Margin="0,0,0,4">
                     <Button DockPanel.Dock="Right" Margin="4,0,0,0" Padding="6,1" Command="{Binding ClearSearchCommand}" Content="×" ToolTip="Clear the search" Visibility="{Binding Search, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                    <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}" ToolTip="Search: a word from the name, the coordinator, the notes, a filter or a participant" />
+                </DockPanel>
+                <DockPanel Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Right" Margin="10,0,0,0" VerticalAlignment="Center" Opacity="0.7" Text="{Binding ShownText}" />
+                    <TextBlock VerticalAlignment="Center" Opacity="0.7" Text="Show" />
                     <ComboBox
-                        DockPanel.Dock="Right"
-                        Width="190"
+                        Width="150"
                         Margin="6,0,0,0"
+                        DisplayMemberPath="Label"
+                        ItemsSource="{Binding ShowChoices}"
+                        SelectedValue="{Binding Show, Mode=TwoWay}"
+                        SelectedValuePath="Code" />
+                    <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Opacity="0.7" Text="Sort" />
+                    <ComboBox
+                        Width="120"
+                        Margin="6,0,0,0"
+                        HorizontalAlignment="Left"
                         DisplayMemberPath="Label"
                         ItemsSource="{Binding SortChoices}"
                         SelectedValue="{Binding SortBy, Mode=TwoWay}"
-                        SelectedValuePath="Code"
-                        ToolTip="What the list is sorted by" />
-                    <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}" ToolTip="A word from the name, the coordinator, the notes, a filter or a participant" />
+                        SelectedValuePath="Code" />
                 </DockPanel>
-                <StackPanel Margin="0,0,0,4" Orientation="Horizontal">
-                    <CheckBox Content="I can take part" IsChecked="{Binding OnlyFit}" ToolTip="Only collaborations this telescope qualifies for" />
-                    <CheckBox Margin="14,0,0,0" Content="Joined" IsChecked="{Binding OnlyJoined}" ToolTip="Only the ones this telescope is on" />
-                    <TextBlock Margin="14,0,0,0" VerticalAlignment="Center" Opacity="0.7" Text="{Binding ShownText}" />
-                </StackPanel>
                 <TextBlock Opacity="0.7" Text="{Binding EmptyText}" Visibility="{Binding EmptyText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <ListBox
                     MaxHeight="720"
@@ -334,7 +351,20 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                     <TextBlock Margin="0,2,0,0" FontWeight="SemiBold" Opacity="0.9" Text="{Binding ProgressText}" />
-                                    <TextBlock Opacity="0.7" Text="{Binding PeopleText}" TextWrapping="Wrap" />
+                                    <!--  Who is on it: a name per line, the ones online marked, with what they are doing.  -->
+                                    <TextBlock Margin="0,4,0,0" Opacity="0.7" Text="{Binding PeopleText}" />
+                                    <ItemsControl Margin="8,0,0,0" ItemsSource="{Binding Participants}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Width="12" Foreground="#7EE7A5" Text="●" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                                    <TextBlock Width="12" Opacity="0.35" Text="○" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
+                                                    <TextBlock Text="{Binding Name}" />
+                                                    <TextBlock Margin="8,0,0,0" Opacity="0.6" FontSize="11" Text="{Binding Doing}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                     <TextBlock
                                         Margin="0,4,0,0"
                                         FontWeight="SemiBold"
@@ -381,14 +411,46 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Telescopes online" Visibility="{Binding Telescopes, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
-                <ItemsControl ItemsSource="{Binding Telescopes}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Opacity="0.85" Text="{Binding}" TextWrapping="Wrap" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <!--  Everybody online, as a table: the shooting ones first.  -->
+                <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="{Binding TelescopesText}" Visibility="{Binding TelescopesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                <Grid Grid.IsSharedSizeScope="True" Visibility="{Binding TelescopesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="scopeName" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="scopeOwner" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="scopeDoing" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Margin="0,0,12,0" Opacity="0.6" FontSize="11" Text="Telescope" />
+                        <TextBlock Grid.Column="1" Margin="0,0,12,0" Opacity="0.6" FontSize="11" Text="Owner" />
+                        <TextBlock Grid.Column="2" Margin="0,0,12,0" Opacity="0.6" FontSize="11" Text="Doing" />
+                        <TextBlock Grid.Column="3" Opacity="0.6" FontSize="11" Text="Target · collaboration" />
+                    </Grid>
+                    <ItemsControl Grid.Row="1" ItemsSource="{Binding Telescopes}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="scopeName" />
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="scopeOwner" />
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="scopeDoing" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Margin="0,0,12,0" FontWeight="SemiBold" Text="{Binding Name}" />
+                                    <TextBlock Grid.Column="1" Margin="0,0,12,0" Opacity="0.85" Text="{Binding Owner}" />
+                                    <TextBlock Grid.Column="2" Margin="0,0,12,0" Opacity="0.85" Text="{Binding Doing}" />
+                                    <TextBlock Grid.Column="3" Opacity="0.85" TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding Target, Mode=OneWay}" /><Run Text=" " /><Run Foreground="#7EE7A5" Text="{Binding Project, Mode=OneWay}" />
+                                    </TextBlock>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
 
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Frames reported" Visibility="{Binding Verdicts, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <ItemsControl ItemsSource="{Binding Verdicts}">
