@@ -197,7 +197,7 @@ namespace Starfront.Collab.Sequencer {
         public string TonightText {
             get {
                 if (!Runtime.Ready) return "Starfront is not set up";
-                if (!Runtime.Settings.Enrolled) return "Sign in with Discord under Options > Plugins > Starfront Collaboration";
+                if (!Runtime.Settings.Enrolled) return "Sign in with Discord under Options > Plugins > Starfront";
                 if (Status == SequenceEntityStatus.RUNNING && Summary.Length > 0) return Summary;
                 var deals = Runtime.Session.DealTonight(ProjectId);
                 if (deals.Count == 0) {
@@ -214,7 +214,7 @@ namespace Starfront.Collab.Sequencer {
         public override async Task Execute(IProgress<ApplicationStatus> progress, CancellationToken token) {
             ClearRuntimeChildren();
             if (!Runtime.Ready || !Runtime.Settings.Enrolled) {
-                throw new SequenceEntityFailedException("Starfront: sign in with Discord under Options > Plugins > Starfront Collaboration first");
+                throw new SequenceEntityFailedException("Starfront: sign in with Discord under Options > Plugins > Starfront first");
             }
             var session = Runtime.Session;
             var settings = Runtime.Settings;
@@ -694,8 +694,8 @@ namespace Starfront.Collab.Sequencer {
         public override bool Validate() {
             var list = new List<string>();
             if (!Runtime.Ready) list.Add("Starfront is not set up yet");
-            else if (!Runtime.Settings.Enrolled) list.Add("Sign in with Discord under Options > Plugins > Starfront Collaboration");
-            else if (Runtime.Settings.Exposures.Count == 0) list.Add("Set the exposure for each filter under Options > Plugins > Starfront Collaboration");
+            else if (!Runtime.Settings.Enrolled) list.Add("Sign in with Discord under Options > Plugins > Starfront");
+            else if (Runtime.Settings.Exposures.Count == 0) list.Add("Set the exposure for each filter under Options > Plugins > Starfront");
             if (!cameraMediator.GetInfo().Connected) list.Add(Loc.Instance["LblCameraNotConnected"]);
             if (!telescopeMediator.GetInfo().Connected) list.Add(Loc.Instance["LblTelescopeNotConnected"]);
             var ok = base.Validate();

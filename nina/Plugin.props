@@ -9,14 +9,14 @@
     <Version Condition="'$(Version)' == ''">1.0.0.0</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
-    <Title>Starfront Collaboration</Title>
+    <Title>Starfront</Title>
     <AssemblyTitle>$(Title)</AssemblyTitle>
     <Product>$(Title)</Product>
     <Copyright>Copyright © 2026 Starfront Observatories</Copyright>
     <Company>Starfront Observatories</Company>
     <Authors>Starfront Observatories</Authors>
     <Description>Take part in Starfront collaborations from N.I.N.A.: sign in with Discord, join a project - a single field or a mosaic - and a sequence container shoots what was dealt to your telescope tonight at your own exposures.</Description>
-    <PluginLongDescription>Starfront Collaboration lets several telescopes work on one target together: a single field everybody adds depth to, or a mosaic shared out between them.
+    <PluginLongDescription>Starfront lets several telescopes work on one target together: a single field everybody adds depth to, or a mosaic shared out between them.
 
 A coordinator starts a collaboration on the Starfront server: the field or region of sky, the filters wanted, and how deep to go at every point. Every night the server deals each telescope that has joined its part - the field itself, or a list of panels - and one filter: Ha or SII on a bright Moon, broadband or OIII on a dark one, sized to the hours it gives. A night's deal, once made, holds for the whole night.
 

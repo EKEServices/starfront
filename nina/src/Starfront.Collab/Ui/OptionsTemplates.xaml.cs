@@ -12,7 +12,7 @@ namespace Starfront.Collab.Ui {
     public partial class OptionsTemplates : ResourceDictionary {
         public OptionsTemplates() {
             InitializeComponent();
-            var title = typeof(OptionsTemplates).Assembly.GetCustomAttribute<AssemblyTitleAttribute>()?.Title ?? "Starfront Collaboration";
+            var title = typeof(OptionsTemplates).Assembly.GetCustomAttribute<AssemblyTitleAttribute>()?.Title ?? "Starfront";
             this[title + "_Options"] = this["Starfront_OptionsTemplate"];
             Remove("Starfront_OptionsTemplate");
         }

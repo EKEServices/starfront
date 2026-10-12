@@ -27,7 +27,7 @@
 </head>
 <body>
 <h1>Starfront Collaboration for N.I.N.A.</h1>
-<p class="sub">How to take part in a Starfront collaboration from N.I.N.A. with the Starfront Collaboration plugin. For plugin 1.0.0.13, October 2026.</p>
+<p class="sub">How to take part in a Starfront collaboration from N.I.N.A. with the Starfront plugin. For plugin 1.0.0.16, October 2026.</p>
 
 <ol class="toc">
   <li>Before you start</li>
@@ -57,16 +57,16 @@
   <li>In N.I.N.A. go to <b>Options &gt; General</b> and find <b>Plugin Repositories</b>.</li>
   <li>Press <b>+</b> and enter exactly:
     <pre>https://collab.starfront.space/nina</pre></li>
-  <li>Go to the <b>Plugins</b> tab (left sidebar) and open <b>Available</b>. <b>Starfront Collaboration</b> is listed; press <b>Install</b>.</li>
+  <li>Go to the <b>Plugins</b> tab (left sidebar) and open <b>Available</b>. <b>Starfront</b> is listed; press <b>Install</b>.</li>
   <li><b>Restart N.I.N.A.</b> Plugins only load at start-up.</li>
   <li>Afterwards the plugin appears under Plugins &gt; Installed, and updates show there too; install them like any other plugin update.</li>
 </ol>
-<p>If Starfront Collaboration is not listed, check the address for typing errors, then press the refresh button on the Plugins tab. The server address must be reachable from the PC; a browser visit to <code>https://collab.starfront.space/api/v1/health</code> should show a short line of text.</p>
+<p>If Starfront is not listed, check the address for typing errors, then press the refresh button on the Plugins tab. The server address must be reachable from the PC; a browser visit to <code>https://collab.starfront.space/api/v1/health</code> should show a short line of text.</p>
 
 <h2>3. Sign in with Discord</h2>
 <p>Signing in once ties this PC's telescope to your Discord account; after that the plugin checks in with the server by itself.</p>
 <ol>
-  <li>Go to <b>Options &gt; Plugins</b> and select <b>Starfront Collaboration</b> in the list. Its page opens on the right.</li>
+  <li>Go to <b>Options &gt; Plugins</b> and select <b>Starfront</b> in the list. Its page opens on the right.</li>
   <li>Under <b>Account</b>, press <b>Sign in with Discord</b>. Your browser opens on Discord's authorisation page.</li>
   <li>Sign in to Discord if asked, then <b>Authorize</b>. Discord only tells Starfront who you are and which server roles you hold; it cannot read your messages.</li>
   <li>The browser shows <b>Signed in as &lt;your name&gt;</b>. Go back to N.I.N.A.: the page now says you are signed in and that this telescope is enrolled under your account. Enrolment happens by itself and names the telescope after your N.I.N.A. profile.</li>
@@ -166,7 +166,7 @@ End
 <p>The log is under <code>%LOCALAPPDATA%\NINA\Logs</code> (paste that into the Windows Explorer address bar); the newest file is tonight's. Search it for <code>Starfront:</code>. The Starfront panel's status line and its <b>Frames reported</b> list show the same things in short.</p>
 <table>
   <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
-  <tr><td><i>Not signed in</i></td><td>No Discord sign-in on this PC</td><td>Options &gt; Plugins &gt; Starfront Collaboration &gt; Sign in with Discord</td></tr>
+  <tr><td><i>Not signed in</i></td><td>No Discord sign-in on this PC</td><td>Options &gt; Plugins &gt; Starfront &gt; Sign in with Discord</td></tr>
   <tr><td><i>This telescope's token is no longer accepted</i></td><td>The telescope was removed on the server, or the settings file was copied from another PC</td><td>Sign out, then sign in again</td></tr>
   <tr><td><i>the collaboration server could not be reached</i></td><td>No internet, or the server is down</td><td>The deal already in hand still runs; frames are reported when it answers</td></tr>
   <tr><td><i>set an exposure for Ha in the exposure table first</i></td><td>A filter the project wants has no seconds against it</td><td>Fill it in under Options &gt; Plugins</td></tr>

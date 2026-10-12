@@ -1,4 +1,4 @@
-# Starfront Collaboration for N.I.N.A.
+# Starfront for N.I.N.A.
 
 The N.I.N.A. side of a Starfront collaboration: several telescopes on one
 target, a single field or a mosaic. A plugin for N.I.N.A. 3.2 or later on .NET 8, built the way the
@@ -18,7 +18,7 @@ builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
    Collaboration**. Restart N.I.N.A. Updates arrive the same way. (This is the
    closed-test channel: only people given the address see the plugin.)
 
-2. **Sign in.** Options > Plugins > Starfront Collaboration > *Sign in with
+2. **Sign in.** Options > Plugins > Starfront > *Sign in with
    Discord*. A browser window opens; you need to be a member of the Starfront
    Discord server. Coming back, the page says who you are and that this
    telescope is enrolled under your account.
@@ -69,7 +69,7 @@ dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release
 ```
 
 Close N.I.N.A., then put the build where N.I.N.A. loads plugins from
-(`%LOCALAPPDATA%\NINA\Plugins\3.0.0\Starfront Collaboration`):
+(`%LOCALAPPDATA%\NINA\Plugins\3.0.0\Starfront`):
 
 ```powershell
 dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release -t:DeployPlugin

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.16
+
+- The plugin is called *Starfront* now, in the Plugins list and under Options, instead of *Starfront Collaboration*. Everything else is as it was; your sign-in and settings carry over.
+
 ## 1.0.0.15
 
 - Start a collaboration from N.I.N.A. The Starfront panel has a *Start a collaboration* form: name it, look the target up by name (or take it from the Framing Assistant, or type RA and Dec), choose one field or a region to tile, say which filters and how many hours you want, set any rules, and it is live for every telescope on the server. Anybody signed in with Discord may start one; being in the Starfront Discord server is the whole gate.

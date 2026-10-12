@@ -62,7 +62,7 @@ namespace Starfront.Collab {
 
         public override Task Initialize() {
             Runtime.Start();
-            Logger.Info($"Starfront Collaboration {Version} initialised; server {Runtime.Settings.ServerUrl}");
+            Logger.Info($"Starfront plugin {Version} initialised; server {Runtime.Settings.ServerUrl}");
             return Task.CompletedTask;
         }
 

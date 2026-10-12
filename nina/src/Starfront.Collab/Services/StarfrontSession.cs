@@ -432,7 +432,7 @@ namespace Starfront.Collab.Services {
                     var seconds = settings.ExposureFor(filterName);
                     if (seconds == null && settings.Colour) seconds = settings.ExposureFor("RGB");
                     if (seconds == null) {
-                        throw new InvalidOperationException($"set an exposure for {label} in the exposure table first (Options > Plugins > Starfront Collaboration)");
+                        throw new InvalidOperationException($"set an exposure for {label} in the exposure table first (Options > Plugins > Starfront)");
                     }
                     if (wants.MinExposure is double low && seconds < low) {
                         throw new InvalidOperationException($"this telescope shoots {label} at {seconds:0.#}s and the project wants {low:0.#}s or longer; change it in the exposure table");

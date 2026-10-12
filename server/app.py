@@ -1852,7 +1852,7 @@ _DOWNLOAD_PAGE = """<!doctype html>
   <h2>Staying on N.I.N.A.?</h2>
   <p>There is a plugin instead. In N.I.N.A., Options &rarr; General &rarr; Plugin
   Repositories, press + and enter <code>{host}/nina</code>, then install
-  &ldquo;Starfront Collaboration&rdquo; from the Plugins tab.</p>
+  &ldquo;Starfront&rdquo; from the Plugins tab.</p>
   <p><a href="/sky">Tonight at Starfront</a>: where the observatory's telescopes are pointed right now.</p>
 </main>
 </body>

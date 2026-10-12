@@ -13,7 +13,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel MaxWidth="760" Margin="10" HorizontalAlignment="Left">
 
-                <TextBlock FontSize="16" FontWeight="SemiBold" Text="Starfront Collaboration" />
+                <TextBlock FontSize="16" FontWeight="SemiBold" Text="Starfront" />
                 <TextBlock
                     Margin="0,4,0,0"
                     Opacity="0.8"
