@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.17
+
+- *From Framing Assistant* takes the rectangle as drawn: its centre after dragging, its panels and overlap, its rotation. It took the view's zoom for the width, so a test mosaic came out thirty-nine degrees across.
+- The *Check in* buttons are gone. Signing in checks in at once, and the plugin keeps checking in on its own at the interval in the options.
+
 ## 1.0.0.16
 
 - The plugin is called *Starfront* now, in the Plugins list and under Options, instead of *Starfront Collaboration*. Everything else is as it was; your sign-in and settings carry over.

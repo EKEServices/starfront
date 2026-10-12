@@ -50,14 +50,9 @@
                     Text="{Binding Session.SignInStatus}"
                     TextWrapping="Wrap"
                     Visibility="{Binding Session.SignInStatus, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                <!--  Signing in checks in, and the plugin keeps checking in on its own; there is no button for it.  -->
                 <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
                     <TextBlock VerticalAlignment="Center" Opacity="0.8" Text="{Binding Session.StatusText}" />
-                    <Button
-                        Margin="12,0,0,0"
-                        Padding="10,4"
-                        Command="{Binding RefreshCommand}"
-                        Content="Check in now"
-                        Visibility="{Binding Settings.Enrolled, Converter={StaticResource Starfront_ShowWhenTrue}}" />
                 </StackPanel>
 
                 <!--  Exposures  -->

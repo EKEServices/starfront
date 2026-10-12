@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.Input;
 using RelayCommand = CommunityToolkit.Mvvm.Input.RelayCommand;
 using Newtonsoft.Json.Linq;
+using NINA.Astrometry;
 using NINA.Core.Utility;
 using NINA.Core.Utility.Notification;
 using NINA.WPF.Base.Interfaces.ViewModel;
@@ -221,20 +222,62 @@ namespace Starfront.Collab.Ui {
             }
         }
 
+        /// <summary>
+        /// The rectangle drawn in the Framing Assistant, as drawn: its centre
+        /// after any dragging, its panels and overlap, its rotation. The sky
+        /// size is worked out the way N.I.N.A. does for its own rectangle -
+        /// the camera's field from the pixel size and focal length the
+        /// Framing Assistant is using, times the panels, less the overlap -
+        /// so what the collaboration asks for is what the person saw. The
+        /// first version took the view's zoom for the width, and a test
+        /// mosaic came out thirty-nine degrees across.
+        /// </summary>
         private void FromFraming() {
             try {
+                var rect = framing?.Rectangle;
                 var dso = framing?.DSO;
-                if (dso?.Coordinates == null) { Message = "The Framing Assistant has no target yet."; return; }
-                RaText = Hms(dso.Coordinates.RADegrees);
-                DecText = Dms(dso.Coordinates.Dec);
-                rotation = dso.RotationPositionAngle;
-                if (Name.Trim().Length == 0 && !string.IsNullOrWhiteSpace(dso.Name)) Name = dso.Name;
-                FoundText = $"From the Framing Assistant: {dso.Name} at {RaText} {DecText}, angle {rotation:0}°";
-                var fov = framing.FieldOfView;
-                if (Mosaic && fov > 0.2) {
-                    WidthText = Math.Round(fov, 1).ToString("0.0", CultureInfo.InvariantCulture);
-                    HeightText = Math.Round(fov * 0.75, 1).ToString("0.0", CultureInfo.InvariantCulture);
+                var centre = rect?.Coordinates ?? dso?.Coordinates;
+                if (centre == null) { Message = "The Framing Assistant has no target yet: load an image there first."; return; }
+
+                var scale = AstroUtil.ArcsecPerPixel(framing.CameraPixelSize, framing.FocalLength);
+                double fieldW, fieldH;
+                if (framing.CameraWidth > 0 && framing.CameraHeight > 0 && scale > 0 && !double.IsNaN(scale) && !double.IsInfinity(scale)) {
+                    fieldW = framing.CameraWidth * scale / 3600.0;
+                    fieldH = framing.CameraHeight * scale / 3600.0;
+                } else {
+                    var field = Runtime.Ready ? RigProfile.Field(Runtime.Host, Runtime.Settings) : null;
+                    (fieldW, fieldH) = field ?? (1.0, 0.75);
                 }
+                var across = Math.Max(1, framing.HorizontalPanels);
+                var down = Math.Max(1, framing.VerticalPanels);
+                double overlapW, overlapH;
+                if (framing.SelectedOverlapUnit == "%") {
+                    var fraction = framing.OverlapPercentage;
+                    if (fraction > 1.0) fraction /= 100.0;
+                    overlapW = fieldW * fraction;
+                    overlapH = fieldH * fraction;
+                } else {
+                    overlapW = overlapH = Math.Max(0, framing.OverlapPixels) * (scale > 0 ? scale : 0) / 3600.0;
+                }
+                var width = across * fieldW - (across - 1) * overlapW;
+                var height = down * fieldH - (down - 1) * overlapH;
+
+                // N.I.N.A. draws the rectangle turned by TotalRotation and calls
+                // the sky position angle 360 minus that; a region's rotation is
+                // the position angle.
+                var total = rect != null ? rect.TotalRotation : (dso?.RotationPositionAngle ?? 0.0);
+                rotation = ((360.0 - total) % 360.0 + 360.0) % 360.0;
+
+                RaText = Hms(centre.RADegrees);
+                DecText = Dms(centre.Dec);
+                WidthText = width.ToString("0.00", CultureInfo.InvariantCulture);
+                HeightText = height.ToString("0.00", CultureInfo.InvariantCulture);
+                Single = across == 1 && down == 1;
+                var label = string.IsNullOrWhiteSpace(dso?.Name) ? "the framing" : dso.Name;
+                if (Name.Trim().Length == 0 && !string.IsNullOrWhiteSpace(dso?.Name)) Name = dso.Name;
+                FoundText = Single
+                    ? $"From the Framing Assistant: {label} at {RaText} {DecText}, one panel of {width:0.00}° × {height:0.00}°, angle {rotation:0}°"
+                    : $"From the Framing Assistant: {label} at {RaText} {DecText}, {across} × {down} panels, {width:0.00}° × {height:0.00}° at {rotation:0}°";
                 Message = "";
             } catch (Exception ex) {
                 Message = $"Could not read the Framing Assistant: {ex.Message}";

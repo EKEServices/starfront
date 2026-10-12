@@ -13,14 +13,9 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="8">
 
+                <!--  Signing in checks in, and the plugin keeps checking in on its own; there is no button for it.  -->
                 <StackPanel Orientation="Horizontal">
                     <TextBlock VerticalAlignment="Center" Opacity="0.85" Text="{Binding StatusText}" TextWrapping="Wrap" />
-                    <Button
-                        Margin="10,0,0,0"
-                        Padding="8,2"
-                        Command="{Binding RefreshCommand}"
-                        Content="Check in"
-                        Visibility="{Binding Enrolled, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
                     <Button
                         Margin="10,0,0,0"
                         Padding="8,2"
