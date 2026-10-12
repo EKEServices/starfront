@@ -557,6 +557,16 @@ class Guider(Device):
     def settling(self) -> bool:
         return False
 
+    @property
+    def settle_error(self) -> str | None:
+        """Why the last settle after `start_guiding` failed, or None.
+
+        None also while a settle is still running and before any has been
+        asked for: the sequencer reads it only once `settling` has gone
+        False, and a guider that cannot say simply never reports one.
+        """
+        return None
+
     def start_guiding(self, settle_pixels: float = 1.5, settle_time: float = 8.0,
                       settle_timeout: float = 60.0, recalibrate: bool = False) -> None:
         raise NotImplementedError

@@ -195,6 +195,12 @@ class Sequencer:
         self._guiding_wanted = False
         self._guide_lost_since: float | None = None
         self._guide_lost_in_slot = False
+        # Restarts for rough guiding since it was last seen guiding well. A
+        # restart "succeeds" the moment PHD2 is guiding again, long before
+        # there are enough frames to know whether it is any better, so the
+        # decision to recalibrate has to be remembered across slots rather
+        # than made inside one attempt loop.
+        self._rough_restarts = 0
         self._recentre_request: str | None = None
         self._entry_id: str | None = None
         self._panel: int = 0
@@ -482,6 +488,7 @@ class Sequencer:
             self._guiding_wanted = False
             self._guide_lost_since = None
             self._guide_lost_in_slot = False
+            self._rough_restarts = 0
             self._recentre_request = None
             self._cooling_wanted = set()
             self._homed = False
@@ -2625,14 +2632,28 @@ class Sequencer:
 
         # Wait for it to settle, so the first frame is not taken mid-slew.
         if self._wait_for_guiding(float(settings.get("settleTimeoutSeconds") or 180.0)):
-            # Only now is guiding something worth watching and recovering: a
-            # guider that never started is not one that has lost its star.
             self._guiding_wanted = True
             self._guide_lost_since = None
             self._say("Guiding", "success")
             return
-        self._say(f"The guider is {guider.state} rather than guiding; carrying "
-                  "on unguided", "warn")
+
+        # It did not settle: the star went, or it never held still.  This used
+        # to be the end of guiding for the target — "carrying on unguided"
+        # fifteen seconds into the night, with the whole recovery machinery
+        # switched off because guiding had "never started".  A guider that
+        # dropped its star during the first settle is exactly a guider that
+        # has lost its star, and gets the same rescue: a fresh star, then a
+        # fresh calibration, and only after all of that an unguided night.
+        fault = self._guiding_fault() or (
+            f"the guider did not settle — {guider.settle_error}"
+            if getattr(guider, "settle_error", None)
+            else f"the guider is {guider.state} rather than settled")
+        if not self._recovery_on("guidingRecovery"):
+            self._say(f"{fault}; carrying on unguided", "warn")
+            return
+        self._guiding_wanted = True
+        self._guide_lost_since = None
+        self._restart_guiding(fault, rough=False)
 
     def _dither(self, entry: dict[str, Any] | None = None) -> None:
         """Nudge the guider between slots so hot pixels do not stack up.
@@ -3176,8 +3197,50 @@ class Sequencer:
             return f"the guider is {state.lower()} rather than guiding"
         return None                     # calibrating, or something else in hand
 
+    #: Guide frames the RMS must be measured over before it is judged.  A
+    #: window this short is still a minute of guiding, and a window shorter
+    #: than it is the first few frames after a restart or a dither, which
+    #: are the settle, not the guiding.
+    ROUGH_MIN_SAMPLES = 20
+
+    def _guiding_quality(self) -> tuple[str, str | None]:
+        """How guiding that *is* running is going: ("rough", why), ("fine",
+        None), or ("unknown", None) while there are too few frames to say.
+
+        PHD2 holding a star is not the same as PHD2 guiding: with a stale or
+        reversed calibration — a pier side the driver never reports, a mount
+        nudged by hand — every correction pushes the star further out, and
+        PHD2 keeps chasing it at hundreds of arcseconds RMS while reporting
+        "Guiding" all the way.  Those subs are trailed exactly as a lost
+        star's would be, so rough is a fault, not a notice.
+        """
+        guider = self.manager.get("guider")
+        if guider is None or not guider.connected:
+            return "unknown", None
+        if not guider.guiding or guider.settling:
+            return "unknown", None
+        limit = float(self._recovery_settings().get("guideRmsFaultArcsec") or 0)
+        if limit <= 0:
+            return "unknown", None
+        try:
+            status = guider.status()
+        except Exception:                        # noqa: BLE001 - informational only
+            return "unknown", None
+        rms = status.get("rmsTotal")
+        samples = int(status.get("samples") or 0)
+        if rms is None or samples < self.ROUGH_MIN_SAMPLES:
+            return "unknown", None
+        if float(rms) <= limit:
+            return "fine", None
+        return "rough", (f"guiding is rough — {float(rms):.1f}\" RMS over the last "
+                         f"{samples} frames against a limit of {limit:g}\"; the "
+                         f"star or the calibration is bad")
+
+    def _guiding_rough(self) -> str | None:
+        return self._guiding_quality()[1]
+
     def _guiding_healthy(self) -> bool:
-        return self._guiding_fault() is None
+        return self._guiding_fault() is None and self._guiding_rough() is None
 
     def _check_guiding(self) -> None:
         """Between slots: is the guider still doing its job, and if not, fix it.
@@ -3189,6 +3252,14 @@ class Sequencer:
         if not self._guiding_wanted or not self._recovery_on("guidingRecovery"):
             return
         fault = self._guiding_fault()
+        rough = False
+        if fault is None:
+            quality, fault = self._guiding_quality()
+            rough = fault is not None
+            if quality == "fine":
+                # A full window of good guiding: whatever was wrong is fixed,
+                # and the next rough patch starts again from a fresh star.
+                self._rough_restarts = 0
         if fault is None:
             self._guide_lost_since = None
             return
@@ -3198,7 +3269,9 @@ class Sequencer:
         # PHD2 usually finds the star again by itself within an exposure or two.
         # A cloud is over before a re-acquisition would have finished, so the
         # grace period is not politeness — it is the faster of the two options.
-        grace = float(settings.get("guideGraceSeconds") or 0)
+        # Rough guiding gets no grace: the RMS is already a window of frames
+        # long, and nothing about a bad calibration comes right by waiting.
+        grace = 0.0 if rough else float(settings.get("guideGraceSeconds") or 0)
         if self._guide_lost_since is None:
             self._guide_lost_since = time.monotonic()
         waited = time.monotonic() - self._guide_lost_since
@@ -3214,20 +3287,37 @@ class Sequencer:
                     return
                 time.sleep(1.0)
 
+        self._restart_guiding(fault, rough)
+
+    def _restart_guiding(self, fault: str, rough: bool) -> None:
+        """Stop the guider, give it a fresh star and start it again, a bounded
+        number of times; the later tries recalibrate.  Out of tries, the night
+        carries on unguided and `_guiding_wanted` goes False so nothing keeps
+        asking.
+        """
+        settings = self._recovery_settings()
         attempts = int(settings.get("guideRestartAttempts") or 0)
         recalibrate_after = int(settings.get("recalibrateAfterAttempts") or 0)
         guiding = self.config.section("guiding")
         guider = self.manager.get("guider")
         if guider is None or not guider.connected:
             return
+        # A fresh calibration is slow and is the only thing that fixes a
+        # mount that has been nudged by hand, so it is what the later
+        # attempts do rather than what every attempt does.  Rough guiding on
+        # a held star is nearly always the calibration, and a restart for it
+        # looks successful the moment PHD2 is guiding again — the verdict
+        # takes another window of frames — so the count that matters there
+        # is restarts across slots: one for a fresh star, then the fix.
+        if rough:
+            self._rough_restarts += 1
+        recalibrate_rough = bool(recalibrate_after) and rough and self._rough_restarts > 1
 
         for attempt in range(1, attempts + 1):
             if self._budget_spent():
                 self._give_up("The guider keeps losing its star")
-            # A fresh calibration is slow and is the only thing that fixes a
-            # mount that has been nudged by hand, so it is what the later
-            # attempts do rather than what every attempt does.
-            recalibrate = bool(recalibrate_after) and attempt > recalibrate_after
+            recalibrate = recalibrate_rough or (
+                bool(recalibrate_after) and attempt > recalibrate_after)
             self._recovering(
                 "guiding",
                 f"{fault}; restarting guiding"
@@ -3263,20 +3353,44 @@ class Sequencer:
         self._guiding_wanted = False
 
     def _wait_for_guiding(self, timeout: float) -> bool:
-        """Wait for the guider to settle onto a star.  True if it did."""
+        """Wait for the guider to settle onto a star.  True if it did.
+
+        A star dropped for a frame or two while settling is not a failure —
+        PHD2 reports LostLock on a single low-SNR frame and is guiding again
+        on the next, and giving up on the first one is how a night went
+        unguided fifteen seconds in.  What ends the wait early is PHD2
+        stopping altogether, its own verdict that the settle failed, or a
+        star that stays lost for longer than a few frames could explain.
+        """
         deadline = time.monotonic() + timeout
         time.sleep(1.0)
         guider = self.manager.get("guider")
+        lost_since: float | None = None
         while time.monotonic() < deadline:
             self._check()
             if guider is None or not guider.connected:
                 return False
-            if guider.guiding and not guider.settling:
-                return True
-            if guider.state in ("Stopped", "LostLock"):
+            state = guider.state
+            if state == "Stopped":
                 return False
+            if state == "LostLock":
+                lost_since = lost_since or time.monotonic()
+                if time.monotonic() - lost_since > self.LOST_LOCK_PATIENCE:
+                    return False
+            else:
+                lost_since = None
+            if not guider.settling:
+                if getattr(guider, "settle_error", None):
+                    return False
+                if guider.guiding:
+                    return True
             time.sleep(0.5)
         return False
+
+    #: Seconds a star may stay lost during a settle before the settle is
+    #: called off: a cloud over the guide field or a star that was never
+    #: really there, either way not something the next frame will mend.
+    LOST_LOCK_PATIENCE = 15.0
 
     # -- the pointing ------------------------------------------------------
     def _check_recentre(self, panel: dict[str, Any], label: str) -> None:

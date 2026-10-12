@@ -229,6 +229,7 @@ class Phd2Guider(Guider):
         self._version: str | None = None
         self._pixel_scale: float | None = None
         self._settling: dict[str, Any] | None = None
+        self._settle_error: str | None = None
         self._last_error: str | None = None
         self._star_lost: str | None = None
         self._snr: float | None = None
@@ -417,6 +418,7 @@ class Phd2Guider(Guider):
         self._ra_errors.clear()
         self._dec_errors.clear()
         self._settling = None
+        self._settle_error = None
         self._snr = None
         self._app_state = "Unknown"
 
@@ -546,6 +548,11 @@ class Phd2Guider(Guider):
             self._app_state = "Looping"
         elif name == "StartGuiding":
             self._app_state = "Guiding"
+            # A fresh session gets a fresh window: the RMS of the one that
+            # was just restarted for being rough must not condemn this one
+            # before it has taken a frame.
+            self._ra_errors.clear()
+            self._dec_errors.clear()
         elif name == "Paused":
             self._app_state = "Paused"
         elif name == "Resumed":
@@ -578,8 +585,10 @@ class Phd2Guider(Guider):
             self._settling = None
             if status:
                 self._last_error = str(event.get("Error") or "settling failed")
+                self._settle_error = self._last_error
             else:
                 self._last_error = None
+                self._settle_error = None
         elif name == "GuidingDithered":
             self._ra_errors.clear()
             self._dec_errors.clear()
@@ -619,13 +628,28 @@ class Phd2Guider(Guider):
         if self.auto_select_star and self._app_state in ("Stopped", "Unknown"):
             self._find_a_star()
 
-        # `guide` does not come back until PHD2 has settled, so it must not be
-        # held to the ordinary short RPC timeout.
-        self._call("guide", [
-            {"pixels": float(settle_pixels), "time": float(settle_time),
-             "timeout": float(settle_timeout)},
-            bool(recalibrate),
-        ], timeout=float(settle_timeout) + 90.0)
+        # `guide` answers at once; the settle itself is reported later by a
+        # SettleDone event.  PHD2 sends its first Settling event only after
+        # the first guide frame, which can be seconds after it has already
+        # said StartGuiding — and in that gap a caller asking "guiding and
+        # not settling?" was told yes, and took a five-minute sub on a
+        # guider that then failed to settle at all.  So the settle is marked
+        # as under way here, before the request goes, and stays so until
+        # SettleDone says how it went.
+        self._ra_errors.clear()
+        self._dec_errors.clear()
+        self._settle_error = None
+        self._settling = {"distance": None, "time": 0.0,
+                          "settleTime": float(settle_time), "starLocked": None}
+        try:
+            self._call("guide", [
+                {"pixels": float(settle_pixels), "time": float(settle_time),
+                 "timeout": float(settle_timeout)},
+                bool(recalibrate),
+            ], timeout=float(settle_timeout) + 90.0)
+        except DeviceError:
+            self._settling = None
+            raise
 
     def _find_a_star(self) -> None:
         """Loop exposures until PHD2 has a frame, then auto-select a star."""
@@ -694,6 +718,10 @@ class Phd2Guider(Guider):
     def settling(self) -> bool:
         return self._settling is not None
 
+    @property
+    def settle_error(self) -> str | None:
+        return None if self._settling is not None else self._settle_error
+
     def status(self) -> dict[str, Any]:
         if not self._connected:
             return {"connected": False}
@@ -719,6 +747,7 @@ class Phd2Guider(Guider):
             "snr": self._snr,
             "starLost": self._star_lost,
             "error": self._last_error,
+            "settleError": self.settle_error,
             "samples": len(self._ra_errors),
             "rmsRaPx": rms_ra,
             "rmsDecPx": rms_dec,

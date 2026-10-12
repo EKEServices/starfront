@@ -489,10 +489,15 @@ the next target, stops, or stops and parks, as you choose.
   restarted; the later attempts recalibrate as well, which is slow and is the
   only thing that fixes a mount that has been nudged by hand. If none of it
   works the night carries on unguided and says so loudly, because an unguided
-  sub of a bright target is still a sub. Frames taken while the guider had no
-  lock are flagged on the sub chart, and optionally moved into a `suspect`
-  folder — never deleted, because whether they are usable is a judgement for the
-  morning with the stack open.
+  sub of a bright target is still a sub. The same rescue runs when the guider
+  fails to settle at the start of a target, and when it is holding a star but
+  guiding rougher than a limit you set (5″ RMS by default): a reversed or stale
+  calibration — a pier side the mount driver never reports, a mount moved by
+  hand — pushes the star out of the frame while PHD2 still says "Guiding", so
+  that case gets one try on a fresh star and then a fresh calibration. Frames
+  taken while the guider had no lock, or was that rough, are flagged on the sub
+  chart, and optionally moved into a `suspect` folder — never deleted, because
+  whether they are usable is a judgement for the morning with the stack open.
 * **The pointing.** The pointing check already plate solves every Nth sub; past
   a threshold of your choosing the mount is sent back to the target and solved
   onto it again, and guiding is restarted afterwards.

@@ -521,6 +521,13 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         # attempt includes a fresh calibration, which is slow but is the only
         # thing that fixes a mount that has been moved by hand.
         "recalibrateAfterAttempts": 2,
+        # Guiding that is running but this rough, in arcseconds RMS over the
+        # last fifty frames, is treated as lost: the star is bad or the
+        # calibration is (a pier side the driver never reports, a mount moved
+        # by hand), and PHD2 will chase it to the edge of the frame while
+        # saying "Guiding". It is restarted on a fresh star and, if that is
+        # not it, a fresh calibration. 0 switches the check off.
+        "guideRmsFaultArcsec": 5.0,
         # A sub exposed while the guider had no lock is very likely trailed, and
         # is always flagged on the sub chart. Moving it out of the way as well
         # is off by default because it may be perfectly usable — that is a

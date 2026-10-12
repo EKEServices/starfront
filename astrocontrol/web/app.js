@@ -3755,6 +3755,7 @@ const EQUIPMENT_FIELDS = [
   ['recovery', 'guideGraceSeconds', 'recGuideGrace', 'number'],
   ['recovery', 'guideRestartAttempts', 'recGuideAttempts', 'number'],
   ['recovery', 'recalibrateAfterAttempts', 'recRecalAfter', 'number'],
+  ['recovery', 'guideRmsFaultArcsec', 'recGuideRough', 'number'],
   ['recovery', 'discardLostFrames', 'recDiscardLost', 'check'],
   ['recovery', 'pointingRecovery', 'recPointing', 'check'],
   ['recovery', 'recentreArcmin', 'recRecentre', 'number'],

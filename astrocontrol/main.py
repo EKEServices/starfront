@@ -617,6 +617,7 @@ class RecoverySettingsRequest(BaseModel):
     guideGraceSeconds: float | None = Field(default=None, ge=0, le=600)
     guideRestartAttempts: int | None = Field(default=None, ge=0, le=20)
     recalibrateAfterAttempts: int | None = Field(default=None, ge=0, le=20)
+    guideRmsFaultArcsec: float | None = Field(default=None, ge=0, le=600)
     discardLostFrames: bool | None = None
     pointingRecovery: bool | None = None
     recentreArcmin: float | None = Field(default=None, gt=0, le=600)

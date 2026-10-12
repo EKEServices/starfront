@@ -188,6 +188,7 @@ guider.recover_after = 3
 seq, rig, config = build({"guider": guider})
 config.update("recovery", {"guideGraceSeconds": 0.0, "guideRestartAttempts": 4,
                            "recalibrateAfterAttempts": 2, "cooldownSeconds": 0.0})
+config.update("guiding", {"settleTimeoutSeconds": 2.0})
 seq._guiding_wanted = True
 seq._check_guiding()
 recal = [bool(s.get("recalibrate")) for s in guider.starts]
@@ -204,6 +205,7 @@ guider.state = "LostLock"
 seq, rig, config = build({"guider": guider})
 config.update("recovery", {"guideGraceSeconds": 0.0, "guideRestartAttempts": 2,
                            "cooldownSeconds": 0.0, "maxPerTarget": 0})
+config.update("guiding", {"settleTimeoutSeconds": 2.0})
 seq._guiding_wanted = True
 seq._check_guiding()
 results.append(case("a guider that will not come back leaves the run going",
@@ -270,6 +272,161 @@ config.update("sequencer", {"filterOffsets": {"Ha": -180}, "useFilterOffsets": F
 seq._select_filter(rig, "Ha")
 results.append(case("offsets switched off leave the focuser where it is",
                     focuser.position == 30000, f"position={focuser.position}"))
+
+# 8b. Guiding that is running but rough — a held star chased at hundreds of
+# arcseconds by a reversed calibration — is a fault, not a notice. The night
+# of the pier side the TheSky driver never reported: 564" RMS, "Guiding" all
+# the way, every sub trailed, nothing restarted.
+class RoughGuider(Guider):
+    def __init__(self, rms_until_start):
+        super().__init__()
+        self.rms_until_start = rms_until_start     # rough until this many starts
+
+    def status(self):
+        rough = len(self.starts) < self.rms_until_start
+        return {"rmsTotal": 564.5 if rough else 0.6, "samples": 50}
+
+    def start_guiding(self, **kw):
+        self.starts.append(kw)
+        self.state = "Guiding"
+
+
+guider = RoughGuider(rms_until_start=2)
+seq, rig, config = build({"guider": guider})
+config.update("recovery", {"guideGraceSeconds": 25.0, "guideRestartAttempts": 3,
+                           "recalibrateAfterAttempts": 2, "cooldownSeconds": 0.0,
+                           "guideRmsFaultArcsec": 5.0})
+seq._guiding_wanted = True
+started = time.monotonic()
+seq._check_guiding()                 # slot 1: rough -> fresh star
+first = [bool(s.get("recalibrate")) for s in guider.starts]
+seq._check_guiding()                 # slot 2: still rough -> recalibrate
+recal = [bool(s.get("recalibrate")) for s in guider.starts]
+seq._check_guiding()                 # slot 3: fine -> nothing, counter reset
+results.append(case("rough guiding on a held star is restarted on a fresh star, then recalibrated",
+                    first == [False] and recal == [False, True]
+                    and len(guider.starts) == 2 and seq._recoveries[-1]["ok"]
+                    and seq._guiding_wanted and seq._rough_restarts == 0,
+                    f"recalibrate flags={recal}, restarts={seq._rough_restarts}"))
+results.append(case("...with no grace period: the RMS is already a minute of frames",
+                    time.monotonic() - started < 8.0,
+                    f"took {time.monotonic() - started:.1f}s"))
+
+# 8c. The roughness check needs a window of frames, and can be turned off.
+guider = RoughGuider(rms_until_start=99)
+guider.status = lambda: {"rmsTotal": 564.5, "samples": 3}
+seq, rig, config = build({"guider": guider})
+config.update("recovery", {"guideGraceSeconds": 0.0, "cooldownSeconds": 0.0})
+seq._guiding_wanted = True
+seq._check_guiding()
+results.append(case("three rough frames after a dither are not yet a verdict",
+                    guider.starts == []))
+guider = RoughGuider(rms_until_start=99)
+seq, rig, config = build({"guider": guider})
+config.update("recovery", {"guideGraceSeconds": 0.0, "cooldownSeconds": 0.0,
+                           "guideRmsFaultArcsec": 0.0})
+seq._guiding_wanted = True
+seq._check_guiding()
+results.append(case("the roughness check switched off leaves rough guiding alone",
+                    guider.starts == []))
+
+
+# 8d. The guider fails to settle when the target starts. That used to be
+# "carrying on unguided" fifteen seconds into the night with recovery
+# switched off for good; now it is the same rescue as a lost star.
+class SettlingGuider(Guider):
+    def __init__(self, fail_starts):
+        super().__init__()
+        self.state = "Stopped"
+        self.fail_starts = fail_starts
+        self.settle_error = None
+
+    def start_guiding(self, **kw):
+        self.starts.append(kw)
+        self.state = "Guiding"
+        self.settle_error = ("timed-out waiting for guider to settle"
+                             if len(self.starts) <= self.fail_starts else None)
+
+
+guider = SettlingGuider(fail_starts=1)
+seq, rig, config = build({"guider": guider})
+config.update("guiding", {"startWithSequence": True, "settleTimeoutSeconds": 3.0})
+config.update("recovery", {"guideGraceSeconds": 0.0, "guideRestartAttempts": 3,
+                           "recalibrateAfterAttempts": 2, "cooldownSeconds": 0.0})
+seq._start_guiding()
+results.append(case("a guider that fails to settle at the start is restarted rather than abandoned",
+                    len(guider.starts) == 2 and seq._guiding_wanted
+                    and seq._recoveries[-1]["ok"],
+                    f"starts={len(guider.starts)}, wanted={seq._guiding_wanted}"))
+
+guider = SettlingGuider(fail_starts=99)
+seq, rig, config = build({"guider": guider})
+config.update("guiding", {"startWithSequence": True, "settleTimeoutSeconds": 3.0})
+config.update("recovery", {"guideGraceSeconds": 0.0, "guideRestartAttempts": 2,
+                           "cooldownSeconds": 0.0, "maxPerTarget": 0})
+seq._start_guiding()
+results.append(case("...and one that never settles leaves the night running unguided after its tries",
+                    len(guider.starts) == 3 and not seq._guiding_wanted,
+                    f"starts={len(guider.starts)}, wanted={seq._guiding_wanted}"))
+
+guider = SettlingGuider(fail_starts=99)
+seq, rig, config = build({"guider": guider})
+config.update("guiding", {"startWithSequence": True, "settleTimeoutSeconds": 3.0})
+config.update("recovery", {"guidingRecovery": False})
+seq._start_guiding()
+results.append(case("...with guiding recovery off it is told once and left alone",
+                    len(guider.starts) == 1 and not seq._guiding_wanted))
+
+
+# 8e. A star dropped for a frame while settling is not a failure. PHD2 says
+# LostLock on one low-SNR frame and is guiding on the next; giving up on the
+# first one is how a night went unguided fifteen seconds in.
+class FlickeringGuider(Guider):
+    def __init__(self):
+        super().__init__()
+        self.settle_error = None
+        self._t0 = time.monotonic()
+
+    @property
+    def state(self):
+        return "LostLock" if time.monotonic() - self._t0 < 1.5 else "Guiding"
+
+    @state.setter
+    def state(self, value):
+        pass
+
+
+guider = FlickeringGuider()
+seq, rig, config = build({"guider": guider})
+results.append(case("a star lost for a frame during the settle is waited out",
+                    seq._wait_for_guiding(5.0) is True))
+
+
+class SettleThenFailGuider(FlickeringGuider):
+    @property
+    def settling(self):
+        return time.monotonic() - self._t0 < 1.5
+
+    @settling.setter
+    def settling(self, value):
+        pass
+
+    @property
+    def settle_error(self):
+        return None if self.settling else "timed-out waiting for guider to settle"
+
+    @settle_error.setter
+    def settle_error(self, value):
+        pass
+
+
+guider = SettleThenFailGuider()
+seq, rig, config = build({"guider": guider})
+started = time.monotonic()
+results.append(case("PHD2's own verdict that the settle failed ends the wait at once",
+                    seq._wait_for_guiding(30.0) is False
+                    and time.monotonic() - started < 5.0))
+
 
 # 9. Recovery switched off entirely does nothing at all.
 guider = Guider()
