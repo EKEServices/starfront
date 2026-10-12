@@ -1,8 +1,14 @@
 # Changelog
 
+## 1.0.0.28
+
+- Joining with the camera just connected works. The server judged a join by the profile from the last check-in, up to ten minutes old and from before the camera was connected, so it refused with "this telescope has not said what it can see" although the camera was on; a join now reads the camera and sends the profile first.
+- A join with no camera connected is refused with what to do: connect your camera first, and set the focal length if it is not set.
+- The plugin reads the sensor from the camera itself again, as before 1.0.0.27, and no longer guesses it from the Framing Assistant; the *What the server is told* line is gone.
+
 ## 1.0.0.27
 
-- A telescope whose camera had not been connected since the plugin was installed could not join ("has not said what it can see - connect once with its focal length, sensor size and pixel size set") although both were set: the sensor size came only from a connected camera. It is now taken from what N.I.N.A.'s Framing Assistant remembers of the last camera when none is connected. *This telescope* shows in one line what the server is told (sensor, pixel size, focal length, scale, field), or what is missing and where to set it, and a join refused for that reason says the same.
+- A telescope whose camera had not been connected since the plugin was installed could not join although its focal length and pixel size were set. (Taken back in 1.0.0.28.)
 - On an open card the *Join* button and the can-take-part line come before the list of who is on it, which can be long.
 
 ## 1.0.0.26

@@ -425,11 +425,10 @@ namespace Starfront.Collab.Services {
         /// </summary>
         public async Task<string> JoinAsync(string projectId, CancellationToken token) {
             if (!settings.Enrolled) throw new InvalidOperationException("sign in with Discord first");
-            if (RigProfile.Field(host, settings) == null) {
-                // Said here, with where to look, rather than by the server as
-                // "this telescope has not said what it can see".
-                throw new InvalidOperationException(RigProfile.Describe(host, settings)
-                    + " Options > Plugins > Starfront > This telescope shows what the server is told.");
+            if (RigProfile.WhatIsMissing(host, settings) is string missing) {
+                // Said here as what to do, rather than by the server as "this
+                // telescope has not said what it can see".
+                throw new InvalidOperationException(missing + ". Then join again.");
             }
             var listing = Projects.FirstOrDefault(p => p.Id == projectId);
             if (listing != null) {
@@ -467,6 +466,13 @@ namespace Starfront.Collab.Services {
             await gate.WaitAsync(token).ConfigureAwait(false);
             Busy = true;
             try {
+                // The server judges the join by the profile it holds, which was
+                // sent at the last check-in - up to ten minutes ago, before the
+                // camera was connected. Send it afresh first, so a camera
+                // connected a moment ago counts.
+                var profile = RigProfile.Build(host, settings, ledger);
+                var presenceSaid = settings.SharePosition ? RigProfile.Presence(host, settings, Run) : null;
+                await client.HelloAsync(settings.AgentToken, profile, presenceSaid, token).ConfigureAwait(false);
                 answer = await client.JoinAsync(settings.AgentToken, projectId, body, token).ConfigureAwait(false);
                 if (answer.Task != null) {
                     lock (tasks) {
