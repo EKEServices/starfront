@@ -27,7 +27,13 @@ namespace Starfront.Collab {
     /// the host services - which *are* the same instances in every container.
     /// </summary>
     [Export(typeof(IPluginManifest))]
-    public class Plugin : PluginBase {
+    public class Plugin : PluginBase, System.ComponentModel.INotifyPropertyChanged {
+
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+
+        private void RaisePropertyChanged(string name) =>
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
+
         internal static event Action ShuttingDown;
 
         /// <summary>The invitation to the Starfront Discord server, as the website gives it. Signing in needs membership.</summary>
@@ -67,9 +73,36 @@ namespace Starfront.Collab {
                         SignInCommand.NotifyCanExecuteChanged();
                         SignOutCommand.NotifyCanExecuteChanged();
                         RefreshCommand.NotifyCanExecuteChanged();
+                        RaisePropertyChanged(nameof(RigText));
                     });
                 }
             };
+            cameraMediator.RegisterConsumer(new CameraWatcher(() => Ui.Dispatch.OnUi(() => RaisePropertyChanged(nameof(RigText)))));
+        }
+
+        /// <summary>Re-reads the "what the server is told" line when the camera connects or disconnects.</summary>
+        private sealed class CameraWatcher : NINA.Equipment.Interfaces.Mediator.ICameraConsumer {
+            private readonly Action changed;
+            private bool wasConnected;
+            public CameraWatcher(Action changed) { this.changed = changed; }
+            public void UpdateDeviceInfo(NINA.Equipment.Equipment.MyCamera.CameraInfo deviceInfo) {
+                var connected = deviceInfo?.Connected == true;
+                if (connected == wasConnected) return;
+                wasConnected = connected;
+                changed();
+            }
+            public void Dispose() { }
+        }
+
+        /// <summary>What the server is told this telescope can see, or what is missing and where to set it.</summary>
+        public string RigText {
+            get {
+                try {
+                    return Services.RigProfile.Describe(Runtime.Host, Runtime.Settings);
+                } catch (Exception ex) {
+                    return $"could not read the camera and telescope: {ex.Message}";
+                }
+            }
         }
 
         public override Task Initialize() {

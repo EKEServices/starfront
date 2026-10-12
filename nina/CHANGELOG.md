@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.27
+
+- A telescope whose camera had not been connected since the plugin was installed could not join ("has not said what it can see - connect once with its focal length, sensor size and pixel size set") although both were set: the sensor size came only from a connected camera. It is now taken from what N.I.N.A.'s Framing Assistant remembers of the last camera when none is connected. *This telescope* shows in one line what the server is told (sensor, pixel size, focal length, scale, field), or what is missing and where to set it, and a join refused for that reason says the same.
+- On an open card the *Join* button and the can-take-part line come before the list of who is on it, which can be long.
+
 ## 1.0.0.26
 
 - *This telescope* under Options > Plugins > Starfront is down to what matters: the name on the chart, whether to show where you point, and the Bortle class. *Hours a night to give* is gone, because the sequence already decides how long the container runs; the server deals a full night's share and the container shoots what it has time for. *Check in every* is gone, fixed at ten minutes. The *Server* box and its *Open* button are gone.

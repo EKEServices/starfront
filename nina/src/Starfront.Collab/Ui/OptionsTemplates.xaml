@@ -164,7 +164,11 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="What the server is told" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4" VerticalAlignment="Center" Text="{Binding RigText}" TextWrapping="Wrap" />
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Name on the chart" />
                     <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4" Text="{Binding Settings.TelescopeName}" />

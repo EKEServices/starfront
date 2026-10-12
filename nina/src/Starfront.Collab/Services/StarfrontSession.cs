@@ -425,6 +425,12 @@ namespace Starfront.Collab.Services {
         /// </summary>
         public async Task<string> JoinAsync(string projectId, CancellationToken token) {
             if (!settings.Enrolled) throw new InvalidOperationException("sign in with Discord first");
+            if (RigProfile.Field(host, settings) == null) {
+                // Said here, with where to look, rather than by the server as
+                // "this telescope has not said what it can see".
+                throw new InvalidOperationException(RigProfile.Describe(host, settings)
+                    + " Options > Plugins > Starfront > This telescope shows what the server is told.");
+            }
             var listing = Projects.FirstOrDefault(p => p.Id == projectId);
             if (listing != null) {
                 if (!listing.Compatibility.Ok) throw new InvalidOperationException(listing.Compatibility.Summary);

@@ -22,13 +22,52 @@ namespace Starfront.Collab.Services {
             return 206.265 * pixel * Math.Max(1, (int)settings.Binning) / focal;
         }
 
+        /// <summary>
+        /// The sensor in pixels: what a connected camera said, else what the
+        /// Framing Assistant remembers of the last camera, which N.I.N.A. keeps in
+        /// the profile. Zero by zero until either is known. Without the fallback a
+        /// telescope whose camera had not been connected since the plugin was
+        /// installed could not join, though its focal length and pixel size were set.
+        /// </summary>
+        public static (int width, int height) Sensor(HostServices host, StarfrontSettings settings) {
+            if (settings.SensorWidth > 0 && settings.SensorHeight > 0) return (settings.SensorWidth, settings.SensorHeight);
+            var framing = host.Profile.ActiveProfile.FramingAssistantSettings;
+            if (framing.CameraWidth > 0 && framing.CameraHeight > 0) return (framing.CameraWidth, framing.CameraHeight);
+            return (0, 0);
+        }
+
         /// <summary>The camera's field on the sky in degrees, width by height, or null until the sensor is known.</summary>
         public static (double width, double height)? Field(HostServices host, StarfrontSettings settings) {
             var scale = Scale(host, settings);
-            if (scale == null || settings.SensorWidth <= 0 || settings.SensorHeight <= 0) return null;
+            var (width, height) = Sensor(host, settings);
+            if (scale == null || width <= 0 || height <= 0) return null;
             var binning = Math.Max(1, (int)settings.Binning);
-            return (scale.Value * (settings.SensorWidth / (double)binning) / 3600.0,
-                    scale.Value * (settings.SensorHeight / (double)binning) / 3600.0);
+            return (scale.Value * (width / (double)binning) / 3600.0,
+                    scale.Value * (height / (double)binning) / 3600.0);
+        }
+
+        /// <summary>
+        /// What the server will be told this telescope can see, in one line for
+        /// the options page - or what is missing and where to set it, so "it says
+        /// my focal length is not set" can be answered by looking.
+        /// </summary>
+        public static string Describe(HostServices host, StarfrontSettings settings) {
+            RememberCamera(host, settings);
+            var profile = host.Profile.ActiveProfile;
+            var focal = profile.TelescopeSettings.FocalLength;
+            var pixel = settings.PixelSize > 0 ? settings.PixelSize : profile.CameraSettings.PixelSize;
+            var (width, height) = Sensor(host, settings);
+            var missing = new List<string>();
+            if (focal <= 0) missing.Add("the focal length (Options > Equipment > Telescope)");
+            if (pixel <= 0) missing.Add("the pixel size (Options > Equipment > Camera)");
+            if (width <= 0 || height <= 0) missing.Add("the sensor size (connect the camera once)");
+            if (missing.Count > 0) return "Not known yet: " + string.Join(", ", missing) + ".";
+            var field = Field(host, settings);
+            var scale = Scale(host, settings) ?? 0;
+            var binned = Math.Max(1, (int)settings.Binning) > 1 ? $" binned {(int)settings.Binning}×" : "";
+            return $"{width}×{height} px at {pixel:0.##} µm, {focal:0.#} mm{binned}: {scale:0.##}″/px, "
+                 + $"{field?.width ?? 0:0.##}° × {field?.height ?? 0:0.##}°"
+                 + (settings.Colour ? ", colour camera" : ", mono camera");
         }
 
         /// <summary>How far two camera angles differ, half a turn counting as the same angle (the same rectangle on the sky).</summary>
@@ -86,13 +125,14 @@ namespace Starfront.Collab.Services {
 
             var rotation = HasRotator(host) ? JValue.CreateNull()
                 : new JValue(double.IsNaN(settings.CameraAngle) ? 0.0 : Math.Round(settings.CameraAngle, 2));
+            var (sensorWidth, sensorHeight) = Sensor(host, settings);
 
             var body = new JObject {
                 ["name"] = settings.TelescopeName,
                 ["focalLength"] = focal > 0 ? new JValue(focal) : JValue.CreateNull(),
                 ["pixelSize"] = pixel > 0 ? new JValue(pixel) : JValue.CreateNull(),
-                ["sensorWidth"] = settings.SensorWidth > 0 ? new JValue(settings.SensorWidth) : JValue.CreateNull(),
-                ["sensorHeight"] = settings.SensorHeight > 0 ? new JValue(settings.SensorHeight) : JValue.CreateNull(),
+                ["sensorWidth"] = sensorWidth > 0 ? new JValue(sensorWidth) : JValue.CreateNull(),
+                ["sensorHeight"] = sensorHeight > 0 ? new JValue(sensorHeight) : JValue.CreateNull(),
                 ["binning"] = (int)settings.Binning,
                 ["filters"] = filters,
                 ["channels"] = channels,

@@ -351,20 +351,7 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                     <TextBlock Margin="0,2,0,0" FontWeight="SemiBold" Opacity="0.9" Text="{Binding ProgressText}" />
-                                    <!--  Who is on it: a name per line, the ones online marked, with what they are doing.  -->
-                                    <TextBlock Margin="0,4,0,0" Opacity="0.7" Text="{Binding PeopleText}" />
-                                    <ItemsControl Margin="8,0,0,0" ItemsSource="{Binding Participants}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Width="12" Foreground="#7EE7A5" Text="●" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
-                                                    <TextBlock Width="12" Opacity="0.35" Text="○" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
-                                                    <TextBlock Text="{Binding Name}" />
-                                                    <TextBlock Margin="8,0,0,0" Opacity="0.6" FontSize="11" Text="{Binding Doing}" />
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <!--  Whether this telescope can help, and the buttons: before the list of who is on it, which can be long.  -->
                                     <TextBlock
                                         Margin="0,4,0,0"
                                         FontWeight="SemiBold"
@@ -404,6 +391,20 @@
                                         <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding RedealCommand}" Content="Deal again" ToolTip="Every telescope on it is dealt afresh at its next check-in" />
                                         <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding CloseCommand}" Content="Close" ToolTip="Off everybody's list; what was collected stays on record" />
                                     </StackPanel>
+                                    <!--  Who is on it: a name per line, the ones online marked, with what they are doing.  -->
+                                    <TextBlock Margin="0,6,0,0" Opacity="0.7" Text="{Binding PeopleText}" />
+                                    <ItemsControl Margin="8,0,0,0" ItemsSource="{Binding Participants}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Width="12" Foreground="#7EE7A5" Text="●" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                                    <TextBlock Width="12" Opacity="0.35" Text="○" Visibility="{Binding Online, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
+                                                    <TextBlock Text="{Binding Name}" />
+                                                    <TextBlock Margin="8,0,0,0" Opacity="0.6" FontSize="11" Text="{Binding Doing}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
