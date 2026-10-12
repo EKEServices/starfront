@@ -326,6 +326,7 @@ class SiteRequest(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     elevation: float | None = Field(default=None, ge=-500, le=9000)
     useMount: bool | None = None
+    bortle: int | None = Field(default=None, ge=1, le=9)
 
 
 class OpticsRequest(BaseModel):

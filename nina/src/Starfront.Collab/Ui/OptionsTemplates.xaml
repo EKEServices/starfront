@@ -160,7 +160,12 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Bortle class of the sky" />
+                    <TextBox Grid.Row="5" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Bortle, ValidatesOnExceptions=True}" />
+                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="1 is the darkest sky, 9 an inner city; 0 is not rated. A project may ask for a dark sky." TextWrapping="Wrap" />
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Name on the chart" />
                     <TextBox Grid.Row="0" Grid.Column="1" Margin="0,4" Text="{Binding Settings.TelescopeName}" />

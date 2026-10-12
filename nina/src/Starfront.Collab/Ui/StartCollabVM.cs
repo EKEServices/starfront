@@ -58,9 +58,10 @@ namespace Starfront.Collab.Ui {
         private string heightText = "";
         private string notes = "";
         private string minFocal = "", maxFocal = "", maxHfr = "", maxGuideRms = "", minExposure = "", maxExposure = "";
-        private string maxMoon = "", minMoonSeparation = "", minAltitude = "", minFrames = "10";
+        private string maxMoon = "", minMoonSeparation = "", minAltitude = "", minFrames = "10", maxBortle = "";
         private bool requireCalibrated;
-        private bool acceptColour = true;
+        private bool acceptOscRgb = true;
+        private bool acceptOscNarrowband = true;
         private string foundText = "";
 
         public StartCollabVM(IFramingAssistantVM framing, Func<Task> refresh) {
@@ -112,8 +113,29 @@ namespace Starfront.Collab.Ui {
         public string MinMoonSeparation { get => minMoonSeparation; set { minMoonSeparation = value ?? ""; RaisePropertyChanged(); } }
         public string MinAltitude { get => minAltitude; set { minAltitude = value ?? ""; RaisePropertyChanged(); } }
         public string MinFrames { get => minFrames; set { minFrames = value ?? ""; RaisePropertyChanged(); } }
+        public string MaxBortle { get => maxBortle; set { maxBortle = value ?? ""; RaisePropertyChanged(); } }
         public bool RequireCalibrated { get => requireCalibrated; set { requireCalibrated = value; RaisePropertyChanged(); } }
-        public bool AcceptColour { get => acceptColour; set { acceptColour = value; RaisePropertyChanged(); } }
+
+        /// <summary>
+        /// A colour camera's data is its own band, kept apart from the mono
+        /// channels: OSC-RGB behind a clear filter, OSC-Ha+OIII behind a
+        /// dual-band. Taking one puts the band among the filters wanted, with
+        /// its own hours; not taking it takes the row away.
+        /// </summary>
+        public bool AcceptOscRgb {
+            get => acceptOscRgb;
+            set { acceptOscRgb = value; RaisePropertyChanged(); OfferBand("OSC-RGB", value); }
+        }
+        public bool AcceptOscNarrowband {
+            get => acceptOscNarrowband;
+            set { acceptOscNarrowband = value; RaisePropertyChanged(); OfferBand("OSC-Ha+OIII", value); }
+        }
+
+        private void OfferBand(string band, bool wanted) {
+            var row = Filters.FirstOrDefault(f => string.Equals(f.Name, band, StringComparison.OrdinalIgnoreCase));
+            if (wanted && row == null) Filters.Add(new FilterGoalRow(band));
+            else if (!wanted && row != null) Filters.Remove(row);
+        }
 
         public string SizeHint {
             get {
@@ -131,23 +153,32 @@ namespace Starfront.Collab.Ui {
             Name = ""; Target = ""; RaText = ""; DecText = ""; rotation = 0; Single = true;
             WidthText = ""; HeightText = ""; Notes = ""; FoundText = "";
             MinFocal = ""; MaxFocal = ""; MaxHfr = ""; MaxGuideRms = ""; MinExposure = ""; MaxExposure = "";
-            MaxMoon = ""; MinMoonSeparation = ""; MinAltitude = ""; MinFrames = "10";
-            RequireCalibrated = false; AcceptColour = true;
+            MaxMoon = ""; MinMoonSeparation = ""; MinAltitude = ""; MinFrames = "10"; MaxBortle = "";
+            RequireCalibrated = false;
             Filters.Clear();
+            acceptOscRgb = true; acceptOscNarrowband = true;
+            RaisePropertyChanged(nameof(AcceptOscRgb));
+            RaisePropertyChanged(nameof(AcceptOscNarrowband));
             if (Runtime.Ready) {
-                // The project asks for channels, not the names in this wheel: a
-                // colour camera with an L-eXtreme offers Ha and OIII, and a
-                // mono wheel its letters. Nothing delivered, every channel.
+                // The project asks for channels and bands, not the names in
+                // this wheel: a mono wheel offers its letters, a colour camera
+                // its OSC bands, and the two OSC bands are offered either way
+                // because the boxes above take them.
                 var delivered = new List<string>();
                 foreach (var filter in RigProfile.FilterNames(Runtime.Settings)) {
-                    foreach (var letter in Runtime.Settings.ChannelsFor(filter)) {
-                        if (!delivered.Contains(letter)) delivered.Add(letter);
+                    foreach (var band in Runtime.Settings.ChannelsFor(filter)) {
+                        if (!delivered.Contains(band)) delivered.Add(band);
                     }
                 }
                 if (delivered.Count == 0) delivered.AddRange(Sky.Filters.Channels);
                 foreach (var letter in Sky.Filters.Channels) {
                     if (delivered.Contains(letter)) Filters.Add(new FilterGoalRow(letter));
                 }
+                foreach (var band in delivered.Where(b => !Sky.Filters.Channels.Contains(b))) {
+                    Filters.Add(new FilterGoalRow(band));
+                }
+                OfferBand("OSC-RGB", true);
+                OfferBand("OSC-Ha+OIII", true);
                 var field = RigProfile.Field(Runtime.Host, Runtime.Settings);
                 if (field is (double w, double h)) {
                     WidthText = (Math.Round(w * 2, 1)).ToString("0.0", CultureInfo.InvariantCulture);
@@ -182,8 +213,12 @@ namespace Starfront.Collab.Ui {
             MaxMoon = wants.MaxMoonIllumination.HasValue ? Text(Math.Round(wants.MaxMoonIllumination.Value * 100)) : "";
             MinMoonSeparation = Text(wants.MinMoonSeparation); MinAltitude = Text(wants.MinAltitude);
             MinFrames = wants.MinFramesPerVisit.ToString(CultureInfo.InvariantCulture);
+            MaxBortle = wants.MaxBortle.HasValue ? wants.MaxBortle.Value.ToString(CultureInfo.InvariantCulture) : "";
             RequireCalibrated = wants.RequireCalibrated;
-            AcceptColour = wants.AcceptColour;
+            acceptOscRgb = wants.AcceptColour && wants.AcceptOscRgb;
+            acceptOscNarrowband = wants.AcceptColour && wants.AcceptOscNarrowband;
+            RaisePropertyChanged(nameof(AcceptOscRgb));
+            RaisePropertyChanged(nameof(AcceptOscNarrowband));
             Filters.Clear();
             var goals = listing.Goals ?? new Dictionary<string, double>();
             foreach (var kv in wants.Filters ?? new Dictionary<string, double?>()) {
@@ -355,6 +390,12 @@ namespace Starfront.Collab.Ui {
             foreach (var row in Filters) {
                 var filter = Sky.Filters.Canonical(row.Name);
                 if (string.IsNullOrEmpty(filter)) continue;
+                // An OSC band is taken only while its box is ticked.
+                if (Sky.Filters.IsOsc(filter)) {
+                    var narrow = filter.Contains('+');
+                    if (narrow && !AcceptOscNarrowband) continue;
+                    if (!narrow && !AcceptOscRgb) continue;
+                }
                 var band = Num(row.Bandpass);
                 filters[filter] = band.HasValue ? new JValue(band.Value) : JValue.CreateNull();
                 var hours = Num(row.Hours);
@@ -363,6 +404,8 @@ namespace Starfront.Collab.Ui {
             if (filters.Count == 0) throw new ArgumentException("Name at least one filter the collaboration wants.");
 
             var moon = Num(MaxMoon);
+            var bortle = Num(MaxBortle);
+            if (bortle is double b && (b < 1 || b > 9)) throw new ArgumentException("Bortle is 1 to 9.");
             var requirements = new JObject {
                 ["minFocalLength"] = Json(Num(MinFocal)),
                 ["maxFocalLength"] = Json(Num(MaxFocal)),
@@ -375,7 +418,10 @@ namespace Starfront.Collab.Ui {
                 ["minAltitude"] = Json(Num(MinAltitude)),
                 ["minFramesPerVisit"] = Math.Max(1, (int)Math.Round(Num(MinFrames) ?? 10)),
                 ["requireCalibrated"] = RequireCalibrated,
-                ["acceptColour"] = AcceptColour,
+                ["acceptColour"] = AcceptOscRgb || AcceptOscNarrowband,
+                ["acceptOscRgb"] = AcceptOscRgb,
+                ["acceptOscNarrowband"] = AcceptOscNarrowband,
+                ["maxBortle"] = bortle.HasValue ? new JValue((int)Math.Round(bortle.Value)) : JValue.CreateNull(),
                 ["filters"] = filters,
             };
             return new JObject {

@@ -109,12 +109,39 @@ namespace Starfront.Collab.Sky {
             return "";
         }
 
-        /// <summary>The channels a delivery code stands for: "HO" → H, O; "RGB" → R, G, B; "-" or "" → none.</summary>
-        public static List<string> ChannelsOf(string code) {
+        /// <summary>
+        /// The band a delivery code stands for, on this camera. A colour
+        /// camera's data is its own band, kept apart from the mono channels:
+        /// "RGB" → OSC-RGB, "HO" → OSC-Ha+OIII; on a mono camera "H" → H and
+        /// "HO" → Ha+OIII. "-" or "" → nothing. One entry, as the server speaks it.
+        /// </summary>
+        public static List<string> ChannelsOf(string code, bool colour) {
             var clean = (code ?? "").Trim().ToUpperInvariant();
             if (clean.Length == 0 || clean == "-") return new List<string>();
-            return clean.Select(c => c.ToString()).Where(c => Channels.Contains(c)).Distinct().ToList();
+            var letters = clean == "RGB" ? new List<string> { "R", "G", "B" }
+                : clean.Select(c => c.ToString()).Where(c => Channels.Contains(c)).Distinct().ToList();
+            if (letters.Count == 0) return new List<string>();
+            var band = BandOf(letters, colour);
+            return band.Length > 0 ? new List<string> { band } : new List<string>();
         }
+
+        private static string BandOf(List<string> letters, bool colour) {
+            var set = new HashSet<string>(letters);
+            string lines;
+            if (set.SetEquals(new[] { "R", "G", "B" }) || (colour && set.IsSubsetOf(new[] { "R", "G", "B", "L" }))) lines = "RGB";
+            else if (set.SetEquals(new[] { "H", "O" })) lines = "Ha+OIII";
+            else if (set.SetEquals(new[] { "S", "O" })) lines = "SII+OIII";
+            else if (set.SetEquals(new[] { "H", "S" })) lines = "Ha+SII";
+            else if (set.SetEquals(new[] { "H", "O", "S" })) lines = "Ha+OIII+SII";
+            else if (set.Count == 1) lines = colour ? Label(letters[0]) : letters[0];
+            else return "";
+            if (colour) return "OSC-" + lines;
+            if (lines == "RGB") return "L";
+            return lines;
+        }
+
+        /// <summary>Whether a channel or band is one-shot colour data.</summary>
+        public static bool IsOsc(string channel) => (channel ?? "").StartsWith("OSC-", StringComparison.OrdinalIgnoreCase);
 
         public static string DeliveryLabel(string code) {
             foreach (var (c, label) in Deliveries) if (c == code) return label;

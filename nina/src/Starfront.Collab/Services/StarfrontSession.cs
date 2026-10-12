@@ -230,6 +230,7 @@ namespace Starfront.Collab.Services {
                 // The channels the frames carry: a night through a dual-band
                 // filter on a colour camera is credited to both its lines.
                 ["channels"] = new JArray(settings.ChannelsFor(row.Filter)),
+                ["bortle"] = settings.Bortle > 0 ? new JValue(settings.Bortle) : JValue.CreateNull(),
             };
             return body;
         }

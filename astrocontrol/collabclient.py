@@ -258,7 +258,16 @@ class CollabClient:
                            or self._hours_from_plan() or None),
             windowFrom=str(settings.get("fromClock") or ""),
             windowTo=str(settings.get("toClock") or ""),
+            # The sky, as the operator rated it under Site.
+            bortle=self._bortle(),
         ).payload()
+
+    def _bortle(self) -> int | None:
+        try:
+            value = int(self.rigs.master.config.get("site", "bortle", None) or 0)
+        except (TypeError, ValueError):
+            return None
+        return value if 1 <= value <= 9 else None
 
     def _carried_filters(self) -> tuple[list[str], dict[str, Any]]:
         """The filters on the mount tonight, in the order the telescopes come.
@@ -528,6 +537,7 @@ class CollabClient:
                     # The channels the frames carry; a night through a
                     # dual-band filter on a colour camera is two of them.
                     "channels": filters.channels(row["filter"], colour),
+                    "bortle": self._bortle(),
                 })
             answer = self.report(batch)
             for row, recorded in zip(pending, answer.get("recorded") or []):

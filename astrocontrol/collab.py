@@ -26,7 +26,9 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .filters import CHANNELS, canonical as _canonical, channels as _channels
+from .filters import (CHANNELS, canonical as _canonical, channels as _channels,
+                      is_narrowband as _is_narrowband, is_osc as _is_osc,
+                      normal_channel as _normal)
 
 
 def _key(name: Any) -> str:
@@ -769,7 +771,7 @@ def _goals_for(filters: list["FilterTask"], goals: dict[str, float]) -> dict[str
     for f in filters:
         for key in f.keys():
             if key not in have:
-                wanted[key.upper() if key.upper() in CHANNELS else f.filter] = f.hours
+                wanted[_normal(key) or f.filter] = f.hours
                 have.add(key)
     return wanted
 
@@ -791,7 +793,7 @@ def _filter_need(f: "FilterTask", demand: dict[str, float], spoken: dict[str, fl
 def _moon_tolerant(f: "FilterTask") -> bool:
     """Whether a filter can be shot under a bright Moon: any narrowband line
     it passes is, and a dual-band's Ha half is worth the night."""
-    return any(key in MOON_TOLERANT for key in f.keys())
+    return any(key in MOON_TOLERANT or _is_narrowband(key) for key in f.keys())
 
 
 def assign(cells: list[dict[str, Any]], goals: dict[str, float],
@@ -963,12 +965,22 @@ class Requirements:
     #: in the form.
     minScale: float | None = None
     maxScale: float | None = None
-    #: Whether one-shot colour cameras may take part. A colour camera has no
-    #: filter wheel, no narrowband, and is broadband whatever it does — so on
-    #: a bright night it has nothing usable to give. `colourMaxMoon` is the
-    #: Moon illumination (0-1) above which a colour camera's night is refused;
-    #: None means the project's ordinary Moon rule, if any, is the only one.
+    #: Whether one-shot colour cameras may take part, and with what. A colour
+    #: camera's data is its own band - OSC-RGB behind a clear filter,
+    #: OSC-Ha+OIII behind a dual-band - kept apart from the mono channels,
+    #: because a Bayer matrix's red is not a red filter's and a dual-band
+    #: frame is two lines on one sensor. `acceptColour` is the old master
+    #: switch; `acceptOscRgb` and `acceptOscNarrowband` say which bands, and
+    #: a project takes a band only when it also lists it among its filters.
+    #: `colourMaxMoon` is the Moon illumination (0-1) above which a colour
+    #: camera's night is refused; None means the project's ordinary Moon
+    #: rule, if any, is the only one.
     acceptColour: bool = True
+    acceptOscRgb: bool = True
+    acceptOscNarrowband: bool = True
+    #: The worst Bortle class a contributing site may have, 1 to 9; None is
+    #: any sky. A rig that has not rated its sky is told, not refused.
+    maxBortle: int | None = None
     colourMaxMoon: float | None = None
     #: Mean star size across a night, in arcseconds.
     maxHfr: float | None = None
@@ -1009,6 +1021,9 @@ class Requirements:
             maxScale=_number(data.get("maxScale")),
             acceptColour=bool(data.get("acceptColour", True)),
             colourMaxMoon=_number(data.get("colourMaxMoon")),
+            acceptOscRgb=bool(data.get("acceptOscRgb", True)),
+            acceptOscNarrowband=bool(data.get("acceptOscNarrowband", True)),
+            maxBortle=_bortle(data.get("maxBortle")),
             maxHfr=_number(data.get("maxHfr")),
             maxGuideRms=_number(data.get("maxGuideRms")),
             minExposure=_number(data.get("minExposure")),
@@ -1109,6 +1124,9 @@ class RigProfile:
     #: under that sky. It travels so a coordinator can read it.
     windowFrom: str = ""
     windowTo: str = ""
+    #: The sky's Bortle class at the site, 1 (darkest) to 9, as the operator
+    #: rates it; None when they have not said. A project may set a limit.
+    bortle: int | None = None
 
     def scale(self) -> float | None:
         """Arcseconds per pixel, by the small-angle formula."""
@@ -1144,7 +1162,7 @@ class RigProfile:
                    for name, value in (data.get("filters") or {}).items()}
         channels: dict[str, list[str]] = {}
         for name, letters in (data.get("channels") or {}).items():
-            clean = [str(c).upper() for c in (letters or []) if str(c).upper() in CHANNELS]
+            clean = [_normal(c) for c in (letters or []) if _normal(c)]
             channels[_canonical(name) or str(name)] = clean
         for name in filters:
             if name not in channels:
@@ -1168,7 +1186,14 @@ class RigProfile:
             hoursPerNight=_number(data.get("hoursPerNight")),
             windowFrom=str(data.get("windowFrom") or ""),
             windowTo=str(data.get("windowTo") or ""),
+            bortle=_bortle(data.get("bortle")),
         )
+
+
+def _bortle(value: Any) -> int | None:
+    """A Bortle class, 1 to 9, or None for unset or nonsense."""
+    number = _int(value)
+    return number if number is not None and 1 <= number <= 9 else None
 
 
 def _int(value: Any) -> int | None:
@@ -1197,8 +1222,19 @@ def wanted_channels(wants: "Requirements") -> dict[str, float | None]:
         if str(name).strip().lower() in COLOUR_FILTERS:
             for letter in ("R", "G", "B"):
                 out.setdefault(letter.lower(), limit)
-        else:
-            out[_key(name)] = limit
+            continue
+        key = _key(name)
+        # A colour-camera band listed by a project that has since switched
+        # that kind of data off is not wanted; the switches win.
+        if _is_osc(key):
+            narrow = "+" in key
+            if not wants.acceptColour:
+                continue
+            if narrow and not wants.acceptOscNarrowband:
+                continue
+            if not narrow and not wants.acceptOscRgb:
+                continue
+        out[key] = limit
     return out
 
 
@@ -1261,10 +1297,12 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
     else:
         note("scale", True, f'{scale:.2f}"/px')
 
-    # A one-shot colour camera is broadband whatever it does. A project can
-    # decline them outright, or take them on dark nights only.
+    # A one-shot colour camera's data is its own band. A project can decline
+    # colour cameras outright, take only their broadband or only their
+    # narrowband, or take them on dark nights only.
     if profile.colour:
-        if not wants.acceptColour:
+        takes = wants.acceptColour and (wants.acceptOscRgb or wants.acceptOscNarrowband)
+        if not takes:
             note("camera", False, "a one-shot colour camera; this project wants "
                                   "mono cameras with filters")
         elif wants.colourMaxMoon is not None:
@@ -1272,6 +1310,18 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
                                  f"Moon under {wants.colourMaxMoon * 100:.0f}% lit")
         else:
             note("camera", True, "one-shot colour")
+
+    # The sky. A project may ask for a dark one; a rig that has not rated
+    # its sky is told what is wanted rather than turned away unheard.
+    if wants.maxBortle is not None:
+        if profile.bortle is None:
+            note("sky", None, f"Bortle class not set; the project wants Bortle "
+                              f"{wants.maxBortle} or darker")
+        elif profile.bortle > wants.maxBortle:
+            note("sky", False, f"Bortle {profile.bortle} sky, project wants Bortle "
+                               f"{wants.maxBortle} or darker")
+        else:
+            note("sky", True, f"Bortle {profile.bortle}")
 
     # Filters: a rig takes part in whichever of the project's filters it
     # carries, and is dealt frames in those alone. A project asking for H, O,
@@ -1288,7 +1338,15 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
     # server for a difference nobody could see.
     wanted = wanted_channels(wants)
     usable: list[str] = []
-    if wanted and not profile.filters and not profile.colour:
+    if wants.filters and profile.colour and not any(_is_osc(key) for key in wanted):
+        # The project lists mono channels only, or switched its colour
+        # bands off. A colour camera's band is never a mono channel, so
+        # there is nothing here for it, and the person to tell is the
+        # coordinator.
+        note("filters", False,
+             "this project takes no one-shot colour data; its coordinator can "
+             "add OSC-RGB or OSC-Ha+OIII to its filters")
+    elif wants.filters and not profile.filters and not profile.colour:
         # Not "no Ha; no R; no G; no B" - the rig has said nothing at all, and
         # the fix is one setting, not four filters. A wheel that is switched
         # off cannot be asked, so the names have to be typed in once; a
@@ -1311,7 +1369,7 @@ def compatibility(profile: RigProfile, wants: Requirements) -> dict[str, Any]:
         missing, why = [], []
         through: dict[str, list[str]] = {}
         for key, limit in wanted.items():
-            shown = key.upper()
+            shown = _normal(key) or key.upper()
             options = delivered.get(key) or []
             if not options:
                 missing.append(shown)
@@ -1425,8 +1483,7 @@ class FilterTask:
     @classmethod
     def read(cls, data: dict[str, Any]) -> "FilterTask":
         name = _canonical(data["filter"]) or str(data["filter"])
-        letters = [str(c).upper() for c in (data.get("channels") or [])
-                   if str(c).upper() in CHANNELS]
+        letters = [_normal(c) for c in (data.get("channels") or []) if _normal(c)]
         if not letters:
             letters = _channels(name)
         return cls(filter=name,
@@ -1531,6 +1588,8 @@ class Contribution:
     #: with `sourceFilter` naming the filter it really came through.
     channels: list[str] = field(default_factory=list)
     sourceFilter: str = ""
+    #: The site's Bortle class the night was shot under, as the rig rates it.
+    bortle: int | None = None
     #: Which panel of the rig's mosaic this is, as the rig numbers them. Blank
     #: for a single-frame chunk. Part of what makes a night's report unique:
     #: twelve panels shot through Ha on one night are twelve contributions, not
@@ -1567,9 +1626,9 @@ class Contribution:
             task=str(data.get("task") or ""),
             night=str(data.get("night") or ""),
             filterName=_canonical(data.get("filterName") or data.get("filter") or ""),
-            channels=[str(c).upper() for c in (data.get("channels") or [])
-                      if str(c).upper() in CHANNELS],
+            channels=[_normal(c) for c in (data.get("channels") or []) if _normal(c)],
             sourceFilter=str(data.get("sourceFilter") or ""),
+            bortle=_bortle(data.get("bortle")),
             panel=str(data.get("panel") if data.get("panel") is not None else ""),
             frames=_int(data.get("frames")) or 0,
             seconds=float(data.get("seconds") or 0.0),
@@ -1616,6 +1675,15 @@ def judge(contribution: Contribution, wants: Requirements) -> dict[str, Any]:
               f"the Moon was {contribution.moonIllumination * 100:.0f}% lit, and "
               "a one-shot colour camera's night counts only under "
               f"{wants.colourMaxMoon * 100:.0f}%")
+    for key in carried:
+        if _is_osc(key) and "+" not in key and not wants.acceptOscRgb:
+            reasons.append("one-shot colour broadband; this project does not take OSC-RGB")
+        elif _is_osc(key) and "+" in key and not wants.acceptOscNarrowband:
+            reasons.append("one-shot colour narrowband; this project does not take it")
+    if wants.maxBortle is not None and contribution.bortle is not None:
+        check(contribution.bortle <= wants.maxBortle,
+              f"shot under a Bortle {contribution.bortle} sky, project wants "
+              f"Bortle {wants.maxBortle} or darker")
     if asked and not any(key in asked for key in carried):
         reasons.append(f"{shown} is not a filter this project wants")
     else:
@@ -1683,6 +1751,8 @@ def judge(contribution: Contribution, wants: Requirements) -> dict[str, Any]:
         unknown.append("star size was not measured")
     if wants.maxGuideRms is not None and contribution.guideRms is None:
         unknown.append("guiding was not measured")
+    if wants.maxBortle is not None and contribution.bortle is None:
+        unknown.append("the site's Bortle class is not set")
     if wants.minScale is not None or wants.maxScale is not None:
         if contribution.scale is None:
             unknown.append("the image scale is not known — was it plate solved?")

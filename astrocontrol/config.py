@@ -54,6 +54,10 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "longitude": None,         # degrees east of Greenwich, negative west
         "elevation": 0.0,          # metres
         "useMount": True,          # prefer what the mount driver reports
+        # The sky's Bortle class, 1 (darkest) to 9, as the operator rates
+        # it; None until they do. Sent with the collaboration profile, so a
+        # project that asks for a dark sky can tell.
+        "bortle": None,
     },
     "optics": {
         "focalLength": None,       # millimetres, for the field-of-view rectangle

@@ -236,8 +236,14 @@ namespace Starfront.Collab.Settings {
             return Sky.Filters.GuessDelivery(name, Colour);
         }
 
-        /// <summary>The channels a filter delivers in a sub: ["H", "O"] for an L-eXtreme, ["R", "G", "B"] for a colour camera's clear filter.</summary>
-        public List<string> ChannelsFor(string filter) => Sky.Filters.ChannelsOf(DeliveryFor(filter));
+        /// <summary>The band a filter delivers in a sub: ["H"] for a mono Ha, ["OSC-Ha+OIII"] for an L-eXtreme on a colour camera, ["OSC-RGB"] for its clear filter.</summary>
+        public List<string> ChannelsFor(string filter) => Sky.Filters.ChannelsOf(DeliveryFor(filter), Colour);
+
+        /// <summary>The sky's Bortle class at this telescope, 1 (darkest) to 9; 0 until rated. Sent with the profile.</summary>
+        public int Bortle {
+            get => options.GetValueInt32(nameof(Bortle), 0);
+            set { options.SetValueInt32(nameof(Bortle), Math.Max(0, Math.Min(9, value))); RaisePropertyChanged(); }
+        }
 
         public void SetExposure(string filter, double? seconds) {
             var table = Exposures;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.19
+
+- A colour camera's data is its own band, kept apart from the mono channels: OSC-RGB behind a clear or UV/IR cut filter, OSC-Ha+OIII behind a dual-band (OSC-SII+OIII, OSC-Ha+OIII+SII likewise). The depth map, the progress bars and the hours log it under that name, never under Ha, OIII, red, green or blue. Whoever starts a collaboration says whether it takes OSC broadband and OSC narrowband; ticking a box puts the band among the filters wanted with its own hours.
+- Every telescope can rate its sky: *Bortle class* under Options > Plugins > Starfront > This telescope, 1 to 9. A collaboration can ask for a sky no worse than a given Bortle class; a rig that has not rated its sky is told what is wanted rather than refused, and a night reported from a brighter sky is rejected.
+
 ## 1.0.0.18
 
 - One-shot colour cameras take part properly. Under Options > Plugins > Starfront each filter in your wheel has a *Delivers* choice: a mono Ha delivers Ha; a colour camera's clear or UV/IR cut delivers red, green and blue in one sub; an L-eXtreme, L-eNhance, L-Ultimate, ALP-T, NBZ or Askar D1 delivers Ha and OIII at once; a D2 delivers SII and OIII; a Triad Ultra or quad-band all three. The guess from the name is usually right. The server deals you the filters that deliver what a project wants and credits a dual-band night to both its lines.

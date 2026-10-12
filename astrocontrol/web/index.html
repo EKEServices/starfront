@@ -1508,11 +1508,18 @@
               <label class="inline"><input type="checkbox" id="colRCalibrated">
                 Only calibrated frames count</label>
               <div class="row gap" style="margin-top: 6px">
-                <label class="inline"><input type="checkbox" id="colRColour" checked>
-                  One-shot colour cameras may take part</label>
-                <label class="inline">— only with the Moon under
+                <label class="inline" title="A colour camera's broadband is its own band, OSC-RGB, kept apart from mono red, green and blue. Ticking this adds OSC-RGB to the filters; give it hours wanted."><input type="checkbox" id="colROscRgb" checked>
+                  Take OSC broadband (OSC-RGB)</label>
+                <label class="inline" title="A colour camera through a dual-band filter records Ha and OIII on one matrix: its own band, OSC-Ha+OIII. Ticking this adds it to the filters."><input type="checkbox" id="colROscNb" checked>
+                  Take OSC narrowband (OSC-Ha+OIII)</label>
+              </div>
+              <div class="row gap" style="margin-top: 6px">
+                <label class="inline">Colour cameras only with the Moon under
                   <input type="number" id="colRColourMoon" step="5" min="0" max="100"
                          style="width: 64px" placeholder="any"> % lit</label>
+                <label class="inline" title="1 is the darkest sky, 9 an inner city. A rig that has not rated its sky is told, not refused.">Sky no worse than Bortle
+                  <input type="number" id="colRMaxBortle" step="1" min="1" max="9"
+                         style="width: 64px" placeholder="any"></label>
               </div>
               <p class="small muted">
                 A colour camera shoots broadband RGB whatever is in front of it,
@@ -2733,6 +2740,9 @@
       <label>Elevation (m)
         <input type="number" id="siteElevation" step="1" min="-500" max="9000" value="0">
       </label>
+      <label title="1 is the darkest sky there is, 9 an inner city. Sent with your collaboration profile, so a project that asks for a dark sky can tell.">Bortle class of the sky (1–9)
+        <input type="number" id="siteBortle" step="1" min="1" max="9" placeholder="not rated">
+      </label>
     </div>
     <p class="small muted" id="siteNote">
       Longitude is degrees east of Greenwich, so the Americas are negative. The
@@ -3152,14 +3162,14 @@
 
 <div id="toasts" class="toasts"></div>
 
-<script src="app.js?v=70"></script>
+<script src="app.js?v=71"></script>
 <script src="livestack.js?v=65"></script>
 <script src="sky.js?v=66"></script>
 <script src="planner.js?v=62"></script>
 <script src="plan.js?v=64"></script>
 <script src="surveytab.js?v=62"></script>
 <script src="calibrate.js?v=62"></script>
-<script src="collab.js?v=70"></script>
+<script src="collab.js?v=71"></script>
 <script src="allsky.js?v=62"></script>
 <script src="wizard.js?v=66"></script>
 </body>

@@ -106,32 +106,92 @@ _COLOUR_WORDS = ("rgb", "osc", "colour", "color", "oneshotcolour", "oneshotcolor
                  "bayer", "nofilter", "open", "empty")
 
 
-def channels(name: Any, colour: bool = False) -> list[str]:
-    """Which of the seven channels a filter delivers, in a camera's sub.
+#: The bands that are not one of the seven: what a one-shot colour camera
+#: records, and what a mono camera records through a filter that passes two
+#: lines at once. Each is its own data set. An OSC frame through an
+#: L-eXtreme is not Ha and it is not OIII; it is both on one Bayer matrix,
+#: stacked and split by whoever processes it, so it is counted as its own
+#: band and a project says whether it takes it. The spellings are fixed:
+#: "OSC-RGB", "OSC-Ha+OIII", "Ha+OIII".
+_BAND_LINES: dict[str, tuple[str, ...]] = {
+    "RGB": ("R", "G", "B"),
+    "Ha": ("H",), "OIII": ("O",), "SII": ("S",),
+    "Ha+OIII": ("H", "O"), "SII+OIII": ("S", "O"), "Ha+SII": ("H", "S"),
+    "Ha+OIII+SII": ("H", "O", "S"),
+}
+BANDS: tuple[str, ...] = tuple(["OSC-" + name for name in _BAND_LINES]
+                               + [name for name in _BAND_LINES if "+" in name])
+_BAND_LOOKUP = {band.lower(): band for band in BANDS}
 
-    "Ha" is ["H"]; "L-eXtreme" is ["H", "O"]; "UV/IR cut" is ["L"] on a mono
-    camera and ["R", "G", "B"] on a colour one, where a clear filter still
-    records three colours; "RGB" is ["R", "G", "B"] whatever the camera. A
-    name nobody here knows is [], which is "say what it delivers", not a
-    guess.
+
+def band(letters: Any, colour: bool = False) -> str:
+    """The band a filter passing these lines records: "OSC-Ha+OIII" on a
+    colour camera, "Ha+OIII" on a mono one, "H" for a mono camera's Ha."""
+    want = tuple(str(c).upper() for c in letters)
+    if colour:
+        if set(want) <= {"R", "G", "B", "L"}:
+            return "OSC-RGB"
+        for name, lines in _BAND_LINES.items():
+            if tuple(sorted(lines)) == tuple(sorted(want)):
+                return "OSC-" + name
+        return ""
+    if len(want) == 1 and want[0] in CHANNELS:
+        return want[0]
+    for name, lines in _BAND_LINES.items():
+        if "+" in name and tuple(sorted(lines)) == tuple(sorted(want)):
+            return name
+    return ""
+
+
+def normal_channel(text: Any) -> str:
+    """A channel or band in its one spelling, or "" for anything else."""
+    clean = str(text if text is not None else "").strip()
+    if clean.upper() in CHANNELS:
+        return clean.upper()
+    return _BAND_LOOKUP.get(clean.lower(), "")
+
+
+def channels(name: Any, colour: bool = False) -> list[str]:
+    """What a filter delivers in a camera's sub: one channel or band.
+
+    "Ha" is ["H"] on a mono camera and ["OSC-Ha"] on a colour one;
+    "L-eXtreme" is ["Ha+OIII"] mono and ["OSC-Ha+OIII"] colour; "UV/IR
+    cut" is ["L"] mono and ["OSC-RGB"] colour, where a clear filter still
+    records three colours on one matrix. A name nobody here knows is [],
+    which is "say what it delivers", not a guess. A list, so a filter could
+    one day deliver two things; today it is one.
     """
     letter = canonical(name)
     if letter in CHANNELS:
-        if colour and letter == "L":
-            return ["R", "G", "B"]
-        return [letter]
+        found = band([letter], colour)
+        return [found] if found else []
     text = _BANDPASS.sub("", str(name if name is not None else "")).strip()
     key = re.sub(r"[\s_\-/+&().,]+", "", text).lower()
     if not key:
         return []
     if key in _COLOUR_WORDS:
-        return ["R", "G", "B"]
-    letters = _MULTI_LOOKUP.get(key)
-    if letters:
-        return list(letters)
+        return ["OSC-RGB"]
+    lines = _MULTI_LOOKUP.get(key)
+    if lines:
+        found = band(lines, colour)
+        return [found] if found else []
     if key in _BROADBAND:
-        return ["R", "G", "B"] if colour else ["L"]
+        return ["OSC-RGB"] if colour else ["L"]
     return []
+
+
+def is_osc(channel: Any) -> bool:
+    """Whether a channel or band is one-shot colour data."""
+    return str(channel or "").upper().startswith("OSC-")
+
+
+def is_narrowband(channel: Any) -> bool:
+    """Whether a channel or band carries an emission line, so it can be shot
+    under a Moon: Ha, SII, or a band with either in it."""
+    text = str(channel or "").upper()
+    if text in ("H", "S"):
+        return True
+    return "HA" in text or "SII" in text
 
 
 def channel_label(letter: Any) -> str:

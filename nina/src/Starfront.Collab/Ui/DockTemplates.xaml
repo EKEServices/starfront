@@ -105,6 +105,11 @@
                             <Button DockPanel.Dock="Right" Padding="8,1" Command="{Binding AddFilterCommand}" Content="Add a filter" />
                             <TextBlock VerticalAlignment="Center" Text="Filters wanted" />
                         </DockPanel>
+                        <!--  Colour cameras: their data is its own band, kept apart from the mono channels, and taken only when asked for.  -->
+                        <StackPanel Margin="0,0,0,4" Orientation="Horizontal">
+                            <CheckBox Content="Take OSC broadband (OSC-RGB)" IsChecked="{Binding AcceptOscRgb}" ToolTip="A colour camera behind a clear or UV/IR cut filter: red, green and blue on one matrix, logged as OSC-RGB" />
+                            <CheckBox Margin="14,0,0,0" Content="Take OSC narrowband (OSC-Ha+OIII)" IsChecked="{Binding AcceptOscNarrowband}" ToolTip="A colour camera behind a dual-band filter: Ha and OIII on one matrix, logged as OSC-Ha+OIII" />
+                        </StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90" />
@@ -171,7 +176,8 @@
                                 <TextBox Grid.Row="4" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MinAltitude, UpdateSourceTrigger=PropertyChanged}" />
                                 <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,0,6,2" VerticalAlignment="Center" Text="Frames per visit ≥" />
                                 <TextBox Grid.Row="4" Grid.Column="3" Margin="0,0,0,2" Text="{Binding MinFrames, UpdateSourceTrigger=PropertyChanged}" />
-                                <CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,4,0,0" Content="Accept colour cameras" IsChecked="{Binding AcceptColour}" />
+                                <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,6,2" VerticalAlignment="Center" Text="Sky ≤ Bortle" ToolTip="1 is the darkest sky, 9 an inner city; a rig that has not rated its sky is told, not refused" />
+                                <TextBox Grid.Row="5" Grid.Column="1" Margin="0,0,0,2" Text="{Binding MaxBortle, UpdateSourceTrigger=PropertyChanged}" />
                                 <CheckBox Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Margin="8,4,0,0" Content="Calibrated frames only" IsChecked="{Binding RequireCalibrated}" />
                             </Grid>
                         </Expander>

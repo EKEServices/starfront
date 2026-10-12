@@ -69,6 +69,9 @@ namespace Starfront.Collab.Server {
         [JsonProperty("minScale")] public double? MinScale { get; set; }
         [JsonProperty("maxScale")] public double? MaxScale { get; set; }
         [JsonProperty("acceptColour")] public bool AcceptColour { get; set; } = true;
+        [JsonProperty("acceptOscRgb")] public bool AcceptOscRgb { get; set; } = true;
+        [JsonProperty("acceptOscNarrowband")] public bool AcceptOscNarrowband { get; set; } = true;
+        [JsonProperty("maxBortle")] public int? MaxBortle { get; set; }
         [JsonProperty("colourMaxMoon")] public double? ColourMaxMoon { get; set; }
         [JsonProperty("maxHfr")] public double? MaxHfr { get; set; }
         [JsonProperty("maxGuideRms")] public double? MaxGuideRms { get; set; }

@@ -102,6 +102,7 @@ namespace Starfront.Collab.Services {
                 ["exposures"] = exposures,
                 ["rotation"] = rotation,
                 ["hoursPerNight"] = settings.HoursPerNight > 0 ? new JValue(settings.HoursPerNight) : JValue.CreateNull(),
+                ["bortle"] = settings.Bortle > 0 ? new JValue(settings.Bortle) : JValue.CreateNull(),
                 ["windowFrom"] = "",
                 ["windowTo"] = "",
                 ["client"] = "nina",

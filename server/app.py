@@ -1430,14 +1430,14 @@ def _sync_task_filters(task: dict[str, Any], wants: collab.Requirements,
         # A rig that has said nothing about its filters is offered the lot,
         # one entry per channel, as before.
         for key in wanted:
-            name = key.upper() if key.upper() in collab.CHANNELS else key
+            name = collab._normal(key) or key
             if key in by_key:
                 fresh.append(by_key[key])
                 continue
             exposure = clamp(float((profile.exposures or {}).get(key) or 0.0) or fallback)
             fresh.append(collab.FilterTask(filter=name, exposure=exposure,
                                            hours=goal_of.get(key) or 1.0,
-                                           channels=[name] if name in collab.CHANNELS else []).payload())
+                                           channels=[name] if collab._normal(name) else []).payload())
     if not fresh:
         return False
     # In the project's order, whatever order the rig lists its filters in:

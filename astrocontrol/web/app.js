@@ -3630,6 +3630,7 @@ function fillSettingsForm(settings) {
   $('siteLatitude').value = site.latitude ?? '';
   $('siteLongitude').value = site.longitude ?? '';
   $('siteElevation').value = site.elevation ?? 0;
+  $('siteBortle').value = site.bortle ?? '';
   const schedule = settings.schedule || {};
   $('schedMinAltitude').value = schedule.minAltitude ?? 30;
   $('schedPerFrame').value = schedule.perFrameSeconds ?? 15;
@@ -4517,6 +4518,8 @@ async function saveSettings() {
   if (longitude !== null) site.longitude = longitude;
   const elevation = numberOrNull('siteElevation');
   if (elevation !== null) site.elevation = elevation;
+  const bortle = numberOrNull('siteBortle');
+  site.bortle = bortle === null ? null : Math.round(bortle);
 
   const optics = {};
   for (const [id, key] of [['opticsFocalLength', 'focalLength'],

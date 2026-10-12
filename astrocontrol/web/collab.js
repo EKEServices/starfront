@@ -418,9 +418,16 @@
       minMoonSeparation: num('colRMoonSep'),
       minAltitude: num('colRMinAlt'),
       requireCalibrated: $('colRCalibrated').checked,
-      acceptColour: $('colRColour').checked,
+      // A colour camera's data is its own band, taken only when the
+      // project lists it: ticking a box puts the band among the filters.
+      acceptOscRgb: $('colROscRgb').checked,
+      acceptOscNarrowband: $('colROscNb').checked,
+      acceptColour: $('colROscRgb').checked || $('colROscNb').checked,
       colourMaxMoon: colourMoon === null ? null : colourMoon / 100,
+      maxBortle: num('colRMaxBortle'),
     };
+    if ($('colROscRgb').checked && !('OSC-RGB' in filters)) filters['OSC-RGB'] = null;
+    if ($('colROscNb').checked && !('OSC-Ha+OIII' in filters)) filters['OSC-Ha+OIII'] = null;
     body.goals = goals;
     // One target or a region to cover. A saved mosaic target picked under
     // "one target" is still a region to cover; a single framing is one spot.
@@ -561,10 +568,17 @@
       else if (wants.maxFocalLength) limits.push(`${wants.maxFocalLength} mm or shorter`);
       if (wants.minScale) limits.push(`${wants.minScale}"/px or coarser`);
       if (wants.maxScale) limits.push(`${wants.maxScale}"/px or finer`);
-      if (wants.acceptColour === false) limits.push('mono cameras only');
-      else if (wants.colourMaxMoon !== null && wants.colourMaxMoon !== undefined) {
-        limits.push(`colour cameras with the Moon under ${Math.round(wants.colourMaxMoon * 100)}%`);
+      const osc = [];
+      if (wants.acceptColour !== false && wants.acceptOscRgb !== false) osc.push('OSC-RGB');
+      if (wants.acceptColour !== false && wants.acceptOscNarrowband !== false) osc.push('OSC narrowband');
+      if (!osc.length) limits.push('mono cameras only');
+      else {
+        limits.push(`takes ${osc.join(' and ')}`);
+        if (wants.colourMaxMoon !== null && wants.colourMaxMoon !== undefined) {
+          limits.push(`colour cameras with the Moon under ${Math.round(wants.colourMaxMoon * 100)}%`);
+        }
       }
+      if (wants.maxBortle) limits.push(`Bortle ${wants.maxBortle} or darker`);
       if (wants.maxHfr) limits.push(`stars within ${wants.maxHfr}"`);
       if (wants.maxGuideRms) limits.push(`guiding within ${wants.maxGuideRms}"`);
       // The project's rules for the night, which every rig on it follows.
@@ -945,9 +959,12 @@
     set('colPNotes', project.notes || '');
     set('colRMinFocal', wants.minFocalLength);
     set('colRMaxFocal', wants.maxFocalLength);
-    if ($('colRColour')) $('colRColour').checked = wants.acceptColour !== false;
+    const takesColour = wants.acceptColour !== false;
+    if ($('colROscRgb')) $('colROscRgb').checked = takesColour && wants.acceptOscRgb !== false;
+    if ($('colROscNb')) $('colROscNb').checked = takesColour && wants.acceptOscNarrowband !== false;
     set('colRColourMoon', wants.colourMaxMoon === null || wants.colourMaxMoon === undefined
       ? '' : Math.round(wants.colourMaxMoon * 100));
+    set('colRMaxBortle', wants.maxBortle);
     if ($('colShapeMosaic') && $('colShapeOne')) {
       $('colShapeMosaic').checked = project.kind !== 'single';
       $('colShapeOne').checked = project.kind === 'single';

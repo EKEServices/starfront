@@ -5,7 +5,7 @@
                     "Major":  "1",
                     "Minor":  "0",
                     "Patch":  "0",
-                    "Build":  "18"
+                    "Build":  "19"
                 },
     "Author":  "Starfront Observatories",
     "Homepage":  "https://collab.starfront.space",
@@ -36,9 +36,9 @@
                          "AltScreenshotURL":  ""
                      },
     "Installer":  {
-                      "URL":  "https://collab.starfront.space/nina/download/Starfront.Collab.1.0.0.18.zip",
+                      "URL":  "https://collab.starfront.space/nina/download/Starfront.Collab.1.0.0.19.zip",
                       "Type":  "ARCHIVE",
-                      "Checksum":  "463AFA71F0154529057D18FE948E95855F6BD7D014FD02B57C27D2CF3F7D6383",
+                      "Checksum":  "6607CD0E863C4469944EE8FAE33CEE539D11669D7ACFD8998288F5B9CD2C961A",
                       "ChecksumType":  "SHA256"
                   }
 }
