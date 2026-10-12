@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.20
+
+- The collaboration list is built for hundreds. One line per collaboration (name, coordinator, kind and size, filters, how far along, hours collected, who is on it, how high it is in your sky now, and whether you can take part), a search box that matches a word anywhere on the card, switches for *I can take part* and *Joined*, and a sort: what needs you, most active, highest in your sky now, newest, by name. A line opens into the full card; the sky pictures are fetched only for open cards, and the list scrolls on its own, so a thousand rows cost what the visible dozen do.
+
 ## 1.0.0.19
 
 - A colour camera's data is its own band, kept apart from the mono channels: OSC-RGB behind a clear or UV/IR cut filter, OSC-Ha+OIII behind a dual-band (OSC-SII+OIII, OSC-Ha+OIII+SII likewise). The depth map, the progress bars and the hours log it under that name, never under Ha, OIII, red, green or blue. Whoever starts a collaboration says whether it takes OSC broadband and OSC narrowband; ticking a box puts the band among the filters wanted with its own hours.

@@ -31,7 +31,14 @@ namespace Starfront.Collab.Ui {
         private ImageSource framing;
         private string framingNote = "fetching the sky…";
 
-        public ProjectRowVM(ProjectListing listing, DealTask task, StarfrontDockVM owner) {
+        private readonly StarfrontDockVM owner;
+        private bool expanded;
+        private double? altitudeNow;
+        private bool altitudeKnown;
+
+        public ProjectRowVM(ProjectListing listing, DealTask task, StarfrontDockVM owner, bool expanded = false) {
+            this.owner = owner;
+            this.expanded = expanded;
             Listing = listing;
             Task = task;
             Mine = Runtime.Ready && listing.OwnerId.Length > 0 && listing.OwnerId == Runtime.Session.UserId;
@@ -41,6 +48,85 @@ namespace Starfront.Collab.Ui {
             EditCommand = new RelayCommand(() => owner.Start.BeginEdit(listing), () => Mine);
             CloseCommand = new AsyncRelayCommand(() => owner.CloseAsync(listing), () => Mine);
             RedealCommand = new AsyncRelayCommand(() => owner.RedealAsync(listing), () => Mine);
+            ToggleCommand = new RelayCommand(() => Expanded = !Expanded);
+        }
+
+        /// <summary>Whether the card is open. The list keeps one line per collaboration until it is.</summary>
+        public bool Expanded {
+            get => expanded;
+            set {
+                if (expanded == value) return;
+                expanded = value;
+                RaisePropertyChanged();
+                RaisePropertyChanged(nameof(Chevron));
+                owner.Remember(Id, value);
+                if (value) owner.LoadVisuals(this);
+            }
+        }
+
+        public string Chevron => expanded ? "▾" : "▸";
+        public RelayCommand ToggleCommand { get; }
+        /// <summary>Whether the sky picture and the altitude chart have been fetched for this row; only open cards fetch them.</summary>
+        public bool VisualsLoaded { get; set; }
+
+        /// <summary>The one line a browser reads before opening a card.</summary>
+        public string Summary {
+            get {
+                var region = Listing.Region;
+                var size = region == null ? "" : $"{region.Width:0.0}° × {region.Height:0.0}°";
+                var kind = Listing.Kind == "single" ? "single field" : "mosaic";
+                var collected = (Listing.Collected ?? new Dictionary<string, double>()).Values.Sum();
+                var progress = Listing.Progress ?? new Dictionary<string, ProgressFigures>();
+                var done = progress.Count > 0 ? $"{progress.Values.Average(p => p.AtGoal) * 100:0}% done" : "";
+                var hours = collected > 0 ? $"{collected:0.0} h collected" : "nothing collected yet";
+                var settings = Runtime.Ready ? Runtime.Settings : null;
+                var wants = string.Join(" ", (Listing.Goals ?? new Dictionary<string, double>()).Keys
+                    .Select(k => settings != null ? settings.FilterName(k) : k));
+                var people = Listing.Participants > 0
+                    ? $"{Listing.Participants} telescope{(Listing.Participants == 1 ? "" : "s")}{(Listing.ParticipantsOnline > 0 ? $", {Listing.ParticipantsOnline} online" : "")}"
+                    : "nobody on it yet";
+                var up = AltitudeNow is double altitude ? $"{altitude:0}° up now" : "";
+                return string.Join(" · ", new[] { kind, size, wants, done, hours, people, up }.Where(s => s.Length > 0));
+            }
+        }
+
+        /// <summary>The target's altitude right now, from this site, for the sort; null without a region.</summary>
+        public double? AltitudeNow {
+            get {
+                if (altitudeKnown) return altitudeNow;
+                altitudeKnown = true;
+                var region = Listing.Region;
+                if (region == null || !Runtime.Ready) return altitudeNow = null;
+                try {
+                    var coordinates = new Coordinates(Angle.ByDegree(region.Ra), Angle.ByDegree(region.Dec), Epoch.J2000);
+                    altitudeNow = SkyMath.AltAz(coordinates, Runtime.Host.Profile, DateTime.Now).altitude;
+                } catch (Exception) {
+                    altitudeNow = null;
+                }
+                return altitudeNow;
+            }
+        }
+
+        /// <summary>How far along the field is on average over its filters, 0 to 1; a project with no goals counts as empty.</summary>
+        public double Average {
+            get {
+                var progress = Listing.Progress ?? new Dictionary<string, ProgressFigures>();
+                return progress.Count > 0 ? progress.Values.Average(p => p.Average) : 0.0;
+            }
+        }
+
+        /// <summary>Whether a word somebody typed is anywhere on this card.</summary>
+        public bool Matches(string needle) {
+            if (string.IsNullOrWhiteSpace(needle)) return true;
+            var words = needle.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            var text = string.Join(" ", new[] {
+                Listing.Name, Listing.Coordinator, Listing.Notes, Listing.Kind,
+                string.Join(" ", (Listing.Goals ?? new Dictionary<string, double>()).Keys.Select(Sky.Filters.Label)),
+                string.Join(" ", (Listing.Requirements?.Filters ?? new Dictionary<string, double?>()).Keys.Select(Sky.Filters.Label)),
+                string.Join(" ", Listing.ParticipantNames ?? new List<string>()),
+                Joined ? "joined" : "", Mine ? "mine yours" : "",
+            }.Where(s => !string.IsNullOrEmpty(s)));
+            return words.All(w => text.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         public ProjectListing Listing { get; }
@@ -182,6 +268,24 @@ namespace Starfront.Collab.Ui {
         private readonly SkyThumbnails thumbnails;
         private bool initialized;
         private string message = "";
+        // The whole list, and what the person asked to see of it.
+        private List<ProjectRowVM> all = new();
+        private readonly HashSet<string> opened = new(StringComparer.Ordinal);
+        private string search = "";
+        private bool onlyFit;
+        private bool onlyJoined;
+        private string sortBy = "need";
+
+        /// <summary>A way to sort the list.</summary>
+        public sealed record SortChoice(string Code, string Label);
+
+        public IReadOnlyList<SortChoice> SortChoices { get; } = new List<SortChoice> {
+            new("need", "Needs me: joined, then ones I can take part in, thinnest first"),
+            new("activity", "Most active: telescopes online, then on it"),
+            new("altitude", "Highest in my sky right now"),
+            new("newest", "Newest first"),
+            new("name", "By name"),
+        };
 
         [ImportingConstructor]
         public StarfrontDockVM(IProfileService profileService,
@@ -211,6 +315,7 @@ namespace Starfront.Collab.Ui {
             }
             RefreshCommand = new AsyncRelayCommand(RefreshAsync);
             SignInCommand = new AsyncRelayCommand(SignInAsync);
+            ClearSearchCommand = new RelayCommand(() => Search = "");
             Start = new StartCollabVM(framingAssistant, RefreshAsync);
             Projects = new ObservableCollection<ProjectRowVM>();
             Tonight = new ObservableCollection<string>();
@@ -252,6 +357,22 @@ namespace Starfront.Collab.Ui {
 
         public AsyncRelayCommand RefreshCommand { get; }
         public AsyncRelayCommand SignInCommand { get; }
+        public RelayCommand ClearSearchCommand { get; }
+
+        /// <summary>A word or two; every card with all of them somewhere stays in the list.</summary>
+        public string Search { get => search; set { search = value ?? ""; RaisePropertyChanged(); Refilter(); } }
+        public bool OnlyFit { get => onlyFit; set { onlyFit = value; RaisePropertyChanged(); Refilter(); } }
+        public bool OnlyJoined { get => onlyJoined; set { onlyJoined = value; RaisePropertyChanged(); Refilter(); } }
+        public string SortBy { get => sortBy; set { sortBy = value ?? "need"; RaisePropertyChanged(); Refilter(); } }
+        public string ShownText => all.Count == 0 ? "" : (Projects.Count == all.Count ? $"{all.Count} open" : $"{Projects.Count} of {all.Count} open");
+        public string EmptyText {
+            get {
+                if (all.Count == 0) return "None are open right now.";
+                if (Projects.Count == 0) return "Nothing matches. Clear the search or the switches.";
+                return "";
+            }
+        }
+
         /// <summary>The form that starts a collaboration, and edits one of yours.</summary>
         public StartCollabVM Start { get; }
         /// <summary>Anybody signed in may start one: being in the Discord server is the whole gate.</summary>
@@ -293,14 +414,12 @@ namespace Starfront.Collab.Ui {
             try {
                 var session = Runtime.Session;
                 var tasks = session.Tasks;
-                Projects.Clear();
-                foreach (var listing in session.Projects.OrderByDescending(p => p.Joined).ThenBy(p => p.Name)) {
-                    var task = tasks.FirstOrDefault(t => t.Live && t.Project == listing.Id);
-                    var row = new ProjectRowVM(listing, task, this);
-                    Projects.Add(row);
-                    LoadTransit(row);
-                    _ = LoadFramingAsync(row);
-                }
+                // Rows for every open collaboration, none of them fetching a
+                // picture: the pictures come when a card is opened, and a card
+                // that was open stays open across a check-in.
+                all = session.Projects.Select(listing => new ProjectRowVM(
+                    listing, tasks.FirstOrDefault(t => t.Live && t.Project == listing.Id), this, opened.Contains(listing.Id))).ToList();
+                Refilter();
                 Tonight.Clear();
                 foreach (var deal in session.DealTonight()) Tonight.Add($"{deal.ProjectName}: {StarfrontSession.Describe(deal)}");
                 if (Tonight.Count == 0) Tonight.Add(tasks.Count == 0 ? "No collaboration joined yet." : "Nothing dealt for tonight yet; the deal is read when the sequence runs.");
@@ -320,6 +439,43 @@ namespace Starfront.Collab.Ui {
             RaisePropertyChanged(nameof(StatusText));
             RaisePropertyChanged(nameof(OnlineText));
             RebuildPlan();
+        }
+
+        /// <summary>The list as asked for: the search, the two switches, the sort.</summary>
+        private void Refilter() {
+            if (!initialized) return;
+            IEnumerable<ProjectRowVM> rows = all.Where(r => r.Matches(search));
+            if (onlyFit) rows = rows.Where(r => r.FitOk);
+            if (onlyJoined) rows = rows.Where(r => r.Joined);
+            rows = sortBy switch {
+                "activity" => rows.OrderByDescending(r => r.Listing.ParticipantsOnline).ThenByDescending(r => r.Listing.Participants).ThenBy(r => r.Name),
+                "altitude" => rows.OrderByDescending(r => r.AltitudeNow ?? -90.0).ThenBy(r => r.Name),
+                "newest" => rows.OrderByDescending(r => r.Listing.Created).ThenBy(r => r.Name),
+                "name" => rows.OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase),
+                // What needs me: the ones I am on, then the ones I could be on,
+                // and within each the field furthest from its goal first.
+                _ => rows.OrderByDescending(r => r.Joined).ThenByDescending(r => r.FitOk).ThenBy(r => r.Average).ThenBy(r => r.Name),
+            };
+            Projects.Clear();
+            foreach (var row in rows) {
+                Projects.Add(row);
+                if (row.Expanded) LoadVisuals(row);
+            }
+            RaisePropertyChanged(nameof(ShownText));
+            RaisePropertyChanged(nameof(EmptyText));
+        }
+
+        /// <summary>Keep a card's open state across check-ins and re-sorts.</summary>
+        public void Remember(string projectId, bool open) {
+            if (open) opened.Add(projectId); else opened.Remove(projectId);
+        }
+
+        /// <summary>Fetch a card's sky picture and altitude chart, once, when it is opened.</summary>
+        public void LoadVisuals(ProjectRowVM row) {
+            if (row.VisualsLoaded) return;
+            row.VisualsLoaded = true;
+            LoadTransit(row);
+            _ = LoadFramingAsync(row);
         }
 
         /// <summary>Close one of your collaborations: off everybody's list, the ledger kept.</summary>

@@ -27,6 +27,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -723,6 +724,7 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             continue
         payload = project.get("payload") or {}
         wants = collab.Requirements.read(payload.get("requirements") or {})
+        collected, progress = _figures(project["id"], payload)
         listed.append({
             "id": project["id"],
             "name": project["name"],
@@ -730,6 +732,7 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             # Whose it is, so a program can offer Edit and Close only to the
             # person who may use them. The server enforces it either way.
             "ownerId": project.get("owner_id") or "",
+            "created": float(project.get("created") or 0.0),
             "region": payload.get("region") or {},
             "kind": payload.get("kind") or "mosaic",
             "requirements": wants.payload(),
@@ -739,14 +742,46 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             "joined": project["id"] in mine,
             # What everyone together has collected, so somebody choosing where
             # to point can choose the one that needs them.
-            "collected": _collected(project["id"]),
+            "collected": collected,
             # How much of the *field* is at the goal, per filter. On a mosaic
             # this is the number that means anything; see `_progress`.
-            "progress": _progress(project["id"], payload),
+            "progress": progress,
             # Who is on it, and how many of them are about tonight.
             **_participants(project["id"], time.time()),
         })
     return {"projects": listed, "protocol": collab.PROTOCOL}
+
+
+#: The collected hours and the progress of every open project, kept from
+#: one listing to the next. Every rig lists every project at every
+#: check-in, and the progress is a depth map laid over the whole field from
+#: every frame anybody has reported - cheap for ten projects, not for five
+#: hundred polled by a few hundred rigs. A project's figures change only
+#: when a night lands on it or its goals or region move, so they are
+#: remembered against exactly that.
+_figures_cache: dict[str, tuple[Any, dict[str, float], dict[str, dict[str, float]]]] = {}
+_figures_lock = threading.Lock()
+
+
+def _figures(project_id: str, payload: dict[str, Any]
+             ) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+    """A project's collected hours per filter and its progress, cached
+    until a contribution lands or the project's goals or region change."""
+    rows = store.contributions(project_id)
+    accepted = [r for r in rows if r.get("accepted")]
+    stamp = (len(rows), len(accepted),
+             max((float(r.get("received") or 0.0) for r in rows), default=0.0),
+             json.dumps({"goals": payload.get("goals"), "region": payload.get("region"),
+                         "kind": payload.get("kind")}, sort_keys=True, default=str))
+    with _figures_lock:
+        held = _figures_cache.get(project_id)
+        if held is not None and held[0] == stamp:
+            return held[1], held[2]
+    collected = _collected(project_id)
+    progress = _progress(project_id, payload)
+    with _figures_lock:
+        _figures_cache[project_id] = (stamp, collected, progress)
+    return collected, progress
 
 
 def _goals(goals: dict[str, float]) -> dict[str, float]:

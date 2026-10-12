@@ -122,6 +122,7 @@ namespace Starfront.Collab.Server {
         [JsonProperty("name")] public string Name { get; set; } = "";
         [JsonProperty("coordinator")] public string Coordinator { get; set; } = "";
         [JsonProperty("ownerId")] public string OwnerId { get; set; } = "";
+        [JsonProperty("created")] public double Created { get; set; }
         [JsonProperty("region")] public Region Region { get; set; }
         [JsonProperty("kind")] public string Kind { get; set; } = "mosaic";
         [JsonProperty("requirements")] public Requirements Requirements { get; set; } = new();

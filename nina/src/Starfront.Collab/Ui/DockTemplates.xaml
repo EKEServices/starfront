@@ -193,22 +193,94 @@
                     </StackPanel>
                 </Expander>
 
+                <!--  The list: made to be searched through at hundreds. One compact line per
+                      collaboration, sorted by what matters, filtered by a word and two
+                      switches; a line opens into the full card, and the sky pictures are
+                      fetched only for cards that are open. The list scrolls on its own,
+                      virtualised, so a thousand rows cost what the visible dozen do.  -->
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Collaborations" />
-                <TextBlock Opacity="0.7" Text="None are open right now." Visibility="{Binding Projects.Count, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
-                <ItemsControl ItemsSource="{Binding Projects}">
-                    <ItemsControl.ItemTemplate>
+                <DockPanel Margin="0,0,0,4">
+                    <Button DockPanel.Dock="Right" Margin="4,0,0,0" Padding="6,1" Command="{Binding ClearSearchCommand}" Content="×" ToolTip="Clear the search" Visibility="{Binding Search, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                    <ComboBox
+                        DockPanel.Dock="Right"
+                        Width="190"
+                        Margin="6,0,0,0"
+                        DisplayMemberPath="Label"
+                        ItemsSource="{Binding SortChoices}"
+                        SelectedValue="{Binding SortBy, Mode=TwoWay}"
+                        SelectedValuePath="Code"
+                        ToolTip="What the list is sorted by" />
+                    <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}" ToolTip="A word from the name, the coordinator, the notes, a filter or a participant" />
+                </DockPanel>
+                <StackPanel Margin="0,0,0,4" Orientation="Horizontal">
+                    <CheckBox Content="I can take part" IsChecked="{Binding OnlyFit}" ToolTip="Only collaborations this telescope qualifies for" />
+                    <CheckBox Margin="14,0,0,0" Content="Joined" IsChecked="{Binding OnlyJoined}" ToolTip="Only the ones this telescope is on" />
+                    <TextBlock Margin="14,0,0,0" VerticalAlignment="Center" Opacity="0.7" Text="{Binding ShownText}" />
+                </StackPanel>
+                <TextBlock Opacity="0.7" Text="{Binding EmptyText}" Visibility="{Binding EmptyText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                <ListBox
+                    MaxHeight="720"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    HorizontalContentAlignment="Stretch"
+                    ItemsSource="{Binding Projects}"
+                    ScrollViewer.CanContentScroll="True"
+                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                    VirtualizingPanel.IsVirtualizing="True"
+                    VirtualizingPanel.VirtualizationMode="Recycling"
+                    VirtualizingPanel.ScrollUnit="Pixel">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0" />
+                            <Setter Property="Focusable" Value="False" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <ContentPresenter />
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
                         <DataTemplate>
                             <Border
-                                Margin="0,0,0,6"
-                                Padding="8,6"
+                                Margin="0,0,0,4"
+                                Padding="8,4"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="3">
                                 <StackPanel>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                        <TextBlock Margin="6,0,0,0" Opacity="0.7" Text="{Binding Coordinator}" />
-                                    </StackPanel>
+                                    <!--  The compact line: everything a browser decides on, and a click to open it.  -->
+                                    <Button
+                                        Padding="0"
+                                        HorizontalContentAlignment="Stretch"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Command="{Binding ToggleCommand}"
+                                        Cursor="Hand">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="18" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Top" Opacity="0.7" Text="{Binding Chevron}" />
+                                            <StackPanel Grid.Column="1">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                                    <TextBlock Margin="6,0,0,0" Opacity="0.7" Text="{Binding Coordinator}" />
+                                                    <TextBlock Margin="6,0,0,0" FontSize="11" Foreground="#7EE7A5" Text="joined" Visibility="{Binding Joined, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                                </StackPanel>
+                                                <TextBlock Opacity="0.85" FontSize="11" Text="{Binding Summary}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Top" FontSize="11" FontWeight="SemiBold" Foreground="#7EE7A5" Text="✓ can take part" Visibility="{Binding FitOk, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}" />
+                                            <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Top" FontSize="11" FontWeight="SemiBold" Foreground="#F0A070" Text="✗ cannot" Visibility="{Binding FitOk, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
+                                        </Grid>
+                                    </Button>
+                                    <!--  The card, open.  -->
+                                    <StackPanel Margin="18,4,0,0" Visibility="{Binding Expanded, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
                                     <TextBlock Opacity="0.85" Text="{Binding Detail}" TextWrapping="Wrap" />
                                     <!--  The sky, with the region outlined and this telescope's panels on it.  -->
                                     <Border
@@ -302,11 +374,12 @@
                                         <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding RedealCommand}" Content="Deal again" ToolTip="Every telescope on it is dealt afresh at its next check-in" />
                                         <Button Margin="6,0,0,0" Padding="8,1" Command="{Binding CloseCommand}" Content="Close" ToolTip="Off everybody's list; what was collected stays on record" />
                                     </StackPanel>
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                    </ListBox.ItemTemplate>
+                </ListBox>
 
                 <TextBlock Margin="0,12,0,2" FontWeight="SemiBold" Text="Telescopes online" Visibility="{Binding Telescopes, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                 <ItemsControl ItemsSource="{Binding Telescopes}">
