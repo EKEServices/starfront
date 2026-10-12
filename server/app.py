@@ -1783,10 +1783,10 @@ def override_verdict(row_id: str, accepted: bool = Query(...),
 #: manager reads, and the zips they point at. N.I.N.A. lets anyone add a
 #: *plugin repository* by URL (Options > General > Plugin Repositories) and
 #: fetches `<url>/plugins/manifests` from it, so this server is one: people
-#: given `https://<host>/nina` see the plugin in their plugin manager and
-#: install and update it there, and nobody else sees it at all - which is
-#: what a closed test wants, and what the central manifest repository, with
-#: its review and its public listing, is not.
+#: who add `https://<host>/nina` see the plugin in their plugin manager and
+#: install and update it there, with no review queue and no wait between a
+#: fix and its release - which the central manifest repository, with its
+#: review and its public listing, does not give.
 NINA_DIR = Path(auth.setting("NINA_DIR") or Path(__file__).resolve().parent / "nina_plugin")
 
 _NINA_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.zip$")

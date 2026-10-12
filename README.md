@@ -1964,8 +1964,8 @@ The server is also the plugin's **repository**: N.I.N.A. users add
 `https://<host>/nina` under *Options → General → Plugin Repositories* and the
 plugin appears in their plugin manager, installed and updated from there.
 Releases live in `server/nina_plugin/`; `nina/README.md` says how one is made.
-Nobody who was not given the address sees it, which is what a closed test
-wants.
+Releasing here rather than through the central manifest repository means a
+fix reaches everybody the moment it is deployed, with no review queue.
 
 ## Layout
 

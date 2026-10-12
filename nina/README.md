@@ -14,9 +14,9 @@ builds plugins, so N.I.N.A.'s own plugin manager installs and updates it.
    https://collab.starfront.space/nina
    ```
 
-   Then open the Plugins tab, *Available*, and install **Starfront
-   Collaboration**. Restart N.I.N.A. Updates arrive the same way. (This is the
-   closed-test channel: only people given the address see the plugin.)
+   Then open the Plugins tab, *Available*, and install **Starfront**. Restart
+   N.I.N.A. Updates arrive the same way. You have to be in the Starfront
+   Discord server to take part: https://discord.com/invite/3ut6a7pfsY
 
 2. **Sign in.** Options > Plugins > Starfront > *Sign in with
    Discord*. A browser window opens; you need to be a member of the Starfront

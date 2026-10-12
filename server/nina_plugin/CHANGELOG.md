@@ -1,8 +1,12 @@
 # Changelog
 
+## 1.0.0.24
+
+- The plugin's page says plainly that you have to be in the Starfront Discord server to take part, with the invitation first in the description and among the links at its top; its homepage is the observatory's website. The button on the Imaging-tab panel is gone; the one beside the sign-in button on the options page stays.
+
 ## 1.0.0.23
 
-- A *Join the Discord* button on the Starfront panel and beside the sign-in button on the options page opens the invitation to the Starfront Discord server, which signing in needs.
+- A *Join the Starfront Discord* button beside the sign-in button on the options page opens the invitation to the Starfront Discord server, which signing in needs.
 
 ## 1.0.0.22
 
@@ -108,7 +112,7 @@
 
 ## 1.0.0.0
 
-First closed-test release for the Starfront Observatories community.
+First release for the Starfront Observatories community.
 
 - Sign in with Discord; only members of the Starfront server can take part.
 - Per-filter exposure table; the server deals your share at your own sub lengths.

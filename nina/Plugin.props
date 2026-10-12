@@ -15,8 +15,10 @@
     <Copyright>Copyright © 2026 Starfront Observatories</Copyright>
     <Company>Starfront Observatories</Company>
     <Authors>Starfront Observatories</Authors>
-    <Description>Take part in Starfront collaborations from N.I.N.A.: sign in with Discord, join a project - a single field or a mosaic - and a sequence container shoots what was dealt to your telescope tonight at your own exposures.</Description>
-    <PluginLongDescription>Starfront lets several telescopes work on one target together: a single field everybody adds depth to, or a mosaic shared out between them.
+    <Description>Take part in Starfront collaborations from N.I.N.A.: join the Starfront Discord, sign in with it, join a project - a single field or a mosaic - and a sequence container shoots what was dealt to your telescope tonight at your own exposures.</Description>
+    <PluginLongDescription>**You have to be in the Starfront Discord server to take part.** Join it here: https://discord.com/invite/3ut6a7pfsY - then sign in with Discord under Options > Plugins > Starfront. Membership is the account; there is no password.
+
+Starfront lets several telescopes work on one target together: a single field everybody adds depth to, or a mosaic shared out between them.
 
 A coordinator starts a collaboration on the Starfront server: the field or region of sky, the filters wanted, and how deep to go at every point. Every night the server deals each telescope that has joined its part - the field itself, or a list of panels - and one filter: Ha or SII on a bright Moon, broadband or OIII on a dark one, sized to the hours it gives. A night's deal, once made, holds for the whole night.
 
@@ -26,11 +28,15 @@ This plugin is the N.I.N.A. side of that:
 - **Your filters, your exposures.** The plugin lists the filters in your own filter wheel, by their own names, and you say how long you normally shoot each; the server works out which of its filters each one is. Your share is dealt at those lengths, so every light calibrates against your own darks. Gain, offset and binning come from your N.I.N.A. profile.
 - **One instruction.** Drop the *Starfront collaboration* container into your Advanced Sequence where a target would go, inside your usual autofocus, meridian-flip and dither triggers. When it runs it reads tonight's deal once, then slews, centres (and rotates, if you have a rotator), switches filter and takes the frames - for the field, or for each panel in turn - skipping anything below the project's altitude floor until it rises.
 - **Frames are reported as they land.** Every light the container takes is credited to the sky it covered, with its star size and guiding error, and sent to the server on the next check-in, so everyone's depth map moves on and tomorrow's deal is made from what was really collected.
-- **An Imaging-tab panel** shows who is online, which collaborations are open to your telescope, how far each has got, and what you have been dealt tonight.
+- **An Imaging-tab panel** shows who is online, which collaborations are open to your telescope, how far each has got, and what you have been dealt tonight. You can start your own collaboration from it too.
 
-Closed test release for the Starfront Observatories community.</PluginLongDescription>
-    <RepositoryUrl>https://collab.starfront.space/nina</RepositoryUrl>
-    <PluginHomepage>https://collab.starfront.space</PluginHomepage>
+Made by Starfront Observatories, Rockwood, Texas - https://starfront.space</PluginLongDescription>
+    <!-- The links N.I.N.A. shows at the top of the plugin's page. The homepage is
+         the observatory's website; the "repository" slot carries the Discord
+         invitation, because membership is what taking part needs and the source
+         repository is private. -->
+    <RepositoryUrl>https://discord.com/invite/3ut6a7pfsY</RepositoryUrl>
+    <PluginHomepage>https://starfront.space</PluginHomepage>
     <PluginTags>Collaboration,Mosaic,Deep Sky,Discord,Starfront,Community,Sequencer</PluginTags>
     <MinimumNinaVersion>3.2.0.9001</MinimumNinaVersion>
     <PluginLicense>MPL-2.0</PluginLicense>
