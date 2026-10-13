@@ -2023,14 +2023,16 @@ status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_0
 case("...the same file again is not taken twice", status == 200 and answer["already"] is True)
 status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/notes.txt", b"hello",
                         {"Authorization": f"Bearer {ALICE}", "Content-Length": "5"})
-case("a file that is not a light is refused", status == 400 and "not a light" in answer["detail"])
+case("a file that is not a frame is refused", status == 400 and "not a frame" in answer["detail"])
 status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/fake.fits", b"JFIF" * 100,
                         {"Authorization": f"Bearer {ALICE}", "Content-Length": "400"})
 case("...and so is a .fits that is not a FITS inside", status == 400 and "does not start like" in answer["detail"])
 status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/../../escape.fits", FITS,
                         {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
-case("a path in the name goes nowhere", status in (200, 400, 404)
-     and not (DATA / "escape.fits").exists() and not (DATA.parent / "escape.fits").exists())
+case("a path in the name goes nowhere", status in (200, 400, 404, 405)
+     and not (DATA / "escape.fits").exists() and not (DATA.parent / "escape.fits").exists()
+     and not (DATA / "files" / "escape.fits").exists(),
+     f"{status} {str(answer)[:80]}")
 status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_002.fits", FITS,
                         {"Content-Length": str(len(FITS))})
 case("nobody uploads without signing in", status == 401)
@@ -2058,25 +2060,57 @@ _, listed_bob = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=BOB
 case("the project's owner sees them too", listed_bob["owned"] is True and len(listed_bob["files"]) == 2)
 _, _, landed, polled = sign_in("code-alice")
 ALICE = polled["token"]            # a program sign-in replaces the program token
-status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1001/M31_Ha_001.fits", None,
+status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1001/light/M31_Ha_001.fits", None,
                      {"Authorization": f"Bearer {BOB3}"}, expect_json=False)
 case("...and can download each one", status == 200 and got == FITS)
-status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1002/M31_Ha_002.fits", None,
+status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1002/light/M31_Ha_002.fits", None,
                      {"Authorization": f"Bearer {polled['token']}"}, expect_json=False)
 case("a person may download their own", status == 200 and got == FITS)
-status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1002/M31_Ha_002.fits", None,
-                     {"Authorization": f"Bearer {mine_rig['token']}"}, expect_json=False)
-case("...but files live under the files folder by project and person",
-     (DATA / "files" / FILES_PROJECT / "1002" / "M31_Ha_002.fits").is_file())
+case("...and files live under the files folder by project, person and kind",
+     (DATA / "files" / FILES_PROJECT / "1002" / "lights" / "M31_Ha_002.fits").is_file())
+
+# Calibration frames: told apart by the name N.I.N.A. gave them, or by the
+# kind the uploader chose, each in its own folder.
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/2026-10-12_FLAT_Ha_0001.fits", FITS,
+                        {"Authorization": f"Bearer {BOB3}", "Content-Length": str(len(FITS))})
+case("a flat is told from its name and filed as one",
+     status == 200 and answer["file"]["kind"] == "flat"
+     and (DATA / "files" / FILES_PROJECT / "1002" / "flats" / "2026-10-12_FLAT_Ha_0001.fits").is_file(),
+     str(answer)[:160])
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/2026-10-12_DARKFLAT_Ha_0001.fits", FITS,
+                        {"Authorization": f"Bearer {BOB3}", "Content-Length": str(len(FITS))})
+case("...a dark flat is not read as a dark", status == 200 and answer["file"]["kind"] == "darkflat")
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/frame_0007.fits?kind=bias", FITS,
+                        {"Authorization": f"Bearer {BOB3}", "Content-Length": str(len(FITS))})
+case("...and an unmarked name takes the kind the uploader chose",
+     status == 200 and answer["file"]["kind"] == "bias")
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/frame_0007.fits?kind=plate", FITS,
+                        {"Authorization": f"Bearer {BOB3}", "Content-Length": str(len(FITS))})
+case("...a kind that is not one of the five is refused", status == 400)
+_, listed = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=ALICE)
+case("the listing says what each file is",
+     sorted((f["name"], f["kind"]) for f in listed["files"]) == sorted([
+         ("M31_Ha_001.fits", "light"), ("M31_Ha_002.fits", "light"),
+         ("2026-10-12_FLAT_Ha_0001.fits", "flat"), ("2026-10-12_DARKFLAT_Ha_0001.fits", "darkflat"),
+         ("frame_0007.fits", "bias")]),
+     str([(f["name"], f["kind"]) for f in listed["files"]]))
+status, info, _ = raw("GET", "/api/v1/files/projects", None, {"Authorization": f"Bearer {ALICE}"})
+project_row = next(p for p in info["projects"] if p["id"] == FILES_PROJECT)
+case("...and the page's list counts them by kind",
+     project_row["kinds"] == {"light": 2, "flat": 1, "darkflat": 1, "bias": 1}, str(project_row["kinds"]))
+status, _ = call("DELETE", f"/api/v1/projects/{FILES_PROJECT}/files/frame_0007.fits?kind=bias", token=BOB3)
+case("a calibration frame comes off by its kind", status == 200
+     and not (DATA / "files" / FILES_PROJECT / "1002" / "bias" / "frame_0007.fits").exists())
 status, _ = call("DELETE", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_002.fits", token=BOB3)
 _, listed = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=ALICE)
 case("a person can take their own file off again",
-     status == 200 and [f["name"] for f in listed["files"]] == ["M31_Ha_001.fits"]
-     and not (DATA / "files" / FILES_PROJECT / "1002" / "M31_Ha_002.fits").exists())
+     status == 200 and "M31_Ha_002.fits" not in [f["name"] for f in listed["files"]]
+     and not (DATA / "files" / FILES_PROJECT / "1002" / "lights" / "M31_Ha_002.fits").exists())
 _, health = call("GET", "/api/v1/health")
 case("health reports what the files folder holds and the room left",
-     # Alice's M31_Ha_001 here, and the M42 she put on Orion as the owner.
-     health["files"]["count"] == 2 and health["files"]["bytes"] == 2 * len(FITS)
+     # Alice's M31_Ha_001 here, the M42 she put on Orion as the owner, and
+     # Bob's flat and dark flat.
+     health["files"]["count"] == 4 and health["files"]["bytes"] == 4 * len(FITS)
      and health["files"]["free"] > 0,
      str(health["files"]))
 

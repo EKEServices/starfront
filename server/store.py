@@ -90,12 +90,13 @@ CREATE TABLE IF NOT EXISTS files (
     id          TEXT PRIMARY KEY,
     project     TEXT NOT NULL,
     user        TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'light',
     name        TEXT NOT NULL,
     bytes       INTEGER NOT NULL DEFAULT 0,
     received    REAL NOT NULL,
     telescope   TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS files_once ON files (project, user, name);
+CREATE UNIQUE INDEX IF NOT EXISTS files_once_per_kind ON files (project, user, kind, name);
 
 CREATE TABLE IF NOT EXISTS web_tokens (
     token       TEXT PRIMARY KEY,
@@ -184,6 +185,16 @@ class Store:
             if "back" not in columns:
                 self._db.execute("ALTER TABLE logins ADD COLUMN back "
                                  "TEXT NOT NULL DEFAULT ''")
+            # Files are lights, flats, darks, bias or dark flats, each its
+            # own kind; a database from the day they were lights only gets
+            # the column and loses the index that keyed on the name alone.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(files)")}
+            if "kind" not in columns:
+                self._db.execute("ALTER TABLE files ADD COLUMN kind "
+                                 "TEXT NOT NULL DEFAULT 'light'")
+            self._db.execute("DROP INDEX IF EXISTS files_once")
+            self._db.execute("CREATE UNIQUE INDEX IF NOT EXISTS files_once_per_kind"
+                             " ON files (project, user, kind, name)")
             self._db.executescript(MIGRATE)
             self._db.commit()
 
@@ -391,27 +402,34 @@ class Store:
 
     # -- files -------------------------------------------------------------
     def add_file(self, file_id: str, project_id: str, user_id: str, name: str,
-                 size: int, telescope: str = "") -> dict[str, Any]:
-        """A file received, or received again: one row per project, person
-        and name, at the latest size."""
+                 size: int, telescope: str = "", kind: str = "light") -> dict[str, Any]:
+        """A file received, or received again: one row per project, person,
+        kind and name, at the latest size."""
         self._run(
-            "INSERT INTO files (id, project, user, name, bytes, received, telescope)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(project, user, name) DO UPDATE SET bytes = excluded.bytes,"
+            "INSERT INTO files (id, project, user, kind, name, bytes, received, telescope)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(project, user, kind, name) DO UPDATE SET bytes = excluded.bytes,"
             " received = excluded.received, telescope = excluded.telescope",
-            file_id, project_id, user_id, name, int(size), time.time(), telescope)
-        return self.file(project_id, user_id, name)
+            file_id, project_id, user_id, kind, name, int(size), time.time(), telescope)
+        return self.file(project_id, user_id, name, kind)
 
-    def file(self, project_id: str, user_id: str, name: str) -> dict[str, Any] | None:
-        return self._one("SELECT * FROM files WHERE project = ? AND user = ? AND name = ?",
-                         project_id, user_id, name)
+    def file(self, project_id: str, user_id: str, name: str,
+             kind: str = "light") -> dict[str, Any] | None:
+        return self._one("SELECT * FROM files WHERE project = ? AND user = ?"
+                         " AND kind = ? AND name = ?", project_id, user_id, kind, name)
 
     def files_in(self, project_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
         if user_id is None:
-            return self._all("SELECT * FROM files WHERE project = ? ORDER BY user, name",
+            return self._all("SELECT * FROM files WHERE project = ? ORDER BY user, kind, name",
                              project_id)
-        return self._all("SELECT * FROM files WHERE project = ? AND user = ? ORDER BY name",
-                         project_id, user_id)
+        return self._all("SELECT * FROM files WHERE project = ? AND user = ?"
+                         " ORDER BY kind, name", project_id, user_id)
+
+    def file_kinds(self, project_id: str) -> dict[str, int]:
+        """How many files of each kind a project holds."""
+        rows = self._all("SELECT kind, COUNT(*) AS count FROM files WHERE project = ?"
+                         " GROUP BY kind", project_id)
+        return {str(row["kind"]): int(row["count"]) for row in rows}
 
     def file_totals(self, project_id: str | None = None) -> dict[str, Any]:
         """How many files and bytes a project holds, or the whole server."""
@@ -429,9 +447,10 @@ class Store:
         return {"count": int((row or {}).get("count") or 0),
                 "bytes": int((row or {}).get("bytes") or 0)}
 
-    def remove_file(self, project_id: str, user_id: str, name: str) -> None:
-        self._run("DELETE FROM files WHERE project = ? AND user = ? AND name = ?",
-                  project_id, user_id, name)
+    def remove_file(self, project_id: str, user_id: str, name: str,
+                    kind: str = "light") -> None:
+        self._run("DELETE FROM files WHERE project = ? AND user = ? AND kind = ? AND name = ?",
+                  project_id, user_id, kind, name)
 
     def login(self, code: str) -> dict[str, Any] | None:
         return self._one("SELECT * FROM logins WHERE code = ?", code)

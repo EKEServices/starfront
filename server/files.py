@@ -50,7 +50,45 @@ KEEP_FREE = 2 * 1024 ** 3
 COOKIE = "starfront_web"
 COOKIE_SECONDS = 90 * 86400
 
+#: What a file is: a light, or one of the calibration frames a stack needs.
+#: Each kind is its own folder under the person's, so a coordinator's
+#: calibration is a matter of pointing the stacker at four folders.
+KINDS = ("light", "flat", "dark", "bias", "darkflat")
+KIND_LABELS = {"light": "Lights", "flat": "Flats", "dark": "Darks",
+               "bias": "Bias", "darkflat": "Dark flats"}
+#: The folder each kind is kept in, under the person's.
+KIND_FOLDERS = {"light": "lights", "flat": "flats", "dark": "darks",
+                "bias": "bias", "darkflat": "darkflats"}
+
 _BAD_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+_KIND_WORDS = (
+    # N.I.N.A.'s $$IMAGETYPE$$ and the usual spellings, checked longest first
+    # so "DARKFLAT" is not read as "DARK".
+    (re.compile(r"dark[\s_\-]?flat|flat[\s_\-]?dark", re.I), "darkflat"),
+    (re.compile(r"\bflats?\b|[_\-]flats?[_\-.]", re.I), "flat"),
+    (re.compile(r"\bdarks?\b|[_\-]darks?[_\-.]", re.I), "dark"),
+    (re.compile(r"\bbias\b|[_\-]bias[_\-.]|\boffset\b", re.I), "bias"),
+)
+
+
+def guess_kind(name: str) -> str:
+    """What a file is, read from its name: N.I.N.A. writes the image type
+    into the name by default. Anything unrecognised is a light."""
+    for pattern, kind in _KIND_WORDS:
+        if pattern.search(name or ""):
+            return kind
+    return "light"
+
+
+def clean_kind(kind: str, name: str) -> str:
+    """The kind asked for, or the one the name says when none was."""
+    kind = (kind or "").strip().lower()
+    if kind in KINDS:
+        return kind
+    if kind in ("", "auto"):
+        return guess_kind(name)
+    raise HTTPException(status_code=400,
+                        detail="kind must be one of " + ", ".join(KINDS))
 
 
 def clean_name(name: str) -> str:
@@ -135,8 +173,8 @@ class Files:
         return who
 
     # -- the shape of things ----------------------------------------------
-    def path_of(self, project_id: str, user_id: str, name: str) -> Path:
-        return self.folder / project_id / user_id / name
+    def path_of(self, project_id: str, user_id: str, name: str, kind: str = "light") -> Path:
+        return self.folder / project_id / user_id / KIND_FOLDERS[kind] / name
 
     def collecting(self, project: dict[str, Any]) -> bool:
         return bool((project.get("payload") or {}).get("collectFiles"))
@@ -155,7 +193,8 @@ class Files:
         if user not in names:
             found = self.store.user(user)
             names[user] = str((found or {}).get("name") or user)
-        return {"name": row["name"], "bytes": int(row.get("bytes") or 0),
+        return {"name": row["name"], "kind": row.get("kind") or "light",
+                "bytes": int(row.get("bytes") or 0),
                 "received": float(row.get("received") or 0.0),
                 "telescope": row.get("telescope") or "",
                 "user": user, "uploader": names[user]}
@@ -212,6 +251,7 @@ class Files:
                     "collecting": self.collecting(project),
                     "notes": (project.get("payload") or {}).get("notes") or "",
                     "files": totals["count"], "bytes": totals["bytes"],
+                    "kinds": self.store.file_kinds(project["id"]),
                     "myFiles": mine["count"], "myBytes": mine["bytes"],
                     "owned": owned,
                 })
@@ -220,6 +260,7 @@ class Files:
                 "name": who["name"] if who else "",
                 "admin": bool(who and who["admin"]),
                 "projects": listed,
+                "kinds": [{"id": kind, "label": KIND_LABELS[kind]} for kind in KINDS],
                 "allowed": list(ALLOWED),
                 "maxBytes": MAX_BYTES,
                 "free": self.stats()["free"],
@@ -243,12 +284,16 @@ class Files:
 
         @app.put("/api/v1/projects/{project_id}/files/{name}")
         async def upload(project_id: str, name: str, request: Request,
-                         telescope: str = Query(default="", max_length=60)) -> dict[str, Any]:
+                         telescope: str = Query(default="", max_length=60),
+                         kind: str = Query(default="", max_length=12)) -> dict[str, Any]:
             """One file, streamed to disk as it arrives.
 
-            Idempotent by name and size: a file already here at the same size
-            is not taken again, which is what lets an upload that was cut off
-            be run again over the whole folder. A different size replaces.
+            `kind` says what it is - light, flat, dark, bias, darkflat - or
+            is left blank for the name to say (N.I.N.A. writes the image
+            type into the name). Idempotent by kind, name and size: a file
+            already here at the same size is not taken again, which is what
+            lets an upload that was cut off be run again over the whole
+            folder. A different size replaces.
             """
             who = self.require(request)
             project = self._project(project_id)
@@ -260,8 +305,9 @@ class Files:
             clean = clean_name(name)
             if not clean:
                 raise HTTPException(status_code=400,
-                                    detail="not a light: a file name ending in "
+                                    detail="not a frame: a file name ending in "
                                            + ", ".join(ALLOWED) + " is expected")
+            what = clean_kind(kind, clean)
             try:
                 length = int(request.headers.get("content-length") or "-1")
             except ValueError:
@@ -273,8 +319,8 @@ class Files:
                                     detail=f"larger than {MAX_BYTES // 1024 ** 3} GB")
             if length == 0:
                 raise HTTPException(status_code=400, detail="an empty file")
-            existing = self.store.file(project_id, who["id"], clean)
-            final = self.path_of(project_id, who["id"], clean)
+            existing = self.store.file(project_id, who["id"], clean, what)
+            final = self.path_of(project_id, who["id"], clean, what)
             if existing is not None and int(existing["bytes"]) == length and final.is_file():
                 return {"file": self._row(existing, {}), "already": True}
             if self.stats()["free"] - length < KEEP_FREE:
@@ -312,26 +358,29 @@ class Files:
                 raise
             label = telescope.strip() or str(who.get("telescope") or "")
             row = self.store.add_file(secrets.token_hex(8), project_id, who["id"],
-                                      clean, written, label[:60])
+                                      clean, written, label[:60], what)
             return {"file": self._row(row, {}), "already": False}
 
-        @app.get("/api/v1/projects/{project_id}/files/{user_id}/{name}")
-        def download(project_id: str, user_id: str, name: str, request: Request):
+        @app.get("/api/v1/projects/{project_id}/files/{user_id}/{kind}/{name}")
+        def download(project_id: str, user_id: str, kind: str, name: str, request: Request):
             """A file back out: the coordinator's, or your own."""
             who = self.require(request)
             project = self._project(project_id)
             if who["id"] != user_id and not self.owns_project(who, project):
                 raise HTTPException(status_code=403, detail="not your file")
             clean = clean_name(name)
-            row = self.store.file(project_id, user_id, clean) if clean else None
-            path = self.path_of(project_id, user_id, clean) if clean else None
-            if row is None or path is None or not path.is_file():
+            if not clean or kind not in KINDS:
+                raise HTTPException(status_code=404, detail="no such file")
+            row = self.store.file(project_id, user_id, clean, kind)
+            path = self.path_of(project_id, user_id, clean, kind)
+            if row is None or not path.is_file():
                 raise HTTPException(status_code=404, detail="no such file")
             return FileResponse(path, media_type="application/octet-stream", filename=clean)
 
         @app.delete("/api/v1/projects/{project_id}/files/{name}")
         def remove(project_id: str, name: str, request: Request,
-                   user: str = Query(default="", max_length=64)) -> dict[str, Any]:
+                   user: str = Query(default="", max_length=64),
+                   kind: str = Query(default="light", max_length=12)) -> dict[str, Any]:
             """Take a file off: your own, or, as the coordinator, anybody's."""
             who = self.require(request)
             project = self._project(project_id)
@@ -339,12 +388,12 @@ class Files:
             if target != who["id"] and not self.owns_project(who, project):
                 raise HTTPException(status_code=403, detail="not your file")
             clean = clean_name(name)
-            if not clean or self.store.file(project_id, target, clean) is None:
+            if not clean or kind not in KINDS or self.store.file(project_id, target, clean, kind) is None:
                 raise HTTPException(status_code=404, detail="no such file")
             with _quiet():
-                self.path_of(project_id, target, clean).unlink()
-            self.store.remove_file(project_id, target, clean)
-            return {"removed": clean}
+                self.path_of(project_id, target, clean, kind).unlink()
+            self.store.remove_file(project_id, target, clean, kind)
+            return {"removed": clean, "kind": kind}
 
 
 class _quiet:
@@ -396,7 +445,7 @@ _PAGE = r"""<!doctype html>
 </style></head>
 <body><main>
 <h1>Starfront files</h1>
-<p class="muted">Where a collaboration's lights are collected for stacking. Drop the night's folder; only the FITS and XISF files in it are taken, and files already here are skipped, so you can drop the same folder again tomorrow.</p>
+<p class="muted">Where a collaboration's frames are collected for stacking: lights, and the flats, darks and bias that calibrate them. Drop the night's folder; only the FITS and XISF files in it are taken, each sorted by what it is, and files already here are skipped, so you can drop the same folder again tomorrow.</p>
 
 <section id="signin" hidden>
   <p>Sign in with the Discord account you use for Starfront. Signing in here does not sign your N.I.N.A. or Starfront out.</p>
@@ -414,7 +463,15 @@ _PAGE = r"""<!doctype html>
   <p id="none" class="muted" hidden>No collaboration is collecting files right now.</p>
 
   <div id="uploader" hidden>
-    <h2>Your lights</h2>
+    <h2>Your frames</h2>
+    <p class="row">
+      <label>These are
+        <select id="kind" style="min-width:200px;margin-left:6px">
+          <option value="auto">whatever the file name says</option>
+        </select>
+      </label>
+      <span class="small muted" id="kindNote">N.I.N.A. writes LIGHT, FLAT, DARK or BIAS into the name; anything unmarked counts as a light.</span>
+    </p>
     <div class="drop" id="drop">
       <p>Drop files or a folder here</p>
       <p class="row" style="justify-content:center">
@@ -423,21 +480,21 @@ _PAGE = r"""<!doctype html>
         <input type="file" id="files" multiple hidden>
         <input type="file" id="folder" webkitdirectory multiple hidden>
       </p>
-      <p class="small muted">Lights only, as N.I.N.A. saved them; the file names say which collaboration and panel. Keep this tab open while it uploads.</p>
+      <p class="small muted">As N.I.N.A. saved them, raw. Flats for every filter you shot, and darks and bias at the same gain, offset, binning, temperature and exposure as your lights. Keep this tab open while it uploads.</p>
     </div>
     <p class="row"><input type="text" id="telescope" placeholder="Telescope (optional)" style="min-width:220px"> <span class="small muted">written against each file, so the coordinator can tell rigs apart</span></p>
     <p id="progress" hidden><span id="progressText"></span></p>
     <div class="bar" id="allBar" hidden><i></i></div>
-    <table id="queue" hidden><thead><tr><th>File</th><th class="num">Size</th><th>State</th></tr></thead><tbody></tbody></table>
+    <table id="queue" hidden><thead><tr><th>File</th><th>Kind</th><th class="num">Size</th><th>State</th></tr></thead><tbody></tbody></table>
 
     <h2 id="mineHead">Already here from you</h2>
     <p class="small muted" id="mineNote"></p>
-    <table id="mine"><thead><tr><th>File</th><th>Telescope</th><th class="num">Size</th><th>Received</th><th></th></tr></thead><tbody></tbody></table>
+    <table id="mine"><thead><tr><th>File</th><th>Kind</th><th>Telescope</th><th class="num">Size</th><th>Received</th><th></th></tr></thead><tbody></tbody></table>
 
     <div id="ownerBox" hidden>
       <h2>Everything on this collaboration</h2>
       <p class="small muted" id="allNote"></p>
-      <table id="all"><thead><tr><th>Person</th><th>File</th><th>Telescope</th><th class="num">Size</th><th>Received</th><th></th></tr></thead><tbody></tbody></table>
+      <table id="all"><thead><tr><th>Person</th><th>File</th><th>Kind</th><th>Telescope</th><th class="num">Size</th><th>Received</th><th></th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 </section>
@@ -445,7 +502,13 @@ _PAGE = r"""<!doctype html>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { projects: [], allowed: [], project: null, owned: false, running: false, queue: [] };
+  const state = { projects: [], allowed: [], kinds: [], project: null, owned: false, running: false, queue: [] };
+  const KIND_WORDS = [[/dark[\s_\-]?flat|flat[\s_\-]?dark/i, 'darkflat'], [/\bflats?\b|[_\-]flats?[_\-.]/i, 'flat'],
+                      [/\bdarks?\b|[_\-]darks?[_\-.]/i, 'dark'], [/\bbias\b|[_\-]bias[_\-.]|\boffset\b/i, 'bias']];
+  const guessKind = (name) => { for (const [re, k] of KIND_WORDS) if (re.test(name)) return k; return 'light'; };
+  const kindOf = (name) => { const chosen = $('kind').value; return chosen === 'auto' ? guessKind(name) : chosen; };
+  const label = (k) => (state.kinds.find((x) => x.id === k) || { label: k }).label;
+  const kindSummary = (kinds) => Object.entries(kinds || {}).map(([k, n]) => `${n} ${label(k).toLowerCase()}`).join(', ');
 
   const mb = (n) => n >= 1024 ** 3 ? (n / 1024 ** 3).toFixed(2) + ' GB' : (n / 1024 ** 2).toFixed(1) + ' MB';
   const when = (t) => t ? new Date(t * 1000).toLocaleString() : '';
@@ -460,16 +523,23 @@ _PAGE = r"""<!doctype html>
 
   async function load() {
     const info = await api('/api/v1/files/projects');
-    state.projects = info.projects; state.allowed = info.allowed;
+    state.projects = info.projects; state.allowed = info.allowed; state.kinds = info.kinds || [];
     $('signin').hidden = info.signedIn; $('app').hidden = !info.signedIn;
     if (!info.signedIn) return;
     $('who').textContent = info.name;
+    const kindSelect = $('kind');
+    while (kindSelect.options.length > 1) kindSelect.remove(1);
+    for (const k of state.kinds) {
+      const o = document.createElement('option');
+      o.value = k.id; o.textContent = k.label;
+      kindSelect.appendChild(o);
+    }
     const select = $('project');
     select.innerHTML = '';
     for (const p of info.projects) {
       const o = document.createElement('option');
       o.value = p.id;
-      o.textContent = `${p.name} — ${p.coordinator || 'no coordinator'} · ${p.files} file${p.files === 1 ? '' : 's'}, ${mb(p.bytes)}` + (p.collecting ? '' : ' (not collecting; yours)');
+      o.textContent = `${p.name} — ${p.coordinator || 'no coordinator'} · ${p.files ? kindSummary(p.kinds) : 'nothing yet'}, ${mb(p.bytes)}` + (p.collecting ? '' : ' (not collecting; yours)');
       select.appendChild(o);
     }
     $('none').hidden = info.projects.length > 0;
@@ -495,12 +565,14 @@ _PAGE = r"""<!doctype html>
   function drawMine(listing) {
     const body = $('mine').querySelector('tbody');
     const my = listing.files.filter((f) => f.user === listing.me);
-    body.innerHTML = my.map((f) => `<tr><td>${esc(f.name)}</td><td>${esc(f.telescope)}</td><td class="num">${mb(f.bytes)}</td><td>${when(f.received)}</td>
-      <td><button class="x" data-del="${esc(f.name)}" title="Take it off the server">✕</button></td></tr>`).join('');
-    $('mineNote').textContent = my.length ? `${my.length} file${my.length === 1 ? '' : 's'}, ${mb(my.reduce((s, f) => s + f.bytes, 0))}` : 'nothing yet';
+    body.innerHTML = my.map((f) => `<tr><td>${esc(f.name)}</td><td>${esc(label(f.kind))}</td><td>${esc(f.telescope)}</td><td class="num">${mb(f.bytes)}</td><td>${when(f.received)}</td>
+      <td><button class="x" data-del="${esc(f.name)}" data-kind="${esc(f.kind)}" title="Take it off the server">✕</button></td></tr>`).join('');
+    const counts = {};
+    for (const f of my) counts[f.kind] = (counts[f.kind] || 0) + 1;
+    $('mineNote').textContent = my.length ? `${kindSummary(counts)}, ${mb(my.reduce((s, f) => s + f.bytes, 0))}` : 'nothing yet';
     body.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
       if (!confirm(`Remove ${b.dataset.del} from the server?`)) return;
-      try { await api(`/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(b.dataset.del)}`, { method: 'DELETE' }); await pick(); }
+      try { await api(`/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(b.dataset.del)}?kind=${encodeURIComponent(b.dataset.kind)}`, { method: 'DELETE' }); await pick(); }
       catch (e) { alert(e.message); }
     }));
   }
@@ -510,14 +582,16 @@ _PAGE = r"""<!doctype html>
     if (!listing.owned) return;
     const body = $('all').querySelector('tbody');
     body.innerHTML = listing.files.map((f) => `<tr><td>${esc(f.uploader)}</td>
-      <td><a href="/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(f.user)}/${encodeURIComponent(f.name)}">${esc(f.name)}</a></td>
-      <td>${esc(f.telescope)}</td><td class="num">${mb(f.bytes)}</td><td>${when(f.received)}</td>
-      <td><button class="x" data-rm="${esc(f.name)}" data-user="${esc(f.user)}">✕</button></td></tr>`).join('');
+      <td><a href="/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(f.user)}/${encodeURIComponent(f.kind)}/${encodeURIComponent(f.name)}">${esc(f.name)}</a></td>
+      <td>${esc(label(f.kind))}</td><td>${esc(f.telescope)}</td><td class="num">${mb(f.bytes)}</td><td>${when(f.received)}</td>
+      <td><button class="x" data-rm="${esc(f.name)}" data-user="${esc(f.user)}" data-kind="${esc(f.kind)}">✕</button></td></tr>`).join('');
     const people = new Set(listing.files.map((f) => f.user)).size;
-    $('allNote').textContent = `${listing.files.length} file${listing.files.length === 1 ? '' : 's'} from ${people} ${people === 1 ? 'person' : 'people'}, ${mb(listing.bytes)}; ${mb(listing.free)} free on the server. Each link downloads one file; the whole set sits in the server's files folder under this collaboration's id.`;
+    const counts = {};
+    for (const f of listing.files) counts[f.kind] = (counts[f.kind] || 0) + 1;
+    $('allNote').textContent = `${kindSummary(counts) || 'nothing yet'} from ${people} ${people === 1 ? 'person' : 'people'}, ${mb(listing.bytes)}; ${mb(listing.free)} free on the server. Each link downloads one file; the whole set sits in the server's files folder under this collaboration's id, one folder per person with lights, flats, darks and bias inside.`;
     body.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', async () => {
       if (!confirm(`Remove ${b.dataset.rm}?`)) return;
-      try { await api(`/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(b.dataset.rm)}?user=${encodeURIComponent(b.dataset.user)}`, { method: 'DELETE' }); await pick(); }
+      try { await api(`/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(b.dataset.rm)}?user=${encodeURIComponent(b.dataset.user)}&kind=${encodeURIComponent(b.dataset.kind)}`, { method: 'DELETE' }); await pick(); }
       catch (e) { alert(e.message); }
     }));
   }
@@ -527,8 +601,8 @@ _PAGE = r"""<!doctype html>
     const files = Array.from(fileList).filter((f) => allowed(f.name));
     const skipped = fileList.length - files.length;
     if (!files.length) { alert('None of those are FITS or XISF files.'); return; }
-    for (const f of files) state.queue.push({ file: f, state: 'waiting', sent: 0 });
-    if (skipped) $('progressText').textContent = `${skipped} file${skipped === 1 ? '' : 's'} left out (not lights).`;
+    for (const f of files) state.queue.push({ file: f, kind: kindOf(f.name), state: 'waiting', sent: 0 });
+    if (skipped) $('progressText').textContent = `${skipped} file${skipped === 1 ? '' : 's'} left out (not FITS or XISF).`;
     drawQueue();
     run();
   }
@@ -536,7 +610,7 @@ _PAGE = r"""<!doctype html>
   function drawQueue() {
     $('queue').hidden = !state.queue.length;
     const body = $('queue').querySelector('tbody');
-    body.innerHTML = state.queue.map((q) => `<tr class="${q.state === 'done' || q.state === 'already' ? 'done' : ''}"><td>${esc(q.file.name)}</td><td class="num">${mb(q.file.size)}</td>
+    body.innerHTML = state.queue.map((q) => `<tr class="${q.state === 'done' || q.state === 'already' ? 'done' : ''}"><td>${esc(q.file.name)}</td><td>${esc(label(q.kind))}</td><td class="num">${mb(q.file.size)}</td>
       <td class="${q.state === 'failed' ? 'no' : (q.state === 'done' || q.state === 'already' ? 'ok' : 'wait')}">${esc(q.text || q.state)}</td></tr>`).join('');
     const total = state.queue.reduce((s, q) => s + q.file.size, 0);
     const sent = state.queue.reduce((s, q) => s + (q.state === 'done' || q.state === 'already' ? q.file.size : q.sent), 0);
@@ -552,7 +626,7 @@ _PAGE = r"""<!doctype html>
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       const tel = encodeURIComponent($('telescope').value.trim());
-      xhr.open('PUT', `/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(q.file.name)}?telescope=${tel}`);
+      xhr.open('PUT', `/api/v1/projects/${encodeURIComponent(state.project.id)}/files/${encodeURIComponent(q.file.name)}?telescope=${tel}&kind=${encodeURIComponent(q.kind)}`);
       xhr.upload.onprogress = (e) => { q.sent = e.loaded; drawQueue(); };
       xhr.onload = () => {
         let body = {};

@@ -184,24 +184,31 @@ contributor's subs onto this server, under the files folder, one directory
 per collaboration and one per person inside it:
 
 ```
-/var/lib/starfront/files/<project id>/<discord user id>/M31_Ha_001.fits
+/var/lib/starfront/files/<project id>/<discord user id>/lights/M31_Ha_001.fits
+                                                        /flats/
+                                                        /darks/
+                                                        /bias/
+                                                        /darkflats/
 ```
 
 People send them from the **files page**, `https://collab.starfront.space/files`:
 sign in with Discord there, pick the collaboration, drop the night's folder
-on it. Only FITS and XISF files are taken, a file already there at the same
-size is skipped (so the same folder can be dropped again the next day), and
-a cut-off upload is picked up where it stopped by dropping the folder again.
+on it. Only FITS and XISF files are taken; each is filed as a light, flat,
+dark, bias or dark flat by the word N.I.N.A. put in its name (or by the kind
+the uploader chose for files that carry none); a file already there at the
+same size is skipped (so the same folder can be dropped again the next day),
+and a cut-off upload is picked up where it stopped by dropping the folder
+again.
 The sign-in on that page is its own credential, a cookie, so it does not sign
 anybody's N.I.N.A. or Starfront out. The same `PUT` takes a telescope's
 token, which is how the programs will send each light as it is saved.
 
 | | |
 |---|---|
-| `PUT /api/v1/projects/{id}/files/{name}` | one file, the body streamed to disk; `?telescope=` labels it |
+| `PUT /api/v1/projects/{id}/files/{name}` | one file, the body streamed to disk; `?kind=light|flat|dark|bias|darkflat` (blank: read from the name), `?telescope=` labels it |
 | `GET /api/v1/projects/{id}/files` | what has arrived: everything to the coordinator, your own to you |
-| `GET /api/v1/projects/{id}/files/{user}/{name}` | one file back out, to the coordinator or its uploader |
-| `DELETE /api/v1/projects/{id}/files/{name}` | your own file; the coordinator's `?user=` anybody's |
+| `GET /api/v1/projects/{id}/files/{user}/{kind}/{name}` | one file back out, to the coordinator or its uploader |
+| `DELETE /api/v1/projects/{id}/files/{name}?kind=` | your own file; the coordinator's `?user=` anybody's |
 | `GET /api/v1/health` → `files` | how many, how many bytes, how much room is left |
 
 The coordinator gets the whole set by copying the directory off the VPS
