@@ -430,6 +430,11 @@ _PAGE = r"""<!doctype html>
          padding: 8px 10px; font-size: 15px; min-width: 260px; }
   .drop { margin: 12px 0; padding: 26px 18px; border: 2px dashed #2a3344; border-radius: 12px; text-align: center; }
   .drop.over { border-color: #7ee7a5; background: #11161f; }
+  .zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
+  .zone { margin: 0; padding: 16px 12px 10px; }
+  .zone h3 { margin: 0 0 2px; font-size: 16px; }
+  .zone p.small { min-height: 2.6em; margin: 0 0 8px; }
+  .zone .btn { padding: 6px 10px; font-size: 13px; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
   th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #1f2634; vertical-align: top; }
@@ -445,7 +450,7 @@ _PAGE = r"""<!doctype html>
 </style></head>
 <body><main>
 <h1>Starfront files</h1>
-<p class="muted">Where a collaboration's frames are collected for stacking: lights, and the flats, darks and bias that calibrate them. Drop the night's folder; only the FITS and XISF files in it are taken, each sorted by what it is, and files already here are skipped, so you can drop the same folder again tomorrow.</p>
+<p class="muted">Where a collaboration's frames are collected for stacking: lights, and the flats, darks and bias that calibrate them. Only FITS and XISF files are taken, and files already here are skipped, so you can send the same folder again tomorrow and only the new ones go.</p>
 
 <section id="signin" hidden>
   <p>Sign in with the Discord account you use for Starfront. Signing in here does not sign your N.I.N.A. or Starfront out.</p>
@@ -464,24 +469,36 @@ _PAGE = r"""<!doctype html>
 
   <div id="uploader" hidden>
     <h2>Your frames</h2>
-    <p class="row">
-      <label>These are
-        <select id="kind" style="min-width:200px;margin-left:6px">
-          <option value="auto">whatever the file name says</option>
-        </select>
-      </label>
-      <span class="small muted" id="kindNote">N.I.N.A. writes LIGHT, FLAT, DARK or BIAS into the name; anything unmarked counts as a light.</span>
-    </p>
-    <div class="drop" id="drop">
-      <p>Drop files or a folder here</p>
-      <p class="row" style="justify-content:center">
-        <button class="btn ghost" id="pickFiles">Choose files</button>
-        <button class="btn ghost" id="pickFolder">Choose a folder</button>
-        <input type="file" id="files" multiple hidden>
-        <input type="file" id="folder" webkitdirectory multiple hidden>
-      </p>
-      <p class="small muted">As N.I.N.A. saved them, raw. Flats for every filter you shot, and darks and bias at the same gain, offset, binning, temperature and exposure as your lights. Keep this tab open while it uploads.</p>
+    <p class="small muted">As N.I.N.A. saved them, raw. Drop each kind on its own box, or press its button; a whole folder can be dropped and only its FITS and XISF files are taken. Keep this tab open while it uploads.</p>
+    <div class="zones">
+      <div class="drop zone" data-kind="light">
+        <h3>Lights</h3>
+        <p class="small muted">The subs themselves, named as N.I.N.A. saved them</p>
+        <p class="row" style="justify-content:center"><button class="btn ghost" data-pick="files">Choose files</button><button class="btn ghost" data-pick="folder">Choose a folder</button></p>
+      </div>
+      <div class="drop zone" data-kind="flat">
+        <h3>Flats</h3>
+        <p class="small muted">One set per filter you shot, from the same camera angle</p>
+        <p class="row" style="justify-content:center"><button class="btn ghost" data-pick="files">Choose files</button><button class="btn ghost" data-pick="folder">Choose a folder</button></p>
+      </div>
+      <div class="drop zone" data-kind="dark">
+        <h3>Darks</h3>
+        <p class="small muted">Same gain, offset, binning, temperature and exposure as the lights</p>
+        <p class="row" style="justify-content:center"><button class="btn ghost" data-pick="files">Choose files</button><button class="btn ghost" data-pick="folder">Choose a folder</button></p>
+      </div>
+      <div class="drop zone" data-kind="bias">
+        <h3>Bias</h3>
+        <p class="small muted">Same gain, offset and binning as the lights</p>
+        <p class="row" style="justify-content:center"><button class="btn ghost" data-pick="files">Choose files</button><button class="btn ghost" data-pick="folder">Choose a folder</button></p>
+      </div>
+      <div class="drop zone" data-kind="darkflat">
+        <h3>Dark flats</h3>
+        <p class="small muted">Only if you use them: darks matching the flats' exposure</p>
+        <p class="row" style="justify-content:center"><button class="btn ghost" data-pick="files">Choose files</button><button class="btn ghost" data-pick="folder">Choose a folder</button></p>
+      </div>
     </div>
+    <input type="file" id="files" multiple hidden>
+    <input type="file" id="folder" webkitdirectory multiple hidden>
     <p class="row"><input type="text" id="telescope" placeholder="Telescope (optional)" style="min-width:220px"> <span class="small muted">written against each file, so the coordinator can tell rigs apart</span></p>
     <p id="progress" hidden><span id="progressText"></span></p>
     <div class="bar" id="allBar" hidden><i></i></div>
@@ -502,11 +519,7 @@ _PAGE = r"""<!doctype html>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { projects: [], allowed: [], kinds: [], project: null, owned: false, running: false, queue: [] };
-  const KIND_WORDS = [[/dark[\s_\-]?flat|flat[\s_\-]?dark/i, 'darkflat'], [/\bflats?\b|[_\-]flats?[_\-.]/i, 'flat'],
-                      [/\bdarks?\b|[_\-]darks?[_\-.]/i, 'dark'], [/\bbias\b|[_\-]bias[_\-.]|\boffset\b/i, 'bias']];
-  const guessKind = (name) => { for (const [re, k] of KIND_WORDS) if (re.test(name)) return k; return 'light'; };
-  const kindOf = (name) => { const chosen = $('kind').value; return chosen === 'auto' ? guessKind(name) : chosen; };
+  const state = { projects: [], allowed: [], kinds: [], project: null, owned: false, running: false, queue: [], picking: 'light' };
   const label = (k) => (state.kinds.find((x) => x.id === k) || { label: k }).label;
   const kindSummary = (kinds) => Object.entries(kinds || {}).map(([k, n]) => `${n} ${label(k).toLowerCase()}`).join(', ');
 
@@ -527,13 +540,6 @@ _PAGE = r"""<!doctype html>
     $('signin').hidden = info.signedIn; $('app').hidden = !info.signedIn;
     if (!info.signedIn) return;
     $('who').textContent = info.name;
-    const kindSelect = $('kind');
-    while (kindSelect.options.length > 1) kindSelect.remove(1);
-    for (const k of state.kinds) {
-      const o = document.createElement('option');
-      o.value = k.id; o.textContent = k.label;
-      kindSelect.appendChild(o);
-    }
     const select = $('project');
     select.innerHTML = '';
     for (const p of info.projects) {
@@ -596,12 +602,12 @@ _PAGE = r"""<!doctype html>
     }));
   }
 
-  function take(fileList) {
+  function take(fileList, kind) {
     if (!state.project) return;
     const files = Array.from(fileList).filter((f) => allowed(f.name));
     const skipped = fileList.length - files.length;
     if (!files.length) { alert('None of those are FITS or XISF files.'); return; }
-    for (const f of files) state.queue.push({ file: f, kind: kindOf(f.name), state: 'waiting', sent: 0 });
+    for (const f of files) state.queue.push({ file: f, kind: kind, state: 'waiting', sent: 0 });
     if (skipped) $('progressText').textContent = `${skipped} file${skipped === 1 ? '' : 's'} left out (not FITS or XISF).`;
     drawQueue();
     run();
@@ -662,29 +668,35 @@ _PAGE = r"""<!doctype html>
   }
 
   $('project').addEventListener('change', () => pick().catch((e) => alert(e.message)));
-  $('pickFiles').addEventListener('click', () => $('files').click());
-  $('pickFolder').addEventListener('click', () => $('folder').click());
-  $('files').addEventListener('change', (e) => { take(e.target.files); e.target.value = ''; });
-  $('folder').addEventListener('change', (e) => { take(e.target.files); e.target.value = ''; });
-  const drop = $('drop');
-  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', async (e) => {
-    e.preventDefault(); drop.classList.remove('over');
-    const items = Array.from(e.dataTransfer.items || []);
-    const files = [];
-    const walk = async (entry) => {
-      if (entry.isFile) { await new Promise((r) => entry.file((f) => { files.push(f); r(); }, r)); }
-      else if (entry.isDirectory) {
-        const reader = entry.createReader();
-        const all = [];
-        for (;;) { const batch = await new Promise((r) => reader.readEntries(r, () => r([]))); if (!batch.length) break; all.push(...batch); }
-        for (const child of all) await walk(child);
-      }
-    };
-    if (items.length && items[0].webkitGetAsEntry) { for (const it of items) { const entry = it.webkitGetAsEntry(); if (entry) await walk(entry); } }
-    else files.push(...e.dataTransfer.files);
-    take(files);
+  // One box per kind of frame. Its buttons open the shared pickers with the
+  // box's kind remembered; a drop on it takes the box's kind.
+  $('files').addEventListener('change', (e) => { take(e.target.files, state.picking); e.target.value = ''; });
+  $('folder').addEventListener('change', (e) => { take(e.target.files, state.picking); e.target.value = ''; });
+  document.querySelectorAll('.zone').forEach((zone) => {
+    const kind = zone.dataset.kind;
+    zone.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+      state.picking = kind;
+      $(b.dataset.pick).click();
+    }));
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+    zone.addEventListener('drop', async (e) => {
+      e.preventDefault(); zone.classList.remove('over');
+      const items = Array.from(e.dataTransfer.items || []);
+      const files = [];
+      const walk = async (entry) => {
+        if (entry.isFile) { await new Promise((r) => entry.file((f) => { files.push(f); r(); }, r)); }
+        else if (entry.isDirectory) {
+          const reader = entry.createReader();
+          const all = [];
+          for (;;) { const batch = await new Promise((r) => reader.readEntries(r, () => r([]))); if (!batch.length) break; all.push(...batch); }
+          for (const child of all) await walk(child);
+        }
+      };
+      if (items.length && items[0].webkitGetAsEntry) { for (const it of items) { const entry = it.webkitGetAsEntry(); if (entry) await walk(entry); } }
+      else files.push(...e.dataTransfer.files);
+      take(files, kind);
+    });
   });
   $('signout').addEventListener('click', async () => { await fetch('/files/signout', { method: 'POST' }); location.reload(); });
   window.addEventListener('beforeunload', (e) => { if (state.running) { e.preventDefault(); e.returnValue = ''; } });
