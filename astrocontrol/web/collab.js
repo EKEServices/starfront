@@ -371,7 +371,8 @@
     const name = ($('colPName').value || '').trim();
     if (!name) { app.toast('Give it a name', 'error'); return; }
 
-    const body = { name, notes: ($('colPNotes').value || '').trim() };
+    const body = { name, notes: ($('colPNotes').value || '').trim(),
+                   collectFiles: !!($('colPCollect') && $('colPCollect').checked) };
     // Editing keeps the region it has unless a new one was chosen; starting
     // needs one either way.
     const editing = col.editing;
@@ -448,6 +449,7 @@
       endEdit();
       $('colPName').value = '';
       $('colPNotes').value = '';
+      if ($('colPCollect')) $('colPCollect').checked = false;
       col.filters = [];
       app.state.collabRegion = null;
       drawFilterRows();
@@ -699,6 +701,8 @@
                 + (project.participantsOnline ? ` · ${project.participantsOnline} online now` : '')
               : 'nobody on it yet'}</div>
           ${project.notes ? `<p class="small">${esc(project.notes)}</p>` : ''}
+          ${project.filesUrl
+            ? `<p class="small">Collects the lights: upload yours at <a href="${esc(project.filesUrl)}" target="_blank" rel="noopener">${esc(project.filesUrl.replace(/^https?:\/\//, '').replace(/#.*$/, ''))}</a></p>` : ''}
           ${limits.length
             ? `<div class="small muted">Takes: ${esc(limits.join(', '))}</div>` : ''}
           ${live}
@@ -957,6 +961,7 @@
     const set = (id, value) => { if ($(id)) $(id).value = value === null || value === undefined ? '' : value; };
     set('colPName', project.name || '');
     set('colPNotes', project.notes || '');
+    if ($('colPCollect')) $('colPCollect').checked = !!project.collectFiles;
     set('colRMinFocal', wants.minFocalLength);
     set('colRMaxFocal', wants.maxFocalLength);
     const takesColour = wants.acceptColour !== false;

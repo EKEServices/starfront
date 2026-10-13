@@ -1975,6 +1975,157 @@ case("a project listing mono channels only has nothing for a colour camera, and 
      not listing["compatibility"]["ok"] and "takes no one-shot colour data" in listing["compatibility"]["summary"],
      listing["compatibility"]["summary"])
 
+# ------------------------------------------------- the files: lights collected
+print("\n-- collecting the lights --")
+
+
+def raw(method, path, data=None, headers=None, expect_json=True):
+    """A request with a body that is not JSON, and whatever headers."""
+    request = urllib.request.Request(f"{BASE}{path}", data=data, method=method,
+                                     headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            body = response.read()
+            return response.status, (json.loads(body.decode() or "{}") if expect_json else body), response.headers
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        try:
+            return exc.code, json.loads(body.decode() or "{}"), exc.headers
+        except ValueError:
+            return exc.code, body, exc.headers
+
+
+FITS = b"SIMPLE  =                    T / conforms to FITS" + b" " * 30
+FITS = FITS.ljust(2880, b" ") + bytes(2880)        # one header block, one data block
+
+_, _, _, polled = sign_in("code-bob")
+BOB2 = polled["token"]
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Rosette, files collected", "kind": "single",
+    "region": {"ra": 97.98, "dec": 4.95, "width": 2.0, "height": 1.5},
+    "requirements": {"filters": {"H": None}}, "goals": {"H": 10.0},
+    "collectFiles": True}, token=BOB2)
+FILES_PROJECT = made["project"]["id"]
+case("a project can be started with its lights collected",
+     status == 200 and made["project"]["payload"]["collectFiles"] is True)
+_, browse = call("GET", "/api/v1/agent/projects", token=AGENT_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == FILES_PROJECT)
+case("...and the listing says so, with where to send them",
+     listing["collectFiles"] is True and listing["filesUrl"].endswith(f"/files#{FILES_PROJECT}"),
+     listing["filesUrl"])
+
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_001.fits", FITS,
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
+case("a signed-in person can upload a light", status == 200 and answer["file"]["name"] == "M31_Ha_001.fits"
+     and answer["file"]["bytes"] == len(FITS) and answer["already"] is False, str(answer)[:200])
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_001.fits", FITS,
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
+case("...the same file again is not taken twice", status == 200 and answer["already"] is True)
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/notes.txt", b"hello",
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": "5"})
+case("a file that is not a light is refused", status == 400 and "not a light" in answer["detail"])
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/fake.fits", b"JFIF" * 100,
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": "400"})
+case("...and so is a .fits that is not a FITS inside", status == 400 and "does not start like" in answer["detail"])
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/../../escape.fits", FITS,
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
+case("a path in the name goes nowhere", status in (200, 400, 404)
+     and not (DATA / "escape.fits").exists() and not (DATA.parent / "escape.fits").exists())
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_002.fits", FITS,
+                        {"Content-Length": str(len(FITS))})
+case("nobody uploads without signing in", status == 401)
+status, answer, _ = raw("PUT", f"/api/v1/projects/{ORION}/files/M42.fits", FITS,
+                        {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
+case("a project not collecting files takes none (unless it is yours)",
+     status in (409, 200), str(status))
+
+# A telescope's token uploads under its owner: that is how the plugin will
+# send each light as it is saved.
+_, mine_rig = call("POST", "/api/v1/agents", {"name": "Bob's rig"}, token=BOB2)
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_002.fits", FITS,
+                        {"Authorization": f"Bearer {mine_rig['token']}", "Content-Length": str(len(FITS))})
+case("a telescope's token uploads under its owner, named after the telescope",
+     status == 200 and answer["file"]["telescope"] == "Bob's rig" and answer["file"]["uploader"] == "Bob",
+     str(answer)[:200])
+
+_, listed = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=ALICE)
+case("the coordinator (Alice owns the server) sees everybody's files",
+     listed["owned"] is True and sorted(f["name"] for f in listed["files"]) == ["M31_Ha_001.fits", "M31_Ha_002.fits"]
+     and listed["bytes"] == 2 * len(FITS), str([f["name"] for f in listed["files"]]))
+_, _, _, polled = sign_in("code-bob")
+BOB3 = polled["token"]
+_, listed_bob = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=BOB3)
+case("the project's owner sees them too", listed_bob["owned"] is True and len(listed_bob["files"]) == 2)
+_, _, landed, polled = sign_in("code-alice")
+ALICE = polled["token"]            # a program sign-in replaces the program token
+status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1001/M31_Ha_001.fits", None,
+                     {"Authorization": f"Bearer {BOB3}"}, expect_json=False)
+case("...and can download each one", status == 200 and got == FITS)
+status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1002/M31_Ha_002.fits", None,
+                     {"Authorization": f"Bearer {polled['token']}"}, expect_json=False)
+case("a person may download their own", status == 200 and got == FITS)
+status, got, _ = raw("GET", f"/api/v1/projects/{FILES_PROJECT}/files/1002/M31_Ha_002.fits", None,
+                     {"Authorization": f"Bearer {mine_rig['token']}"}, expect_json=False)
+case("...but files live under the files folder by project and person",
+     (DATA / "files" / FILES_PROJECT / "1002" / "M31_Ha_002.fits").is_file())
+status, _ = call("DELETE", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_002.fits", token=BOB3)
+_, listed = call("GET", f"/api/v1/projects/{FILES_PROJECT}/files", token=ALICE)
+case("a person can take their own file off again",
+     status == 200 and [f["name"] for f in listed["files"]] == ["M31_Ha_001.fits"]
+     and not (DATA / "files" / FILES_PROJECT / "1002" / "M31_Ha_002.fits").exists())
+_, health = call("GET", "/api/v1/health")
+case("health reports what the files folder holds and the room left",
+     # Alice's M31_Ha_001 here, and the M42 she put on Orion as the owner.
+     health["files"]["count"] == 2 and health["files"]["bytes"] == 2 * len(FITS)
+     and health["files"]["free"] > 0,
+     str(health["files"]))
+
+# The browser: a sign-in begun from the files page comes back to it with a
+# cookie, and that cookie is a credential of its own - Alice's program token
+# still works afterwards.
+opener = urllib.request.build_opener(_NoRedirect())
+try:
+    opener.open(urllib.request.Request(f"{BASE}/files/signin", method="GET"), timeout=10)
+    raise AssertionError("expected a redirect")
+except urllib.error.HTTPError as hop:
+    to_start = hop.headers.get("Location")
+case("the files page's sign-in begins a login and goes to Discord's start page",
+     to_start and to_start.startswith("/auth/discord/start?code="), str(to_start))
+try:
+    opener.open(urllib.request.Request(BASE + to_start, method="GET"), timeout=10)
+    raise AssertionError("expected a redirect")
+except urllib.error.HTTPError as hop:
+    to_discord = hop.headers.get("Location") + "&who=code-alice"
+try:
+    opener.open(urllib.request.Request(to_discord, method="GET"), timeout=10)
+    raise AssertionError("expected a redirect")
+except urllib.error.HTTPError as hop:
+    back = hop.headers.get("Location")
+try:
+    opener.open(urllib.request.Request(back, method="GET"), timeout=10)
+    raise AssertionError("expected a redirect back to the files page")
+except urllib.error.HTTPError as hop:
+    hop_code = hop.code
+    landed_at = hop.headers.get("Location")
+    cookie = hop.headers.get("Set-Cookie") or ""
+case("...and Discord's callback sends the browser back to the files page with a cookie",
+     hop_code == 303 and landed_at == "/files" and cookie.startswith("starfront_web=") and "HttpOnly" in cookie,
+     f"{hop_code} {landed_at} {cookie[:40]}")
+jar = cookie.split(";", 1)[0]
+status, info, _ = raw("GET", "/api/v1/files/projects", None, {"Cookie": jar})
+case("the cookie signs the page in", status == 200 and info["signedIn"] and info["name"] == "Alice"
+     and any(p["id"] == FILES_PROJECT for p in info["projects"]), str(info)[:200])
+status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_003.fits", FITS,
+                        {"Cookie": jar, "Content-Length": str(len(FITS))})
+case("...and uploads on it", status == 200 and answer["file"]["name"] == "M31_Ha_003.fits")
+_, me = call("GET", "/api/v1/auth/me", token=ALICE)
+case("signing in on the files page did not sign Alice's program out", me.get("name") == "Alice")
+status, page, _ = raw("GET", "/files", None, {}, expect_json=False)
+case("the files page is served", status == 200 and b"Starfront files" in page)
+status, _, _ = raw("POST", "/files/signout", b"", {"Cookie": jar})
+status, info, _ = raw("GET", "/api/v1/files/projects", None, {"Cookie": jar})
+case("signing out on the page forgets the cookie's token", not info["signedIn"])
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

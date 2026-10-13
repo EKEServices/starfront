@@ -42,6 +42,7 @@ import astrocontrol                                              # noqa: E402
 from astrocontrol import catalog, collab, filters                # noqa: E402
 from astrocontrol.config import data_root                        # noqa: E402
 from server import auth                                          # noqa: E402
+from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -96,7 +97,9 @@ def _person(token: str) -> dict[str, Any] | None:
     if ADMIN_TOKEN and secrets.compare_digest(token, ADMIN_TOKEN):
         return {"kind": "admin", "id": "", "name": "coordinator", "roles": [],
                 "admin": True}
-    user = store.user_by_token(token)
+    # A program's token, or the one a browser sign-in on the files page was
+    # handed; both are the person.
+    user = store.user_by_token(token) or store.user_by_web_token(token)
     if user is None:
         return None
     # The people who run the server sign in like anybody else and are
@@ -236,6 +239,27 @@ def auth_callback(code: str = Query(default=""), state: str = Query(default=""),
     except auth.AuthError as exc:
         return HTMLResponse(auth.page("Could not sign you in", str(exc), ok=False),
                             status_code=403)
+    back = str(login.get("back") or "")
+    if back:
+        # Begun from a page on this server (the files page): the browser is
+        # the client, and gets a credential of its own in a cookie rather
+        # than a token the program's sign-in would be replaced by. The
+        # person's record is refreshed, their program token left alone.
+        existing = store.user(identity.id)
+        store.upsert_user(identity.id,
+                          existing["token"] if existing else auth.new_user_token(),
+                          identity.name, identity.avatar, identity.roles)
+        web = auth.new_user_token()
+        store.add_web_token(web, identity.id)
+        store.sweep_web_tokens(time.time() - COOKIE_SECONDS)
+        store.bind_login(state, identity.id)
+        store.claim_login(state)
+        response = RedirectResponse(back if back.startswith("/") else "/files",
+                                    status_code=303)
+        response.set_cookie(COOKIE, web, max_age=COOKIE_SECONDS, httponly=True,
+                            secure=DISCORD.public_url.startswith("https"),
+                            samesite="lax", path="/")
+        return response
     token = auth.new_user_token()
     store.upsert_user(identity.id, token, identity.name, identity.avatar,
                       identity.roles)
@@ -401,6 +425,10 @@ class ProjectRequest(BaseModel):
     # Depth wanted at every point inside the region, per filter, in hours.
     goals: dict[str, float] = Field(default_factory=dict)
     notes: str = Field(default="", max_length=2000)
+    # Whether contributors' lights are collected on this server (the files
+    # page, and in time the programs themselves), for the coordinator to
+    # stack. Off unless asked: gigabytes a night are nobody's by accident.
+    collectFiles: bool = False
 
 
 class TaskRequest(BaseModel):
@@ -738,6 +766,11 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             "requirements": wants.payload(),
             "goals": payload.get("goals") or {},
             "notes": payload.get("notes") or "",
+            # Whether the lights themselves are collected here, and where
+            # a person sends them.
+            "collectFiles": bool(payload.get("collectFiles")),
+            "filesUrl": (f"{DISCORD.public_url.rstrip('/')}/files#{project['id']}"
+                         if payload.get("collectFiles") and DISCORD.public_url else ""),
             "compatibility": collab.compatibility(profile, wants),
             "joined": project["id"] in mine,
             # What everyone together has collected, so somebody choosing where
@@ -1610,6 +1643,7 @@ def create_project(body: ProjectRequest,
         "requirements": collab.Requirements.read(body.requirements).payload(),
         "goals": _goals(body.goals),
         "notes": body.notes,
+        "collectFiles": bool(body.collectFiles),
     }
     # The name on it is the person's Discord name unless the owner, on the
     # admin token, chose to write one.
@@ -1628,6 +1662,7 @@ class ProjectUpdateRequest(BaseModel):
     requirements: dict[str, Any] | None = None
     goals: dict[str, float] | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    collectFiles: bool | None = None
     # open | closed. Closing takes it off everybody's list without deleting
     # the record of what was collected.
     status: str | None = Field(default=None, pattern="^(open|closed)$")
@@ -1659,6 +1694,8 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
         payload["goals"] = _goals(body.goals)
     if body.notes is not None:
         payload["notes"] = body.notes
+    if body.collectFiles is not None:
+        payload["collectFiles"] = bool(body.collectFiles)
     if body.name is not None:
         store.rename_project(project_id, body.name.strip())
     updated = store.set_project(project_id, payload, body.status)
@@ -2088,12 +2125,28 @@ def sky_file(name: str):
 
 
 # ---------------------------------------------------------------------------
+# The files: contributors' lights, collected for the coordinator to stack
+# ---------------------------------------------------------------------------
+#
+# Beside the database unless STARFRONT_FILES says otherwise - a mounted
+# volume, once a season's subs outgrow the VPS's own disk. The routes, the
+# page and the rules are in server/files.py.
+
+FILES_DIR = Path(auth.setting("FILES") or DATA / "files")
+files = Files(app, store, FILES_DIR, _person, owns_project, DISCORD.owners,
+              DISCORD.public_url, auth.new_login_code)
+
+
+# ---------------------------------------------------------------------------
 # Everything else
 # ---------------------------------------------------------------------------
 
 @app.get("/api/v1/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "protocol": collab.PROTOCOL, "time": time.time(),
+            # What the files folder holds and how much room is left, so a
+            # disk filling up is seen from outside before it is full.
+            "files": files.stats(),
             # Which build is running, so an update can be checked from outside.
             "version": astrocontrol.__version__,
             "adminConfigured": bool(ADMIN_TOKEN),

@@ -86,6 +86,24 @@ CREATE TABLE IF NOT EXISTS logins (
     claimed     INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS files (
+    id          TEXT PRIMARY KEY,
+    project     TEXT NOT NULL,
+    user        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    bytes       INTEGER NOT NULL DEFAULT 0,
+    received    REAL NOT NULL,
+    telescope   TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS files_once ON files (project, user, name);
+
+CREATE TABLE IF NOT EXISTS web_tokens (
+    token       TEXT PRIMARY KEY,
+    user        TEXT NOT NULL,
+    created     REAL NOT NULL,
+    seen        REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS presence_log (
     agent       TEXT NOT NULL,
     at          REAL NOT NULL,
@@ -159,6 +177,13 @@ class Store:
             if "presence" not in columns:
                 self._db.execute("ALTER TABLE agents ADD COLUMN presence "
                                  "TEXT NOT NULL DEFAULT '{}'")
+            # A sign-in begun from a web page on this server goes back to that
+            # page when it is done, with a cookie, instead of to a program
+            # polling for a token.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(logins)")}
+            if "back" not in columns:
+                self._db.execute("ALTER TABLE logins ADD COLUMN back "
+                                 "TEXT NOT NULL DEFAULT ''")
             self._db.executescript(MIGRATE)
             self._db.commit()
 
@@ -332,9 +357,81 @@ class Store:
         row["roles"] = json.loads(row.get("roles") or "[]")
         return row
 
-    def add_login(self, code: str) -> None:
-        self._run("INSERT INTO logins (code, created, user, claimed)"
-                  " VALUES (?, ?, '', 0)", code, time.time())
+    def add_login(self, code: str, back: str = "") -> None:
+        """A sign-in beginning. `back` is the page on this server to return
+        to when it is done, for a sign-in begun in a browser; blank for a
+        program that will poll for the token."""
+        self._run("INSERT INTO logins (code, created, user, claimed, back)"
+                  " VALUES (?, ?, '', 0, ?)", code, time.time(), back)
+
+    # -- the browser's own credential --------------------------------------
+    #
+    # Somebody uploading files from a browser signs in with Discord there
+    # too, and is handed a *web token* in a cookie - a credential of its own,
+    # so that signing in on the files page does not sign their N.I.N.A. or
+    # Starfront out, as a second program sign-in would.
+    def add_web_token(self, token: str, user_id: str) -> None:
+        self._run("INSERT INTO web_tokens (token, user, created, seen)"
+                  " VALUES (?, ?, ?, ?)", token, user_id, time.time(), time.time())
+
+    def user_by_web_token(self, token: str) -> dict[str, Any] | None:
+        if not token:
+            return None
+        row = self._one("SELECT user FROM web_tokens WHERE token = ?", token)
+        if row is None:
+            return None
+        self._run("UPDATE web_tokens SET seen = ? WHERE token = ?", time.time(), token)
+        return self.user(row["user"])
+
+    def forget_web_token(self, token: str) -> None:
+        self._run("DELETE FROM web_tokens WHERE token = ?", token)
+
+    def sweep_web_tokens(self, older_than: float) -> None:
+        self._run("DELETE FROM web_tokens WHERE seen < ?", older_than)
+
+    # -- files -------------------------------------------------------------
+    def add_file(self, file_id: str, project_id: str, user_id: str, name: str,
+                 size: int, telescope: str = "") -> dict[str, Any]:
+        """A file received, or received again: one row per project, person
+        and name, at the latest size."""
+        self._run(
+            "INSERT INTO files (id, project, user, name, bytes, received, telescope)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(project, user, name) DO UPDATE SET bytes = excluded.bytes,"
+            " received = excluded.received, telescope = excluded.telescope",
+            file_id, project_id, user_id, name, int(size), time.time(), telescope)
+        return self.file(project_id, user_id, name)
+
+    def file(self, project_id: str, user_id: str, name: str) -> dict[str, Any] | None:
+        return self._one("SELECT * FROM files WHERE project = ? AND user = ? AND name = ?",
+                         project_id, user_id, name)
+
+    def files_in(self, project_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
+        if user_id is None:
+            return self._all("SELECT * FROM files WHERE project = ? ORDER BY user, name",
+                             project_id)
+        return self._all("SELECT * FROM files WHERE project = ? AND user = ? ORDER BY name",
+                         project_id, user_id)
+
+    def file_totals(self, project_id: str | None = None) -> dict[str, Any]:
+        """How many files and bytes a project holds, or the whole server."""
+        if project_id is None:
+            row = self._one("SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes FROM files")
+        else:
+            row = self._one("SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes"
+                            " FROM files WHERE project = ?", project_id)
+        return {"count": int((row or {}).get("count") or 0),
+                "bytes": int((row or {}).get("bytes") or 0)}
+
+    def file_totals_of(self, project_id: str, user_id: str) -> dict[str, Any]:
+        row = self._one("SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes"
+                        " FROM files WHERE project = ? AND user = ?", project_id, user_id)
+        return {"count": int((row or {}).get("count") or 0),
+                "bytes": int((row or {}).get("bytes") or 0)}
+
+    def remove_file(self, project_id: str, user_id: str, name: str) -> None:
+        self._run("DELETE FROM files WHERE project = ? AND user = ? AND name = ?",
+                  project_id, user_id, name)
 
     def login(self, code: str) -> dict[str, Any] | None:
         return self._one("SELECT * FROM logins WHERE code = ?", code)

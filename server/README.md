@@ -176,6 +176,45 @@ Verdicts are **advisory**. A coordinator can overrule one, and should be able
 to: seeing varies, and a night the numbers reject may be the only data anybody
 has on that patch of sky.
 
+## Collecting the lights
+
+A collaboration started with **Collect the lights on the server** ticked (the
+Collab tab's form in Starfront, or `collectFiles` on the API) takes every
+contributor's subs onto this server, under the files folder, one directory
+per collaboration and one per person inside it:
+
+```
+/var/lib/starfront/files/<project id>/<discord user id>/M31_Ha_001.fits
+```
+
+People send them from the **files page**, `https://collab.starfront.space/files`:
+sign in with Discord there, pick the collaboration, drop the night's folder
+on it. Only FITS and XISF files are taken, a file already there at the same
+size is skipped (so the same folder can be dropped again the next day), and
+a cut-off upload is picked up where it stopped by dropping the folder again.
+The sign-in on that page is its own credential, a cookie, so it does not sign
+anybody's N.I.N.A. or Starfront out. The same `PUT` takes a telescope's
+token, which is how the programs will send each light as it is saved.
+
+| | |
+|---|---|
+| `PUT /api/v1/projects/{id}/files/{name}` | one file, the body streamed to disk; `?telescope=` labels it |
+| `GET /api/v1/projects/{id}/files` | what has arrived: everything to the coordinator, your own to you |
+| `GET /api/v1/projects/{id}/files/{user}/{name}` | one file back out, to the coordinator or its uploader |
+| `DELETE /api/v1/projects/{id}/files/{name}` | your own file; the coordinator's `?user=` anybody's |
+| `GET /api/v1/health` → `files` | how many, how many bytes, how much room is left |
+
+The coordinator gets the whole set by copying the directory off the VPS
+(`rsync -a root@…:/var/lib/starfront/files/<project id>/ .`), or file by file
+from the page. **Disk is the limit.** A 61-megapixel sub is 120 MB and a
+night from one telescope is several gigabytes, so the cheapest droplet's
+disk fills in a week of a busy collaboration. Attach a block-storage volume
+and mount it at `/var/lib/starfront/files` (the service may write only under
+`/var/lib/starfront`; a volume mounted elsewhere needs `STARFRONT_FILES` in
+`discord.env` *and* that path added to `ReadWritePaths` in the service
+file). The server always leaves two gigabytes free and refuses uploads
+beyond that, telling the person to tell the coordinator.
+
 ## What is deliberately not here yet
 
 - **A drawn depth map.** The depth map exists at the resolution of each rig's

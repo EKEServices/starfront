@@ -207,12 +207,13 @@ class CollabAdmin:
                     requirements: dict[str, Any] | None = None,
                     goals: dict[str, float] | None = None,
                     coordinator: str = "", notes: str = "",
-                    kind: str = "mosaic") -> dict[str, Any]:
+                    kind: str = "mosaic", collect_files: bool = False) -> dict[str, Any]:
         return self._call("POST", "/api/v1/projects", {
             "name": name, "region": region, "kind": kind,
             "requirements": requirements or {},
             "goals": goals or {},
             "coordinator": coordinator, "notes": notes,
+            "collectFiles": bool(collect_files),
         })
 
     def update_project(self, project_id: str,
