@@ -979,6 +979,28 @@ seq._loop = False
 seq._run()
 case("not on loop, one night and no bed of its own", ran == ["night"], str(ran))
 
+# Park at end means "when the plan runs out". Stop promises the mount is left
+# tracking where it is, and for a while it was not: the end of the run parked
+# whenever the setting was on, so Stop and Abort & park did the same thing.
+mount = Mount()
+seq, rig, config = build({"mount": mount})
+config.update("sequencer", {"parkAtEnd": True})
+seq._night = lambda: None
+seq._loop = False
+seq._run()
+case("a plan that runs out parks the mount when Park at end is on",
+     mount.parks == 1, f"parks={mount.parks}")
+
+mount = Mount()
+seq, rig, config = build({"mount": mount})
+config.update("sequencer", {"parkAtEnd": True, "stopTrackingAtEnd": True})
+seq._night = lambda: seq.stop()             # Stop pressed during the night
+seq._loop = False
+seq._run()
+case("a run ended by Stop leaves the mount tracking where it is",
+     mount.parks == 0 and mount.tracking is True,
+     f"parks={mount.parks} tracking={mount.tracking}")
+
 # A loop is refused where it could not put the mount to bed.
 mount = Mount()
 mount.can_park = False

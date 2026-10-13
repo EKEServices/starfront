@@ -843,11 +843,23 @@ class Sequencer:
             # it. Parking is deliberately opt-in: a surprise slew in the dark is
             # worse than a mount left tracking, unless there is a roof that has
             # to close over it — which is what the setting is for.
+            #
+            # And only when the plan ran out on its own. The setting says "when
+            # the plan runs out", and the Stop button promises the mount is
+            # left tracking where it is; Abort & park is the one that parks.
+            # The weather shutdown and a give-up set to park do their own
+            # parking before they raise the flag, so they lose nothing here.
             settings = self._settings()
-            if settings.get("parkAtEnd") or settings.get("stopTrackingAtEnd"):
+            stopped = self._abort.is_set()
+            if not stopped and (settings.get("parkAtEnd")
+                                or settings.get("stopTrackingAtEnd")):
                 with contextlib.suppress(Exception):
                     self._make_safe(park=bool(settings.get("parkAtEnd")),
                                     stop_tracking=bool(settings.get("stopTrackingAtEnd")))
+            elif stopped and settings.get("parkAtEnd"):
+                self._say("Stopped: the mount is left tracking where it is "
+                          "(Park at end applies when the plan runs out; "
+                          "Abort & park parks now)")
 
             # A copy of the log where the data is, so a night run at a remote
             # site can be read into afterwards without getting onto that machine.
