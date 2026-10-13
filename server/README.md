@@ -209,11 +209,19 @@ The coordinator gets the whole set by copying the directory off the VPS
 from the page. **Disk is the limit.** A 61-megapixel sub is 120 MB and a
 night from one telescope is several gigabytes, so the cheapest droplet's
 disk fills in a week of a busy collaboration. Attach a block-storage volume
-and mount it at `/var/lib/starfront/files` (the service may write only under
-`/var/lib/starfront`; a volume mounted elsewhere needs `STARFRONT_FILES` in
-`discord.env` *and* that path added to `ReadWritePaths` in the service
-file). The server always leaves two gigabytes free and refuses uploads
-beyond that, telling the person to tell the coordinator.
+and mount it at `/var/lib/starfront/files`:
+
+```bash
+sudo bash server/deploy/attach-files-volume.sh starfront-files        # the volume's name in the panel
+sudo bash server/deploy/attach-files-volume.sh starfront-files --grow # after making it bigger
+```
+
+The script formats a blank volume, mounts it at the files folder, carries
+over anything already there, and makes the mount survive a reboot. (A volume
+mounted anywhere else needs `STARFRONT_FILES` in `discord.env` *and* that
+path in `ReadWritePaths` in the service file.) The server always leaves two
+gigabytes free and refuses uploads beyond that, telling the person to tell
+the coordinator.
 
 ## What is deliberately not here yet
 

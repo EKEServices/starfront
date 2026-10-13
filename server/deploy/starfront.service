@@ -16,7 +16,9 @@ RestartSec=3
 # The admin token and the Discord secret live in /var/lib/starfront and
 # nowhere else; the program folder is read-only to the service.
 ProtectSystem=strict
-ReadWritePaths=/var/lib/starfront
+# The files folder is named as well as its parent so that a block-storage
+# volume mounted there is writable too.
+ReadWritePaths=/var/lib/starfront /var/lib/starfront/files
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true

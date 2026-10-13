@@ -88,8 +88,11 @@ fi
 
 echo "== user and folders"
 id -u "$SERVICE" >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin "$SERVICE"
-mkdir -p "$APP" "$DATA"
-chown -R "$SERVICE:$SERVICE" "$DATA"
+mkdir -p "$APP" "$DATA" "$DATA/files"
+# The files folder may be a mounted volume; its contents are the service's
+# already and a season's worth of subs is not worth re-owning on every deploy.
+chown "$SERVICE:$SERVICE" "$DATA" "$DATA/files"
+find "$DATA" -maxdepth 1 -mindepth 1 ! -name files -exec chown -R "$SERVICE:$SERVICE" {} +
 chmod 700 "$DATA"
 
 echo "== code -> $APP"
