@@ -163,6 +163,23 @@ os.environ["STARFRONT_DOWNLOAD_DIR"] = str(DOWNLOAD_DIR)
                   "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
 
 
+# The database the server opens is one from the day files were lights only:
+# the files table without its kind column, keyed on the name alone. The
+# server must bring it up to date at start rather than fail to start - which
+# it did once, with the new index asked for before the column existed.
+import sqlite3                                                   # noqa: E402
+_old = sqlite3.connect(str(DATA / "collab.sqlite"))
+_old.executescript("""
+CREATE TABLE files (
+    id TEXT PRIMARY KEY, project TEXT NOT NULL, user TEXT NOT NULL,
+    name TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0,
+    received REAL NOT NULL, telescope TEXT NOT NULL DEFAULT '');
+CREATE UNIQUE INDEX files_once ON files (project, user, name);
+""")
+_old.commit()
+_old.close()
+
+
 def serve():
     import uvicorn
     from server.app import app

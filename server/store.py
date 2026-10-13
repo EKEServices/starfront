@@ -96,7 +96,9 @@ CREATE TABLE IF NOT EXISTS files (
     received    REAL NOT NULL,
     telescope   TEXT NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS files_once_per_kind ON files (project, user, kind, name);
+-- files_once_per_kind, the unique index on (project, user, kind, name), is
+-- made after the migrations below: a database from the day files had no
+-- kind must get the column first, and this script runs before that.
 
 CREATE TABLE IF NOT EXISTS web_tokens (
     token       TEXT PRIMARY KEY,
