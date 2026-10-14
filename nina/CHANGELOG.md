@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.31
+
+- *Collect the lights on the server* in the start-a-collaboration form, and on Edit. A collaboration with it on takes everyone's lights, flats, darks and bias through the files page at collab.starfront.space/files, sorted by collaboration and person, for the coordinator to stack. A card on such a collaboration says so and has an *Open the files page* button.
+
 ## 1.0.0.30
 
 - A telescope with its camera open is reported as shooting. The plugin told the others' charts "idle" unless its own Starfront container was the thing running, so a telescope on a collaboration's target through its own sequence, or between two runs of the container, sat at M31 marked idle all night. Shooting is now read from the camera and from the last light saved, with that light's target name.

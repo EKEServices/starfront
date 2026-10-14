@@ -51,6 +51,13 @@ namespace Starfront.Collab.Ui {
             JoinCommand = new AsyncRelayCommand(() => owner.JoinAsync(listing.Id), () => CanJoin);
             LeaveCommand = new AsyncRelayCommand(() => owner.LeaveAsync(task?.Id), () => task != null);
             ShowInFramingCommand = new AsyncRelayCommand(() => owner.ShowInFramingAsync(listing), () => listing.Region != null);
+            OpenFilesCommand = new RelayCommand(() => {
+                try {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(listing.FilesUrl) { UseShellExecute = true });
+                } catch (Exception ex) {
+                    Logger.Error(ex);
+                }
+            }, () => !string.IsNullOrEmpty(listing.FilesUrl));
             EditCommand = new RelayCommand(() => owner.Start.BeginEdit(listing), () => Mine);
             CloseCommand = new AsyncRelayCommand(() => owner.CloseAsync(listing), () => Mine);
             RedealCommand = new AsyncRelayCommand(() => owner.RedealAsync(listing), () => Mine);
@@ -148,6 +155,11 @@ namespace Starfront.Collab.Ui {
         public AsyncRelayCommand JoinCommand { get; }
         public AsyncRelayCommand LeaveCommand { get; }
         public AsyncRelayCommand ShowInFramingCommand { get; }
+        public RelayCommand OpenFilesCommand { get; }
+        /// <summary>Where the lights go, when the collaboration collects them; blank when it does not.</summary>
+        public string FilesText => Listing.CollectFiles && !string.IsNullOrEmpty(Listing.FilesUrl)
+            ? "Collects the lights, flats, darks and bias: send yours from the files page."
+            : "";
         public RelayCommand EditCommand { get; }
         public AsyncRelayCommand CloseCommand { get; }
         public AsyncRelayCommand RedealCommand { get; }

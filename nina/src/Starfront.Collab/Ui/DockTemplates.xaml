@@ -195,6 +195,10 @@
 
                         <TextBlock Margin="0,8,0,2" Text="Notes for the people joining" />
                         <TextBox AcceptsReturn="True" MinHeight="40" TextWrapping="Wrap" Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding CollectFiles}" />
+                            <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="Collect the lights on the server" ToolTip="Everyone on it sends their lights, flats, darks and bias to the server's files page, sorted by collaboration and person, for you to stack. Off, the ledger records what was shot and the files stay with whoever shot them." />
+                        </StackPanel>
 
                         <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
                             <Button Padding="12,3" Command="{Binding StartCommand}" Content="{Binding SubmitLabel}" />
@@ -367,6 +371,11 @@
                                         TextWrapping="Wrap"
                                         Visibility="{Binding FitOk, Converter={StaticResource Starfront_Dock_ShowWhenFalse}}" />
                                     <TextBlock Text="{Binding TonightText}" TextWrapping="Wrap" Visibility="{Binding TonightText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                                    <!--  Where the lights go, when the collaboration collects them.  -->
+                                    <StackPanel Margin="0,4,0,0" Orientation="Horizontal" Visibility="{Binding FilesText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}">
+                                        <TextBlock VerticalAlignment="Center" Opacity="0.85" Text="{Binding FilesText}" TextWrapping="Wrap" />
+                                        <Button Margin="8,0,0,0" Padding="8,1" VerticalAlignment="Center" Command="{Binding OpenFilesCommand}" Content="Open the files page" />
+                                    </StackPanel>
                                     <StackPanel Margin="0,4,0,0" Orientation="Horizontal">
                                         <Button
                                             Padding="10,2"

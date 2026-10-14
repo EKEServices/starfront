@@ -128,6 +128,9 @@ namespace Starfront.Collab.Server {
         [JsonProperty("requirements")] public Requirements Requirements { get; set; } = new();
         [JsonProperty("goals")] public Dictionary<string, double> Goals { get; set; } = new();
         [JsonProperty("notes")] public string Notes { get; set; } = "";
+        /// <summary>Whether the lights are collected on the server for the coordinator to stack, and where to send them.</summary>
+        [JsonProperty("collectFiles")] public bool CollectFiles { get; set; }
+        [JsonProperty("filesUrl")] public string FilesUrl { get; set; } = "";
         [JsonProperty("compatibility")] public Compatibility Compatibility { get; set; } = new();
         [JsonProperty("joined")] public bool Joined { get; set; }
         [JsonProperty("collected")] public Dictionary<string, double> Collected { get; set; } = new();

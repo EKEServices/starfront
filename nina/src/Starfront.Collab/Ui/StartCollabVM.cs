@@ -122,6 +122,9 @@ namespace Starfront.Collab.Ui {
         public string MinFrames { get => minFrames; set { minFrames = value ?? ""; RaisePropertyChanged(); } }
         public string MaxBortle { get => maxBortle; set { maxBortle = value ?? ""; RaisePropertyChanged(); } }
         public bool RequireCalibrated { get => requireCalibrated; set { requireCalibrated = value; RaisePropertyChanged(); } }
+        /// <summary>Collect everyone's lights (and calibration frames) on the server, for the coordinator to stack.</summary>
+        public bool CollectFiles { get => collectFiles; set { collectFiles = value; RaisePropertyChanged(); } }
+        private bool collectFiles;
 
         /// <summary>
         /// A colour camera's data is its own band, kept apart from the mono
@@ -162,6 +165,7 @@ namespace Starfront.Collab.Ui {
             MinFocal = ""; MaxFocal = ""; MaxHfr = ""; MaxGuideRms = ""; MinExposure = ""; MaxExposure = "";
             MaxMoon = ""; MinMoonSeparation = ""; MinAltitude = ""; MinFrames = "10"; MaxBortle = "";
             RequireCalibrated = false;
+            CollectFiles = false;
             Filters.Clear();
             acceptOscRgb = true; acceptOscNarrowband = true;
             RaisePropertyChanged(nameof(AcceptOscRgb));
@@ -204,6 +208,7 @@ namespace Starfront.Collab.Ui {
             editingId = listing.Id;
             Name = listing.Name;
             Notes = listing.Notes ?? "";
+            CollectFiles = listing.CollectFiles;
             Single = listing.Kind == "single";
             var region = listing.Region;
             if (region != null) {
@@ -435,6 +440,7 @@ namespace Starfront.Collab.Ui {
                 ["name"] = title,
                 ["kind"] = Single ? "single" : "mosaic",
                 ["notes"] = Notes.Trim(),
+                ["collectFiles"] = CollectFiles,
                 ["region"] = new JObject {
                     ["ra"] = Math.Round(ra.Value, 5), ["dec"] = Math.Round(dec.Value, 5),
                     ["width"] = Math.Round(width, 4), ["height"] = Math.Round(height, 4),
