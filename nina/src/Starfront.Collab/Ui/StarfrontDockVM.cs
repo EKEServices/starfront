@@ -256,6 +256,9 @@ namespace Starfront.Collab.Ui {
             ? "Nobody is on it yet"
             : $"{Listing.Participants} telescope{(Listing.Participants == 1 ? "" : "s")} on it, {Listing.ParticipantsOnline} online now";
 
+        /// <summary>Whether a presence state means the camera is open: the plugin says "imaging", Starfront says "exposing" or "imaging".</summary>
+        public static bool Shooting(string state) => state == "imaging" || state == "exposing";
+
         /// <summary>Every telescope on it, by name, the ones online marked and what they are doing.</summary>
         public List<ParticipantVM> Participants {
             get {
@@ -263,8 +266,8 @@ namespace Starfront.Collab.Ui {
                 var rows = new List<ParticipantVM>();
                 foreach (var name in (Listing.ParticipantNames ?? new List<string>()).Distinct().OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)) {
                     var seen = presence.FirstOrDefault(t => t.Online && string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
-                    var doing = seen == null ? "" : seen.State == "imaging" && seen.Project == Listing.Id ? "shooting it now"
-                        : seen.State == "imaging" ? "shooting elsewhere" : seen.State;
+                    var doing = seen == null ? "" : Shooting(seen.State) && seen.Project == Listing.Id ? "shooting it now"
+                        : Shooting(seen.State) ? "shooting elsewhere" : seen.State;
                     rows.Add(new ParticipantVM(name, seen != null, doing));
                 }
                 return rows.OrderByDescending(r => r.Online).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -457,12 +460,14 @@ namespace Starfront.Collab.Ui {
                 Telescopes.Clear();
                 var names = session.Projects.ToDictionary(p => p.Id, p => p.Name);
                 var online = (session.Presence?.Telescopes ?? new List<TelescopePresence>()).Where(t => t.Online)
-                    .OrderByDescending(t => t.State == "imaging").ThenBy(t => t.OwnerName).ThenBy(t => t.Name);
+                    .OrderByDescending(t => ProjectRowVM.Shooting(t.State)).ThenBy(t => t.OwnerName).ThenBy(t => t.Name);
                 foreach (var scope in online) {
                     names.TryGetValue(scope.Project ?? "", out var onProject);
                     Telescopes.Add(new TelescopeRowVM(
                         scope.Name, scope.OwnerName ?? "",
-                        scope.State switch { "imaging" => "shooting", "slewing" => "slewing", "parked" => "parked", _ => "idle" },
+                        ProjectRowVM.Shooting(scope.State) ? "shooting"
+                            : scope.State switch { "slewing" => "slewing", "parked" => "parked", "cooling" => "cooling",
+                                                   "centring" => "centring", "focusing" => "focusing", "paused" => "paused", _ => "idle" },
                         scope.Target ?? "", onProject ?? ""));
                 }
                 RaisePropertyChanged(nameof(TelescopesText));

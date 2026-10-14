@@ -2092,7 +2092,9 @@ def sky(hours: float = Query(default=TRAIL_HOURS, ge=0.0, le=48.0)) -> JSONRespo
     online = [row for row in rows if row["online"]]
     return JSONResponse(
         {"telescopes": rows, "online": len(online),
-         "imaging": sum(1 for row in online if row["state"] == "imaging"),
+         # The plugin says "imaging"; Starfront says "exposing" between the
+         # frames of a run. Both are a camera open on the sky.
+         "imaging": sum(1 for row in online if row["state"] in ("imaging", "exposing")),
          "serverTime": round(now), "trailHours": hours,
          "onlineSeconds": ONLINE_SECONDS},
         headers={**_SKY_HEADERS, "Cache-Control": "public, max-age=30"})

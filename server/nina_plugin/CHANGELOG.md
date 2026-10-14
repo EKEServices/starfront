@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0.30
+
+- A telescope with its camera open is reported as shooting. The plugin told the others' charts "idle" unless its own Starfront container was the thing running, so a telescope on a collaboration's target through its own sequence, or between two runs of the container, sat at M31 marked idle all night. Shooting is now read from the camera and from the last light saved, with that light's target name.
+- Telescopes online shows a Starfront program's rig as shooting too (it says "exposing" between frames), and shows cooling, centring, focusing and paused instead of idle.
+
 ## 1.0.0.29
 
 - A mono telescope is no longer told to "set an exposure for OSC-RGB" before joining a collaboration that also takes colour data. Before joining, the plugin checks exposures only for the channels its own filters deliver; the rest is the server's to deal to others.

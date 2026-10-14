@@ -52,6 +52,15 @@ namespace Starfront.Collab.Services {
             initialized = true;
         }
 
+        /// <summary>When the last light was saved, whatever it was of: how the
+        /// others' charts know this telescope is shooting even when the
+        /// Starfront container is not the thing running.</summary>
+        public DateTime? LastLightUtc { get; private set; }
+        /// <summary>The target name on the last light saved, as N.I.N.A. stamped it.</summary>
+        public string LastTarget { get; private set; } = "";
+        /// <summary>The collaboration the last light belonged to, when it was one of ours.</summary>
+        public string LastProject { get; private set; } = "";
+
         public void Register(PanelContext context) => byTarget[context.TargetName] = context;
 
         public void Forget(string targetName) => byTarget.TryRemove(targetName, out _);
@@ -79,6 +88,9 @@ namespace Starfront.Collab.Services {
                 var metadata = args.MetaData;
                 if (metadata?.Image == null || metadata.Image.ImageType != "LIGHT") return;
                 var context = Lookup(metadata.Target?.Name);
+                LastLightUtc = DateTime.UtcNow;
+                LastTarget = (metadata.Target?.Name ?? "").Trim();
+                LastProject = context?.ProjectId ?? "";
                 if (context == null) return;
 
                 var filter = Filters.Canonical(string.IsNullOrWhiteSpace(args.Filter) ? context.Filter : args.Filter);

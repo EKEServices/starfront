@@ -139,7 +139,7 @@ namespace Starfront.Collab.Services {
                 }
                 var agentToken = settings.AgentToken;
                 var profile = RigProfile.Build(host, settings, ledger);
-                var presenceSaid = settings.SharePosition ? RigProfile.Presence(host, settings, Run) : null;
+                var presenceSaid = settings.SharePosition ? RigProfile.Presence(host, settings, Run, reporter) : null;
                 var hello = await client.HelloAsync(agentToken, profile, presenceSaid, token).ConfigureAwait(false);
                 if (hello.ServerTime > 0) ClockSkewSeconds = Math.Round(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0 - hello.ServerTime, 1);
 
@@ -485,7 +485,7 @@ namespace Starfront.Collab.Services {
                 // camera was connected. Send it afresh first, so a camera
                 // connected a moment ago counts.
                 var profile = RigProfile.Build(host, settings, ledger);
-                var presenceSaid = settings.SharePosition ? RigProfile.Presence(host, settings, Run) : null;
+                var presenceSaid = settings.SharePosition ? RigProfile.Presence(host, settings, Run, reporter) : null;
                 await client.HelloAsync(settings.AgentToken, profile, presenceSaid, token).ConfigureAwait(false);
                 answer = await client.JoinAsync(settings.AgentToken, projectId, body, token).ConfigureAwait(false);
                 if (answer.Task != null) {

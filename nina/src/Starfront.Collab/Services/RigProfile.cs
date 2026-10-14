@@ -132,8 +132,21 @@ namespace Starfront.Collab.Services {
             return body;
         }
 
-        /// <summary>Where this telescope points and what it is doing, for the others' charts. Never the site's location.</summary>
-        public static JObject Presence(HostServices host, StarfrontSettings settings, RunState run) {
+        /// <summary>A light saved this recently means the telescope is shooting, between exposures or not.</summary>
+        private static readonly TimeSpan ShootingWindow = TimeSpan.FromMinutes(15);
+
+        /// <summary>
+        /// Where this telescope points and what it is doing, for the others'
+        /// charts. Never the site's location.
+        ///
+        /// Shooting is read from the camera and the last light saved, not
+        /// only from the Starfront container: a telescope on a collaboration's
+        /// target through its own sequence, or between two runs of the
+        /// container, was reported idle to everybody while its camera was
+        /// open the whole time.
+        /// </summary>
+        public static JObject Presence(HostServices host, StarfrontSettings settings, RunState run,
+                                       FrameReporter reporter = null) {
             var said = new JObject { ["telescope"] = Truncate(settings.TelescopeName, 60) };
             var state = "idle";
             try {
@@ -150,10 +163,22 @@ namespace Starfront.Collab.Services {
             } catch (Exception ex) {
                 Logger.Debug($"Starfront: mount not readable for presence - {ex.Message}");
             }
+            var exposing = false;
+            try {
+                var camera = host.Camera.GetInfo();
+                exposing = camera != null && camera.Connected && camera.IsExposing;
+            } catch (Exception ex) {
+                Logger.Debug($"Starfront: camera not readable for presence - {ex.Message}");
+            }
+            var recentLight = reporter?.LastLightUtc is DateTime at && DateTime.UtcNow - at < ShootingWindow;
             if (run != null && run.Running) {
                 state = "imaging";
                 said["target"] = Truncate(run.TargetName ?? "", 80);
                 if (!string.IsNullOrEmpty(run.ProjectId)) said["project"] = run.ProjectId;
+            } else if ((exposing || recentLight) && state != "parked") {
+                state = "imaging";
+                said["target"] = Truncate(reporter?.LastTarget ?? "", 80);
+                if (!string.IsNullOrEmpty(reporter?.LastProject)) said["project"] = reporter.LastProject;
             }
             said["state"] = state;
             return said;

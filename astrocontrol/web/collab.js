@@ -487,7 +487,7 @@
     const seen = new Map();
     for (const t of telescopes) {
       const key = t.ownerName || t.name || t.id;
-      const shooting = (t.state || '') === 'imaging';
+      const shooting = ['imaging', 'exposing'].includes(t.state || '');
       const held = seen.get(key);
       if (!held) {
         seen.set(key, { ...t, shooting, hint: `${t.ownerName || t.name}${t.ownerName ? ` · ${t.name}` : ''}${t.target ? ` — ${t.target}` : ''}` });
@@ -508,7 +508,7 @@
     const who = status.presence || {};
     if (!status.configured || who.online === undefined) { node.hidden = true; return; }
     const online = (who.telescopes || []).filter((t) => t.online);
-    const shooting = online.filter((t) => (t.state || '') === 'imaging');
+    const shooting = online.filter((t) => ['imaging', 'exposing'].includes(t.state || ''));
     const people = who.people || 0;
     const feed = ((col.activity || {}).events || []).slice(0, 14);
     const now = Number((col.activity || {}).serverTime) || (Date.now() / 1000);
@@ -641,7 +641,7 @@
       // the thing, above the ledger. A card with telescopes shooting on it
       // glows; the button to join one that is moving tonight glows too.
       const onIt = (who.telescopes || []).filter((t) => t.online && t.project === project.id);
-      const shooting = onIt.filter((t) => (t.state || '') === 'imaging');
+      const shooting = onIt.filter((t) => ['imaging', 'exposing'].includes(t.state || ''));
       const day = today[project.id] || {};
       const prog = project.progress || {};
       const thin = Object.entries(prog)
