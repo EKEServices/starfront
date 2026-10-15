@@ -33,8 +33,8 @@ This plugin is the N.I.N.A. side of that:
 Made by Starfront Observatories, Rockwood, Texas - https://starfront.space</PluginLongDescription>
     <!-- The links N.I.N.A. shows at the top of the plugin's page. The homepage is
          the observatory's website; the "repository" slot carries the Discord
-         invitation, because membership is what taking part needs and the source
-         repository is private. -->
+         invitation, because membership is what taking part needs. The source
+         is at https://github.com/bray-sfro/starfront (nina/). -->
     <RepositoryUrl>https://discord.com/invite/3ut6a7pfsY</RepositoryUrl>
     <PluginHomepage>https://starfront.space</PluginHomepage>
     <PluginTags>Collaboration,Mosaic,Deep Sky,Discord,Starfront,Community,Sequencer</PluginTags>

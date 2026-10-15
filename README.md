@@ -35,9 +35,11 @@ beside it) and copies the installer to `server\downloads\`, which the
 collaboration server offers at `/download`; running `Deploy the Starfront
 server.cmd` publishes it.  The version is `astrocontrol.__version__`; bump it
 for a release.  The program icon is built from `packaging\logo.png`, the
-Starfront Observatories mark, by `packaging\make_icon.py`.  The source stays
-private: the download page and the N.I.N.A. plugin feed are the only public
-faces, and `/download/latest` always fetches the newest installer.
+Starfront Observatories mark, by `packaging\make_icon.py`.  The download page
+and the N.I.N.A. plugin feed are where people get the built program, and
+`/download/latest` always fetches the newest installer; the source is here,
+under the Mozilla Public License 2.0 (`LICENSE`); `CONTRIBUTING.md` says how
+to work on it.
 
 **The first run.** A window called *First light* opens over an empty program
 and walks through the whole thing in order: bring your settings over from
