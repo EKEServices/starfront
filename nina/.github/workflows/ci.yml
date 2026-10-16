@@ -25,6 +25,11 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release --no-restore
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test the upload engine
+        shell: pwsh
+        run: |
+          dotnet test tests/RapidStackerCollab.Core.Tests/RapidStackerCollab.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Validate the distributable
         shell: pwsh
         env:
