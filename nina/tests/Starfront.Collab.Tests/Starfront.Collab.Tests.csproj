@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Starfront.Collab.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/RapidStackerCollab.Core/RapidStackerCollab.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The plugin itself is a WPF library that only runs inside N.I.N.A.; the
+         files below use neither, so they are compiled in here by link. Add a
+         file to this list only if it has no N.I.N.A. or WPF reference. -->
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/JoinCodes.cs" Link="Linked/JoinCodes.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingMapping.cs" Link="Linked/StackingMapping.cs" />
+  </ItemGroup>
+</Project>

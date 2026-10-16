@@ -13,6 +13,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{16FC7FBB
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RapidStackerCollab.Core.Tests", "tests\RapidStackerCollab.Core.Tests\RapidStackerCollab.Core.Tests.csproj", "{DD1BBFE7-E8A9-4500-B0D6-317453600AED}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Starfront.Collab.Tests", "tests\Starfront.Collab.Tests\Starfront.Collab.Tests.csproj", "{478ABF80-373B-48A0-BD67-7191C2C44B92}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -34,10 +36,15 @@ Global
 		{DD1BBFE7-E8A9-4500-B0D6-317453600AED}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DD1BBFE7-E8A9-4500-B0D6-317453600AED}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DD1BBFE7-E8A9-4500-B0D6-317453600AED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{478ABF80-373B-48A0-BD67-7191C2C44B92}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{478ABF80-373B-48A0-BD67-7191C2C44B92}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{478ABF80-373B-48A0-BD67-7191C2C44B92}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{478ABF80-373B-48A0-BD67-7191C2C44B92}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{BFF94DC6-170D-406B-9C29-3C1CB360E70D} = {8D92E023-3A1A-440C-9A5F-88B62F860F99}
 		{2E21672E-E91B-4AE9-89C0-8767EF68A204} = {8D92E023-3A1A-440C-9A5F-88B62F860F99}
 		{DD1BBFE7-E8A9-4500-B0D6-317453600AED} = {16FC7FBB-0775-4CD4-8783-6106A06EEA78}
+		{478ABF80-373B-48A0-BD67-7191C2C44B92} = {16FC7FBB-0775-4CD4-8783-6106A06EEA78}
 	EndGlobalSection
 EndGlobal
