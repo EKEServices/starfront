@@ -36,6 +36,9 @@ the top of your copy.
 - [ ] The Starfront panel. *Expected:* a *Live stacking* block under Tonight's deal saying to sign in.
 - [ ] *Sign in to Rapid Stacker Collab*. *Expected:* the browser opens on the approval page with the code filled in;
   the options page shows the same code with *Open the browser again* and *Cancel*.
+- [ ] Against the local stack (`http://127.0.0.1:8787/api/`, through an SSH tunnel if it runs on another machine).
+  *Expected:* the browser opens on `http://127.0.0.1:8787/device` with the code filled in, as with https. Against
+  plain http on any other address it does not open; the line under the button gives the address to open by hand.
 - [ ] Approve it. *Expected:* within a few seconds *Signed in as …* and *The sign-in is good for … days*; the log
   says `signed in to Rapid Stacker Collab as …`; `settings.json` holds `StackingToken` as unreadable text (DPAPI),
   never the `rscu_` token itself.

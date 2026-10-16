@@ -147,10 +147,20 @@ namespace Starfront.Collab.Services.Stacking {
             }
         }
 
-        /// <summary>Open the approval page, with the code filled in, in the default browser. https only.</summary>
+        /// <summary>
+        /// Open the approval page, with the code filled in, in the default
+        /// browser: an https page, or an http one on this PC (BrowserUrls).
+        /// Anything else is left for the person to open, and says where.
+        /// </summary>
         public void OpenBrowser() {
             var url = VerificationUrl;
-            if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
+            if (!BrowserUrls.CanOpen(url)) {
+                if (url.Length > 0) {
+                    Status = $"Open {url} in a browser and approve the code {UserCode} there.";
+                    Logger.Warning($"Starfront stacking: the approval page {url} was not opened, as it is neither https nor on this PC");
+                }
+                return;
+            }
             try {
                 Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             } catch (Exception ex) {

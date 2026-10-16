@@ -103,7 +103,7 @@ namespace Starfront.Collab.Ui {
             this.settings = settings;
             AcceptTermsCommand = new AsyncRelayCommand(AcceptTermsAsync, () => !busy && settings.StackingEnabled && TermsOutdated);
             RetryCommand = new AsyncRelayCommand(RetryAsync, () => !busy && settings.StackingEnabled && CanRetry);
-            ReadTermsCommand = new RelayCommand(ReadTerms, () => link.TermsUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            ReadTermsCommand = new RelayCommand(ReadTerms, () => BrowserUrls.CanOpen(link.TermsUrl));
         }
 
         public string Name => link.StarfrontName;
