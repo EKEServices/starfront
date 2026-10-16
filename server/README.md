@@ -230,6 +230,30 @@ path in `ReadWritePaths` in the service file.) The server always leaves two
 gigabytes free and refuses uploads beyond that, telling the person to tell
 the coordinator.
 
+## Live stacking: the join code
+
+A collaboration can name the [Rapid Stacker Collab](https://collab.astro.ekeservices.com)
+project that stacks its lights as they land, by carrying that project's join
+code. The coordinator sets it with `stackingJoinCode` on
+`POST /api/v1/projects` or `PUT /api/v1/projects/{id}` (blank clears it; a
+`PUT` without the field leaves it alone). The N.I.N.A. plugin's form does
+this; the Starfront program's Collab form does not yet send the field, and an
+edit from it leaves the code as it was.
+
+The code is a credential: whoever holds it can join the stacking project and
+send frames to it. So:
+
+- it is stored canonical, `XXXX-XXXX-XXXX`, whatever spacing or case it was
+  pasted with, and one that cannot be a code (twelve characters of 2-9 and
+  A-Z without I, L and O) is refused with 400;
+- `GET /api/v1/agent/projects` hands `stackingJoinCode` only to telescopes
+  with a task on the collaboration and to the telescopes of its owner; every
+  telescope gets `stackingLinked`, a yes or no.
+
+Nothing else on this server is involved: the frames go from the telescope
+straight to Rapid Stacker Collab, and the ledger and reports are as before.
+`tools/check_server.py` has the cases.
+
 ## What is deliberately not here yet
 
 - **A drawn depth map.** The depth map exists at the resolution of each rig's

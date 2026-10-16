@@ -195,7 +195,7 @@
                     <TextBlock
                         Margin="0,4,0,0"
                         Opacity="0.7"
-                        Text="Turning this on joins this telescope to the stacking project of each linked collaboration you are on, accepting that project's current terms of contribution; if the terms change later, nothing more is sent until you read and accept them here."
+                        Text="Turning this on joins this telescope to the stacking project of each linked collaboration you are on, and joining accepts Rapid Stacker Collab's terms of contribution as they stand; read them on its website first."
                         TextWrapping="Wrap" />
 
                     <StackPanel IsEnabled="{Binding Settings.StackingEnabled}">
