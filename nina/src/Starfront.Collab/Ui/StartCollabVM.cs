@@ -11,6 +11,8 @@ using NINA.WPF.Base.Interfaces.ViewModel;
 using Starfront.Collab.Server;
 using Starfront.Collab.Services;
 
+using Starfront.Collab.Services.Stacking;
+
 namespace Starfront.Collab.Ui {
 
     /// <summary>One filter a collaboration wants: how deep, and how narrow the filter may be.</summary>
@@ -128,6 +130,8 @@ namespace Starfront.Collab.Ui {
         /// <summary>The Rapid Stacker Collab join code that stacks this collaboration's lights as they land; blank for none.</summary>
         public string StackingJoinCode { get => stackingJoinCode; set { stackingJoinCode = value ?? ""; RaisePropertyChanged(); } }
         private string stackingJoinCode = "";
+        /// <summary>The code as the form was loaded with it, so an edit sends it only when it was changed.</summary>
+        private string loadedStackingJoinCode = "";
 
         /// <summary>
         /// A colour camera's data is its own band, kept apart from the mono
@@ -170,6 +174,7 @@ namespace Starfront.Collab.Ui {
             RequireCalibrated = false;
             CollectFiles = false;
             StackingJoinCode = "";
+            loadedStackingJoinCode = "";
             Filters.Clear();
             acceptOscRgb = true; acceptOscNarrowband = true;
             RaisePropertyChanged(nameof(AcceptOscRgb));
@@ -214,6 +219,7 @@ namespace Starfront.Collab.Ui {
             Notes = listing.Notes ?? "";
             CollectFiles = listing.CollectFiles;
             StackingJoinCode = listing.StackingJoinCode ?? "";
+            loadedStackingJoinCode = StackingJoinCode;
             Single = listing.Kind == "single";
             var region = listing.Region;
             if (region != null) {
@@ -423,7 +429,7 @@ namespace Starfront.Collab.Ui {
             var moon = Num(MaxMoon);
             var bortle = Num(MaxBortle);
             if (bortle is double b && (b < 1 || b > 9)) throw new ArgumentException("Bortle is 1 to 9.");
-            if (!Services.Stacking.JoinCodes.TryNormalize(StackingJoinCode, out var stackingCode)) throw new ArgumentException(Services.Stacking.JoinCodes.Hint + ", or leave it blank.");
+            if (!JoinCodes.TryNormalize(StackingJoinCode, out var stackingCode)) throw new ArgumentException(JoinCodes.Hint + ", or leave it blank.");
             var requirements = new JObject {
                 ["minFocalLength"] = Json(Num(MinFocal)),
                 ["maxFocalLength"] = Json(Num(MaxFocal)),
@@ -442,15 +448,11 @@ namespace Starfront.Collab.Ui {
                 ["maxBortle"] = bortle.HasValue ? new JValue((int)Math.Round(bortle.Value)) : JValue.CreateNull(),
                 ["filters"] = filters,
             };
-            return new JObject {
+            var body = new JObject {
                 ["name"] = title,
                 ["kind"] = Single ? "single" : "mosaic",
                 ["notes"] = Notes.Trim(),
                 ["collectFiles"] = CollectFiles,
-                // Always sent: blank clears it on an edit. The owner's telescopes
-                // are handed the code with the listing, so an edit never blanks
-                // one it could not see.
-                ["stackingJoinCode"] = stackingCode,
                 ["region"] = new JObject {
                     ["ra"] = Math.Round(ra.Value, 5), ["dec"] = Math.Round(dec.Value, 5),
                     ["width"] = Math.Round(width, 4), ["height"] = Math.Round(height, 4),
@@ -459,6 +461,15 @@ namespace Starfront.Collab.Ui {
                 ["requirements"] = requirements,
                 ["goals"] = goals,
             };
+            // The stacking join code goes on an edit only when it was changed
+            // (blank then clears it). The server hands the code only to
+            // telescopes on the collaboration and to its owner's, and a
+            // collaboration started on the coordinator token has no owner, so
+            // this form may have loaded it blank: sending that back would
+            // clear a code nobody meant to touch.
+            JoinCodes.TryNormalize(loadedStackingJoinCode, out var loaded);
+            if (!Editing || stackingCode != loaded) body["stackingJoinCode"] = stackingCode;
+            return body;
         }
 
         private static JToken Json(double? value) => value.HasValue ? new JValue(value.Value) : JValue.CreateNull();

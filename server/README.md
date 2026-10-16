@@ -236,9 +236,11 @@ A collaboration can name the [Rapid Stacker Collab](https://collab.astro.ekeserv
 project that stacks its lights as they land, by carrying that project's join
 code. The coordinator sets it with `stackingJoinCode` on
 `POST /api/v1/projects` or `PUT /api/v1/projects/{id}` (blank clears it; a
-`PUT` without the field leaves it alone). The N.I.N.A. plugin's form does
-this; the Starfront program's Collab form does not yet send the field, and an
-edit from it leaves the code as it was.
+`PUT` without the field leaves it alone). Both forms that start and edit a
+collaboration have a box for it, the Starfront program's Collab tab and the
+N.I.N.A. plugin's panel, and both send it on an edit only when it was changed:
+a collaboration started on the coordinator token has no owner, so a form may
+have loaded it blank, and sending that back would clear it.
 
 The code is a credential: whoever holds it can join the stacking project and
 send frames to it. So:
