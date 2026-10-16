@@ -131,6 +131,9 @@ namespace Starfront.Collab.Server {
         /// <summary>Whether the lights are collected on the server for the coordinator to stack, and where to send them.</summary>
         [JsonProperty("collectFiles")] public bool CollectFiles { get; set; }
         [JsonProperty("filesUrl")] public string FilesUrl { get; set; } = "";
+        /// <summary>Whether the lights are stacked as they land by Rapid Stacker Collab, and the code that gets this telescope into that project (handed to telescopes on the collaboration and to the owner's own; blank to the rest).</summary>
+        [JsonProperty("stackingLinked")] public bool StackingLinked { get; set; }
+        [JsonProperty("stackingJoinCode")] public string StackingJoinCode { get; set; } = "";
         [JsonProperty("compatibility")] public Compatibility Compatibility { get; set; } = new();
         [JsonProperty("joined")] public bool Joined { get; set; }
         [JsonProperty("collected")] public Dictionary<string, double> Collected { get; set; } = new();
