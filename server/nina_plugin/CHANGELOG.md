@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0.32
+
+- *Live stacking*, off by default. A coordinator can put a Rapid Stacker Collab join code on a collaboration (a new field at the bottom of the start and edit form), and every telescope on it with *Live stacking* turned on under Options > Plugins > Starfront sends each light the Starfront container saves to that stacking project as it lands, so everyone's frames build one stack through the night. The code is handed only to telescopes on the collaboration and to the coordinator's own; the others' cards just say the lights are live-stacked.
+- Live stacking has its own sign-in, to Rapid Stacker Collab, the same way as the Discord one: a code to approve in the browser, no password in N.I.N.A. The telescope joins each linked project by itself at the next check-in, with its filters mapped from your exposure table's *Delivers* column and the filter names; a filter the project does not use is never sent. Joining accepts Rapid Stacker Collab's terms of contribution as they stand, and the switch says so; read them on its website first. If they change in the moment between the plugin reading them and joining, the join waits for you to read and accept them on the options page.
+- What is sent is a copy with your site's latitude, longitude and height, the observer, and the altitude and azimuth that would give them away taken out; your own files are never moved, changed or deleted. Only lights the container shot for a linked collaboration go, and darks, flats and bias only if you ask (to the project of the last light sent). Uploads wait for the camera to be idle unless you choose otherwise, can keep to a daily window, can be capped in speed, and resume where they stopped after a restart. The Starfront panel shows what is waiting and going, with *Pause uploads* and *Upload now*.
+- With it off, nothing changes: no sign-in, no connection, no queue, and the ledger and reporting work exactly as before.
+
 ## 1.0.0.31
 
 - *Collect the lights on the server* in the start-a-collaboration form, and on Edit. A collaboration with it on takes everyone's lights, flats, darks and bias through the files page at collab.starfront.space/files, sorted by collaboration and person, for the coordinator to stack. A card on such a collaboration says so and has an *Open the files page* button.

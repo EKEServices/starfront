@@ -1969,6 +1969,44 @@ Releases live in `server/nina_plugin/`; `nina/README.md` says how one is made.
 Releasing here rather than through the central manifest repository means a
 fix reaches everybody the moment it is deployed, with no review queue.
 
+**Live stacking.** A collaboration can carry the join code of a
+[Rapid Stacker Collab](https://collab.astro.ekeservices.com) project, and a
+plugin with *Live stacking* turned on sends every light the container saves
+for it to that project as it lands, where a worker folds it into the
+per-filter stacks. The decisions behind it:
+
+- **The code lives on the Starfront project, not in each telescope.** Pasting
+  it into every plugin by hand would be forgotten on half of them. It is a
+  credential, not a label: whoever holds it can join the stacking project, so
+  the server stores it canonical, refuses one that cannot be real, and hands
+  it only to telescopes on the collaboration and to the owner's own (the
+  owner's program fills its Edit form from that listing, and an owner who
+  could not see the code would save it away blank). Everyone else is told
+  only that the lights are stacked.
+- **The uploader is a second listener on N.I.N.A.'s image pipeline**, and finds
+  a light's collaboration exactly the way the ledger does, by the target name
+  N.I.N.A. stamped. The ledger and the reporting are untouched, and with the
+  switch off the plugin opens, hooks and connects nothing new.
+- **Only lights the container shot for a linked collaboration go.** Calibration
+  frames carry no target, so when asked for they go to the project of the last
+  light sent; on a night split between two collaborations the later one gets
+  the darks.
+- **The plugin joins by itself, and joining accepts the stacking service's
+  terms of contribution as they stand.** The text beside the switch says so.
+  It only ever accepts the version the service has just shown it: if the terms
+  change between that and the join, the join is refused and waits for somebody
+  to read and accept them on the options page. Rapid Stacker Collab does not
+  stop a member's uploads when its terms change later, so neither does the
+  plugin.
+- **There is no "after the sequence ends" upload mode.** The plugin does not
+  follow the sequencer's state, and a mode that waited for it would wait for
+  ever; "when the camera is idle" covers the same need between frames.
+- **The upload engine is Rapid Stacker Collab's own, copied in**
+  (`nina/src/RapidStackerCollab.Core`, MPL-2.0) with its tests, rather than
+  rewritten. Its queue is SQLite, whose native library the plugin loads by full
+  path before opening it, because N.I.N.A. adds a plugin's folders to the
+  search path only once the plugin has started.
+
 ## Layout
 
 ```

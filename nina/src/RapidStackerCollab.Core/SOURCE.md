@@ -53,4 +53,4 @@ be diffed against upstream on a re-sync:
 | `TempCleaner.cs` | `RapidStackerCollab.Shell/Hosting/TempCleaner.cs` |
 | `NativeSqlite.cs` | `RapidStackerCollab.Plugin/Services/NinaAdapters.cs` (`NativeSqlite.Preload`) |
 
-(The table lists the files the live-stacking work adds in its later phases; a row whose file does not exist yet is planned, not missing.)
+`StackingJoiner.cs`, `StackingLinks.cs`, `StackingSignIn.cs` and the rest of that folder are Starfront's own, with no upstream counterpart to follow.

@@ -58,6 +58,18 @@ The target name in your file pattern is the project's name, with `panel <n>`
 added on a mosaic, so your files sort by project and panel, and each FITS
 header carries `STARFRNT` (the project) and `SFPANEL`.
 
+6. **Live stacking (optional, off by default).** A coordinator can link a
+   collaboration to a [Rapid Stacker Collab](https://collab.astro.ekeservices.com)
+   project by pasting its join code into the start or edit form. Turn on
+   *Live stacking* under Options > Plugins > Starfront and sign in to Rapid
+   Stacker Collab there (a code to approve in the browser, as with Discord).
+   At the next check-in the telescope joins the stacking project of every
+   linked collaboration it is on, and from then on each light the container
+   saves for it is sent there as it lands: a copy with your location taken
+   out, never your file itself. The Starfront panel shows what is waiting
+   and going. With the switch off the plugin connects to nothing new and
+   behaves exactly as before.
+
 ## For people building it
 
 Windows, the .NET 8 SDK (8.0.100 or later) and N.I.N.A. 3.2. PowerShell 7 is
@@ -66,7 +78,14 @@ not required; the scripts run on Windows PowerShell as well.
 ```powershell
 cd nina
 dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release
+dotnet test tests/RapidStackerCollab.Core.Tests     # the live-stacking upload engine; runs on macOS too
 ```
+
+`Starfront.sln` holds the plugin, the upload engine it ships
+(`src/RapidStackerCollab.Core`) and that engine's tests. The whole solution,
+XAML included, also builds on macOS (`dotnet build Starfront.sln`); only
+N.I.N.A. itself needs Windows. `MANUAL_CHECKLIST.md` lists what has to be
+checked inside N.I.N.A. before a release that touches live stacking.
 
 Close N.I.N.A., then put the build where N.I.N.A. loads plugins from
 (`%LOCALAPPDATA%\NINA\Plugins\3.0.0\Starfront`):
@@ -110,8 +129,17 @@ public repositories only, and asks for an accountable human maintainer.
 | `Ledger/` | what was shot, on disk, until the server has taken it |
 | `Sequencer/` | the *Starfront collaboration* container, its panels, the altitude gate, the once-through strategy |
 | `Ui/` | the options page, the exposure table, the Imaging-tab panel |
+| `Services/Stacking/` | live stacking: the Rapid Stacker Collab sign-in, the link to each collaboration's stacking project and the join, the queue and the uploads, and the switch that turns all of it on and off |
+| `../RapidStackerCollab.Core/` | the upload engine (resumable multipart upload, the SQLite queue, location stripping), copied from Rapid Stacker Collab's own N.I.N.A. plugin; see its `SOURCE.md` |
 
 Everything the plugin owns is in the zip; nothing of N.I.N.A.'s is.
-`build/Plugin.targets` lists exactly what ships.
+`build/Plugin.targets` lists exactly what ships: the plugin, the upload
+engine, the SQLite it keeps its queue in (with the native
+`runtimes/win-x64/native/e_sqlite3.dll`, which the plugin loads by full path
+because N.I.N.A. adds a plugin's folders to the search path only after it has
+started), `LICENSE.txt` and `NOTICE.txt`.
 
 Licensed under the Mozilla Public License 2.0, like N.I.N.A. itself.
+`src/RapidStackerCollab.Core` is © EKE Services LLC, also MPL-2.0, and keeps
+its own file headers and build rules; `NOTICE.txt` lists the third-party
+components that ship.
