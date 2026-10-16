@@ -2031,6 +2031,71 @@ case("...and the listing says so, with where to send them",
      listing["collectFiles"] is True and listing["filesUrl"].endswith(f"/files#{FILES_PROJECT}"),
      listing["filesUrl"])
 
+# ------------------------------------------- live stacking: the join code
+# A collaboration can name the Rapid Stacker Collab project that stacks its
+# lights as they land. The code is a credential: it is stored canonical,
+# refused when it cannot be real, and handed out only to telescopes on the
+# collaboration and to the owner's own.
+print("\n-- live stacking: the join code --")
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Orion, live-stacked", "region": {"ra": 84.0, "dec": 0.0,
+                                               "width": 16.0, "height": 8.0},
+    "requirements": {"filters": {"Ha": 3.0}}, "goals": {"Ha": 10.0},
+    "stackingJoinCode": " h4rt 92bk-wnpc "}, token=BOB2)
+STACKED = made["project"]["id"]
+case("a project can be started with a stacking join code, stored canonical",
+     status == 200 and made["project"]["payload"]["stackingJoinCode"] == "H4RT-92BK-WNPC",
+     str(made)[:200])
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "typo", "region": {"ra": 84.0, "dec": 0.0, "width": 16.0, "height": 8.0},
+    "stackingJoinCode": "H4RT-92BK-WNP1"}, token=BOB2)
+case("a code that cannot be real is refused", status == 400 and "twelve characters" in answer["detail"],
+     str(answer)[:200])
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "short", "region": {"ra": 84.0, "dec": 0.0, "width": 16.0, "height": 8.0},
+    "stackingJoinCode": "H4RT-92BK"}, token=BOB2)
+case("...and so is one that is too short", status == 400)
+
+_, bobs = call("POST", "/api/v1/agents", {"name": "Bob's rig"}, token=BOB2)
+_, browse = call("GET", "/api/v1/agent/projects", token=bobs["token"])
+listing = next(p for p in browse["projects"] if p["id"] == STACKED)
+case("the owner's own telescope is handed the code without joining",
+     listing["stackingLinked"] is True and listing["stackingJoinCode"] == "H4RT-92BK-WNPC",
+     str(listing.get("stackingJoinCode")))
+_, browse = call("GET", "/api/v1/agent/projects", token=AGENT_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == STACKED)
+case("a telescope that is only browsing learns that the lights are stacked, not the code",
+     listing["stackingLinked"] is True and listing["stackingJoinCode"] == "",
+     str(listing.get("stackingJoinCode")))
+STACKER_TOKEN, _ = enrol("stacker", 389.0, 9576, 6388, 6.0)
+status, _ = call("POST", f"/api/v1/agent/projects/{STACKED}/join", {}, token=STACKER_TOKEN)
+_, browse = call("GET", "/api/v1/agent/projects", token=STACKER_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == STACKED)
+case("a telescope on the collaboration is handed the code",
+     status == 200 and listing["stackingJoinCode"] == "H4RT-92BK-WNPC",
+     f"join {status}, code {listing.get('stackingJoinCode')!r}")
+_, browse = call("GET", "/api/v1/agent/projects", token=AGENT_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == FILES_PROJECT)
+case("a collaboration without one says so", listing["stackingLinked"] is False
+     and listing["stackingJoinCode"] == "")
+
+status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"notes": "still stacked"}, token=BOB2)
+case("an edit that leaves the code out leaves it alone",
+     status == 200 and changed["project"]["payload"]["stackingJoinCode"] == "H4RT-92BK-WNPC")
+status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "wnpc-h4rt-92bk"}, token=BOB2)
+case("...one that sends a new code replaces it, canonical",
+     status == 200 and changed["project"]["payload"]["stackingJoinCode"] == "WNPC-H4RT-92BK")
+status, _ = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "nope"}, token=BOB2)
+_, browse = call("GET", "/api/v1/agent/projects", token=STACKER_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == STACKED)
+case("...a bad one is refused and the old one stands",
+     status == 400 and listing["stackingJoinCode"] == "WNPC-H4RT-92BK")
+status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": ""}, token=BOB2)
+_, browse = call("GET", "/api/v1/agent/projects", token=STACKER_TOKEN)
+listing = next(p for p in browse["projects"] if p["id"] == STACKED)
+case("...and a blank one clears it", status == 200 and changed["project"]["payload"]["stackingJoinCode"] == ""
+     and listing["stackingLinked"] is False and listing["stackingJoinCode"] == "")
+
 status, answer, _ = raw("PUT", f"/api/v1/projects/{FILES_PROJECT}/files/M31_Ha_001.fits", FITS,
                         {"Authorization": f"Bearer {ALICE}", "Content-Length": str(len(FITS))})
 case("a signed-in person can upload a light", status == 200 and answer["file"]["name"] == "M31_Ha_001.fits"

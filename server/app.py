@@ -414,6 +414,31 @@ class AgentRequest(BaseModel):
     owner: str = Field(default="", max_length=80)
 
 
+#: The characters a Rapid Stacker Collab join code is made of: Crockford's
+#: base32, with the letters that look like digits left out.
+_JOIN_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+
+
+def _stacking_join_code(text: str) -> str:
+    """A Rapid Stacker Collab join code as the plugin will send it, or 400.
+
+    Blank means the collaboration is not live-stacked. Anything else has to be
+    the twelve characters of a real code, whatever spacing or hyphens or case
+    it was pasted with, because the code is a credential and not a label: a
+    telescope that is handed it joins a stacking project with it, and a typo
+    saved here would send every telescope on the collaboration to join a
+    project that does not exist, night after night.
+    """
+    cleaned = "".join(ch for ch in (text or "").upper() if ch not in " -_")
+    if not cleaned:
+        return ""
+    if len(cleaned) != 12 or any(ch not in _JOIN_CODE_ALPHABET for ch in cleaned):
+        raise HTTPException(status_code=400,
+                            detail="a Rapid Stacker Collab join code is twelve "
+                                   "characters, like H4RT-92BK-WNPC")
+    return f"{cleaned[0:4]}-{cleaned[4:8]}-{cleaned[8:12]}"
+
+
 class ProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     coordinator: str = Field(default="", max_length=80)
@@ -429,6 +454,10 @@ class ProjectRequest(BaseModel):
     # page, and in time the programs themselves), for the coordinator to
     # stack. Off unless asked: gigabytes a night are nobody's by accident.
     collectFiles: bool = False
+    # The join code of the Rapid Stacker Collab project that stacks this
+    # collaboration's lights as they land, or blank for none. Validated by
+    # `_stacking_join_code` and stored canonical, XXXX-XXXX-XXXX.
+    stackingJoinCode: str = Field(default="", max_length=40)
 
 
 class TaskRequest(BaseModel):
@@ -753,6 +782,16 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
         payload = project.get("payload") or {}
         wants = collab.Requirements.read(payload.get("requirements") or {})
         collected, progress = _figures(project["id"], payload)
+        # The stacking join code admits whoever holds it to the Rapid Stacker
+        # Collab project, so a telescope browsing for something to join is
+        # told only that the lights are live-stacked. The code itself goes
+        # to telescopes on the collaboration, and to the owner's own
+        # telescopes whether or not they are on it, because the owner's
+        # program fills its Edit form from this listing and an owner who
+        # could not see the code would save it away blank.
+        stacking_code = payload.get("stackingJoinCode") or ""
+        owner_id = project.get("owner_id") or ""
+        owns = bool(owner_id) and owner_id == (agent.get("owner_id") or "")
         listed.append({
             "id": project["id"],
             "name": project["name"],
@@ -771,6 +810,10 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             "collectFiles": bool(payload.get("collectFiles")),
             "filesUrl": (f"{DISCORD.public_url.rstrip('/')}/files#{project['id']}"
                          if payload.get("collectFiles") and DISCORD.public_url else ""),
+            # Whether the lights are stacked as they land, and the code that
+            # gets a telescope on this collaboration into that stack.
+            "stackingLinked": bool(stacking_code),
+            "stackingJoinCode": stacking_code if (project["id"] in mine or owns) else "",
             "compatibility": collab.compatibility(profile, wants),
             "joined": project["id"] in mine,
             # What everyone together has collected, so somebody choosing where
@@ -1644,6 +1687,7 @@ def create_project(body: ProjectRequest,
         "goals": _goals(body.goals),
         "notes": body.notes,
         "collectFiles": bool(body.collectFiles),
+        "stackingJoinCode": _stacking_join_code(body.stackingJoinCode),
     }
     # The name on it is the person's Discord name unless the owner, on the
     # admin token, chose to write one.
@@ -1663,6 +1707,8 @@ class ProjectUpdateRequest(BaseModel):
     goals: dict[str, float] | None = None
     notes: str | None = Field(default=None, max_length=2000)
     collectFiles: bool | None = None
+    # Blank clears it; left out, it is left alone like every other field.
+    stackingJoinCode: str | None = Field(default=None, max_length=40)
     # open | closed. Closing takes it off everybody's list without deleting
     # the record of what was collected.
     status: str | None = Field(default=None, pattern="^(open|closed)$")
@@ -1696,6 +1742,8 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
         payload["notes"] = body.notes
     if body.collectFiles is not None:
         payload["collectFiles"] = bool(body.collectFiles)
+    if body.stackingJoinCode is not None:
+        payload["stackingJoinCode"] = _stacking_join_code(body.stackingJoinCode)
     if body.name is not None:
         store.rename_project(project_id, body.name.strip())
     updated = store.set_project(project_id, payload, body.status)
