@@ -125,6 +125,9 @@ namespace Starfront.Collab.Ui {
         /// <summary>Collect everyone's lights (and calibration frames) on the server, for the coordinator to stack.</summary>
         public bool CollectFiles { get => collectFiles; set { collectFiles = value; RaisePropertyChanged(); } }
         private bool collectFiles;
+        /// <summary>The Rapid Stacker Collab join code that stacks this collaboration's lights as they land; blank for none.</summary>
+        public string StackingJoinCode { get => stackingJoinCode; set { stackingJoinCode = value ?? ""; RaisePropertyChanged(); } }
+        private string stackingJoinCode = "";
 
         /// <summary>
         /// A colour camera's data is its own band, kept apart from the mono
@@ -166,6 +169,7 @@ namespace Starfront.Collab.Ui {
             MaxMoon = ""; MinMoonSeparation = ""; MinAltitude = ""; MinFrames = "10"; MaxBortle = "";
             RequireCalibrated = false;
             CollectFiles = false;
+            StackingJoinCode = "";
             Filters.Clear();
             acceptOscRgb = true; acceptOscNarrowband = true;
             RaisePropertyChanged(nameof(AcceptOscRgb));
@@ -209,6 +213,7 @@ namespace Starfront.Collab.Ui {
             Name = listing.Name;
             Notes = listing.Notes ?? "";
             CollectFiles = listing.CollectFiles;
+            StackingJoinCode = listing.StackingJoinCode ?? "";
             Single = listing.Kind == "single";
             var region = listing.Region;
             if (region != null) {
@@ -418,6 +423,7 @@ namespace Starfront.Collab.Ui {
             var moon = Num(MaxMoon);
             var bortle = Num(MaxBortle);
             if (bortle is double b && (b < 1 || b > 9)) throw new ArgumentException("Bortle is 1 to 9.");
+            if (!Services.Stacking.JoinCodes.TryNormalize(StackingJoinCode, out var stackingCode)) throw new ArgumentException(Services.Stacking.JoinCodes.Hint + ", or leave it blank.");
             var requirements = new JObject {
                 ["minFocalLength"] = Json(Num(MinFocal)),
                 ["maxFocalLength"] = Json(Num(MaxFocal)),
@@ -441,6 +447,10 @@ namespace Starfront.Collab.Ui {
                 ["kind"] = Single ? "single" : "mosaic",
                 ["notes"] = Notes.Trim(),
                 ["collectFiles"] = CollectFiles,
+                // Always sent: blank clears it on an edit. The owner's telescopes
+                // are handed the code with the listing, so an edit never blanks
+                // one it could not see.
+                ["stackingJoinCode"] = stackingCode,
                 ["region"] = new JObject {
                     ["ra"] = Math.Round(ra.Value, 5), ["dec"] = Math.Round(dec.Value, 5),
                     ["width"] = Math.Round(width, 4), ["height"] = Math.Round(height, 4),

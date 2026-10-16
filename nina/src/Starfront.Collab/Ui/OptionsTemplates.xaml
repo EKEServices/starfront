@@ -178,6 +178,144 @@
                     <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" Text="{Binding Settings.Bortle, ValidatesOnExceptions=True}" />
                     <TextBlock Grid.Row="2" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="1 is the darkest sky, 9 an inner city; 0 is not rated. A project may ask for a dark sky." TextWrapping="Wrap" />
                 </Grid>
+
+                <!--  Live stacking: the lights of a linked collaboration sent to Rapid Stacker Collab as they land.
+                      Off by default; off, nothing below is connected, opened or read.  -->
+                <StackPanel DataContext="{Binding Stacking}">
+                    <TextBlock Margin="0,18,0,4" FontWeight="SemiBold" Text="Live stacking" />
+                    <TextBlock
+                        Opacity="0.8"
+                        Text="A collaboration's coordinator can have its lights stacked as they land by Rapid Stacker Collab. With this on, every light the Starfront container saves for such a collaboration is sent there - a copy, with your location taken out - and the stack grows through the night. Nothing else on this PC is sent, and your own files are never moved, changed or deleted."
+                        TextWrapping="Wrap" />
+                    <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                        <!--  N.I.N.A.'s theme draws a CheckBox as a bare switch, so the label sits beside it.  -->
+                        <CheckBox VerticalAlignment="Center" IsChecked="{Binding Settings.StackingEnabled}" />
+                        <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" FontWeight="SemiBold" Text="Send my lights to live stacking" />
+                    </StackPanel>
+                    <TextBlock
+                        Margin="0,4,0,0"
+                        Opacity="0.7"
+                        Text="Turning this on joins this telescope to the stacking project of each linked collaboration you are on, accepting that project's current terms of contribution; if the terms change later, nothing more is sent until you read and accept them here."
+                        TextWrapping="Wrap" />
+
+                    <StackPanel IsEnabled="{Binding Settings.StackingEnabled}">
+                        <!--  The Rapid Stacker Collab account, separate from the Discord one above.  -->
+                        <TextBlock Margin="0,12,0,4" FontWeight="SemiBold" Text="Rapid Stacker Collab account" />
+                        <StackPanel Orientation="Horizontal" Visibility="{Binding SignIn.SignedIn, Converter={StaticResource Starfront_ShowWhenFalse}}">
+                            <Button MinWidth="180" Padding="12,6" Command="{Binding SignInCommand}" Content="Sign in to Rapid Stacker Collab" />
+                            <TextBlock
+                                Margin="12,0,0,0"
+                                MaxWidth="400"
+                                VerticalAlignment="Center"
+                                Opacity="0.8"
+                                Text="A browser window opens with a code to approve. No password is typed into N.I.N.A."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Visibility="{Binding SignIn.SignedIn, Converter={StaticResource Starfront_ShowWhenTrue}}">
+                            <TextBlock VerticalAlignment="Center" Text="{Binding SignIn.AccountText}" />
+                            <Button Margin="12,0,0,0" Padding="10,4" Command="{Binding SignOutCommand}" Content="Sign out" />
+                        </StackPanel>
+                        <StackPanel Margin="0,6,0,0" Orientation="Horizontal" Visibility="{Binding SignIn.Waiting, Converter={StaticResource Starfront_ShowWhenTrue}}">
+                            <TextBlock VerticalAlignment="Center" Text="Code: " />
+                            <TextBlock VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold" Text="{Binding SignIn.UserCode}" />
+                            <Button Margin="12,0,0,0" Padding="10,4" Command="{Binding OpenBrowserCommand}" Content="Open the browser again" />
+                            <Button Margin="8,0,0,0" Padding="10,4" Command="{Binding CancelSignInCommand}" Content="Cancel" />
+                        </StackPanel>
+                        <TextBlock Margin="0,6,0,0" Opacity="0.8" Text="{Binding SignIn.Status}" TextWrapping="Wrap" Visibility="{Binding SignIn.Status, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                        <TextBlock Margin="0,4,0,0" Opacity="0.7" Text="{Binding SignIn.ExpiryText}" TextWrapping="Wrap" Visibility="{Binding SignIn.ExpiryText, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+
+                        <!--  When and how the uploads run.  -->
+                        <TextBlock Margin="0,12,0,4" FontWeight="SemiBold" Text="Uploads" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Send" />
+                            <ComboBox
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                Margin="0,4"
+                                DisplayMemberPath="Label"
+                                ItemsSource="{Binding Modes}"
+                                SelectedValue="{Binding Settings.StackingUploadMode, Mode=TwoWay}"
+                                SelectedValuePath="Code" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="idle means between exposures, so an upload never competes with a download from the camera" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Window opens (HH:mm)" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingWindowStart, ValidatesOnExceptions=True}" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                            <TextBlock Grid.Row="1" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="local time; a window may cross midnight" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Window closes (HH:mm)" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingWindowEnd, ValidatesOnExceptions=True}" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                            <TextBlock Grid.Row="2" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the same time as the start means all day" Visibility="{Binding UsesWindow, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Wait after each image (s)" />
+                            <TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingIdleGraceSeconds, ValidatesOnExceptions=True}" />
+                            <TextBlock Grid.Row="3" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="when sending while idle: how long after a frame lands before an upload starts, 0 to 600" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Speed limit (KB/s)" />
+                            <TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingBandwidthKBps, ValidatesOnExceptions=True}" />
+                            <TextBlock Grid.Row="4" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="0 is no limit; changes take effect at once" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Take my location out" />
+                            <CheckBox Grid.Row="5" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.StackingStripLocation}" />
+                            <TextBlock Grid.Row="5" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="the site's latitude, longitude and height, the observer, and the altitude and azimuth that would give them away; a project may insist" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Also send darks, flats, bias" />
+                            <CheckBox Grid.Row="6" Grid.Column="1" Margin="0,4" VerticalAlignment="Center" IsChecked="{Binding Settings.StackingIncludeCalibration}" />
+                            <TextBlock Grid.Row="6" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="to the project of the last light sent; calibration frames carry no target of their own" TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="7" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Name on the stack" />
+                            <TextBox Grid.Row="7" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingDisplayName}" />
+                            <TextBlock Grid.Row="7" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="who the frames are credited to; blank uses your Discord name. Used when joining." TextWrapping="Wrap" />
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="Rapid Stacker Collab server" />
+                            <TextBox Grid.Row="8" Grid.Column="1" Margin="0,4" Text="{Binding Settings.StackingApiBase}" />
+                            <TextBlock Grid.Row="8" Grid.Column="2" Margin="10,4,0,4" VerticalAlignment="Center" Opacity="0.7" Text="leave it as it is unless you were told otherwise" TextWrapping="Wrap" />
+                        </Grid>
+
+                        <!--  Every collaboration with a stacking project, and how this telescope stands with it.  -->
+                        <TextBlock Margin="0,12,0,4" FontWeight="SemiBold" Text="Linked collaborations" />
+                        <TextBlock
+                            Opacity="0.7"
+                            Text="None yet. When a collaboration you are on has a join code, this telescope joins its stacking project at the next check-in."
+                            TextWrapping="Wrap"
+                            Visibility="{Binding HasLinks, Converter={StaticResource Starfront_ShowWhenFalse}}" />
+                        <ItemsControl ItemsSource="{Binding Links}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4,0,6">
+                                        <TextBlock>
+                                            <Run FontWeight="SemiBold" Text="{Binding Name, Mode=OneWay}" /><Run Text=" → " /><Run Text="{Binding Project, Mode=OneWay}" />
+                                        </TextBlock>
+                                        <TextBlock Opacity="0.85" Text="{Binding StatusText}" TextWrapping="Wrap" />
+                                        <TextBlock Opacity="0.7" Text="{Binding MappingText}" TextWrapping="Wrap" Visibility="{Binding MappingText, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                                        <TextBlock Opacity="0.7" Text="{Binding RetryText}" TextWrapping="Wrap" Visibility="{Binding RetryText, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                                        <StackPanel Margin="0,4,0,0" Orientation="Horizontal" Visibility="{Binding TermsOutdated, Converter={StaticResource Starfront_ShowWhenTrue}}">
+                                            <Button Padding="10,2" Command="{Binding ReadTermsCommand}" Content="Read the new terms" />
+                                            <Button Margin="8,0,0,0" Padding="10,2" Command="{Binding AcceptTermsCommand}" Content="Accept them and carry on" />
+                                        </StackPanel>
+                                        <Button Margin="0,4,0,0" HorizontalAlignment="Left" Padding="10,2" Command="{Binding RetryCommand}" Content="Retry now" Visibility="{Binding CanRetry, Converter={StaticResource Starfront_ShowWhenTrue}}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </DataTemplate>

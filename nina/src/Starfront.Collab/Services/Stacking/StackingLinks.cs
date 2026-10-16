@@ -92,6 +92,7 @@ namespace Starfront.Collab.Services.Stacking {
                     links = new Dictionary<string, StackingLink>(StringComparer.Ordinal);
                 }
             }
+            try { Changed?.Invoke(this, EventArgs.Empty); } catch (Exception ex) { Logger.Error("Starfront stacking: a links handler failed", ex); }
         }
 
         private void Save() {
