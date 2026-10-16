@@ -36,6 +36,37 @@ somebody might share.
 The settings were called `ASTROCOLLAB_…` before the server was named; those
 names are still read, so nothing written under them has to change.
 
+### Trying it out locally, without Discord
+
+```
+python server/run_local.py
+```
+
+People sign in through Discord, and a Discord application (client secret,
+guild, a redirect Discord accepts) is a lot to set up just to try the server,
+the program and the N.I.N.A. plugin on one machine. `run_local.py` runs the
+same server with a stand-in Discord of its own, served at `/_local/discord` on
+the server's own address. Signing in from the program or the plugin opens a
+page that asks only for a name: **@ncedelliott** owns the server unless
+`--name` says otherwise, and any other name typed there signs in as an
+ordinary member, for seeing what somebody else's telescope sees. The same name
+is the same person every run, so its projects are still there after a restart.
+
+| | |
+|---|---|
+| `--name NAME` | the owner's Discord name (default `ncedelliott`) |
+| `--port N` | listen port (default 8800) |
+| `--data DIR` | the database and token (default `~/starfront-local`) |
+
+The stand-in signs in whoever asks, as the owner if they like, so the launcher
+is fenced off from anything real. It listens on `127.0.0.1` with no `--host`
+(another PC reaches it through an SSH tunnel to 8800, which carries the
+sign-in page too). It refuses a data folder holding a `discord.env` and the
+folder a real server uses by default. It replaces any Discord settings already
+in the environment rather than mixing them in. And it only ever sends the
+browser back to its own callback. `tools/check_local_server.py` covers all of
+that, with a full sign-in over HTTP.
+
 ## Putting it on a VPS, with Discord sign-in
 
 A server other people use wants to be always on and reachable over HTTPS —
