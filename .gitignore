@@ -41,3 +41,6 @@ run-test.log
 
 # GasTown 
 .gastown-ignore
+
+# Claude Code guidance, kept on this machine only.
+CLAUDE.md
