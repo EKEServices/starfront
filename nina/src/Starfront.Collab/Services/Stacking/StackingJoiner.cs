@@ -1,0 +1,274 @@
+using System.Net.Http;
+using NINA.Core.Enum;
+using NINA.Core.Utility;
+using RapidStackerCollab.Core.Api;
+using RapidStackerCollab.Core.Filters;
+using Starfront.Collab.Server;
+using Starfront.Collab.Settings;
+
+namespace Starfront.Collab.Services.Stacking {
+
+    /// <summary>
+    /// Joins the stacking project behind each linked collaboration, with
+    /// nobody at the keyboard: the code arrives with the check-in, the rig is
+    /// described from what the camera and the profile say, the filters are
+    /// mapped from the person's own delivery table and the stacking service's
+    /// name table, and the join is sent. What cannot be done headlessly (the
+    /// terms changing, a camera that has never been connected) is left for the
+    /// options page to say, and tried again at a later check-in.
+    /// </summary>
+    public sealed class StackingJoiner {
+        private static readonly TimeSpan AfterFailure = TimeSpan.FromHours(6);
+        private static readonly TimeSpan AfterTransient = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan AfterNoFilters = TimeSpan.FromHours(1);
+
+        private readonly HostServices host;
+        private readonly StarfrontSettings settings;
+        private readonly StackingLinks links;
+        private readonly Func<IApiClient> api;
+        private readonly SemaphoreSlim gate = new(1, 1);
+        private FilterNormalizer normalizer;
+
+        public StackingJoiner(HostServices host, StarfrontSettings settings, StackingLinks links, Func<IApiClient> api) {
+            this.host = host;
+            this.settings = settings;
+            this.links = links;
+            this.api = api;
+        }
+
+        /// <summary>The service rejected the sign-in; nothing more is tried until somebody signs in again.</summary>
+        public event EventHandler AuthRequired;
+
+        /// <summary>Bring the links in line with what the check-in listed. One at a time; a second call waits.</summary>
+        public async Task ReconcileAsync(IReadOnlyList<ProjectListing> listings, CancellationToken ct) {
+            if (!settings.StackingEnabled || !settings.StackingSignedIn) return;
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try {
+                foreach (var listing in listings ?? Array.Empty<ProjectListing>()) {
+                    ct.ThrowIfCancellationRequested();
+                    if (string.IsNullOrWhiteSpace(listing.StackingJoinCode)) continue;
+                    if (!JoinCodes.TryNormalize(listing.StackingJoinCode, out var code) || code.Length == 0) {
+                        Logger.Warning($"Starfront stacking: {listing.Name} carries a join code that cannot be one ({listing.StackingJoinCode}); ignored");
+                        continue;
+                    }
+                    var link = links.Lookup(listing.Id);
+                    if (link != null && link.JoinCode == code && link.Active) continue;
+                    if (link != null && link.JoinCode == code && link.NextAttemptUtc is DateTime next && next > DateTime.UtcNow) continue;
+                    if (link != null && link.JoinCode == code && link.Status is LinkStatus.TermsOutdated or LinkStatus.Pending) continue;
+                    if (await JoinOneAsync(listing, code, ct).ConfigureAwait(false) == Outcome.AuthRequired) return;
+                }
+            } finally {
+                gate.Release();
+            }
+        }
+
+        /// <summary>Somebody read the new terms and pressed Accept: join again, accepting the current version.</summary>
+        public async Task AcceptTermsAsync(string starfrontProjectId, CancellationToken ct) {
+            var link = links.Lookup(starfrontProjectId);
+            if (link == null) return;
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try {
+                await JoinOneAsync(new ProjectListing { Id = link.StarfrontProjectId, Name = link.StarfrontName, StackingJoinCode = link.JoinCode }, link.JoinCode, ct, acceptTerms: true).ConfigureAwait(false);
+            } finally {
+                gate.Release();
+            }
+        }
+
+        /// <summary>Try a failed link again now rather than when its wait is over.</summary>
+        public async Task RetryAsync(string starfrontProjectId, CancellationToken ct) {
+            var link = links.Lookup(starfrontProjectId);
+            if (link == null || link.Active) return;
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try {
+                await JoinOneAsync(new ProjectListing { Id = link.StarfrontProjectId, Name = link.StarfrontName, StackingJoinCode = link.JoinCode }, link.JoinCode, ct, acceptTerms: link.Status == LinkStatus.TermsOutdated).ConfigureAwait(false);
+            } finally {
+                gate.Release();
+            }
+        }
+
+        /// <summary>A pending membership may have been approved, and an active one may have been removed: ask.</summary>
+        public async Task RefreshMembershipsAsync(CancellationToken ct) {
+            if (!settings.StackingEnabled || !settings.StackingSignedIn) return;
+            foreach (var link in links.All()) {
+                ct.ThrowIfCancellationRequested();
+                if (link.CollabProjectId.Length == 0 || link.Status is not (LinkStatus.Pending or LinkStatus.Active)) continue;
+                try {
+                    var membership = await api().GetMembershipAsync(link.CollabProjectId, ct).ConfigureAwait(false);
+                    var status = membership.Status == MemberStatuses.Active ? LinkStatus.Active
+                               : membership.Status == MemberStatuses.Pending ? LinkStatus.Pending : LinkStatus.Failed;
+                    if (status == link.Status) continue;
+                    link.Status = status;
+                    link.Message = status == LinkStatus.Failed ? $"removed from {link.CollabName}" : "";
+                    link.NextAttemptUtc = status == LinkStatus.Failed ? DateTime.UtcNow + AfterFailure : null;
+                    link.Mapping = membership.FilterMapping.ToDictionary(m => m.Raw, m => m.Canonical, StringComparer.Ordinal);
+                    links.Upsert(link);
+                    Logger.Info($"Starfront stacking: {link.StarfrontName} is now {link.Describe()}");
+                } catch (ApiException ex) when (ex.IsAuthenticationFailure) {
+                    Raise(AuthRequired);
+                    return;
+                } catch (Exception ex) when (ex is ApiException or HttpRequestException) {
+                    Logger.Debug($"Starfront stacking: the membership of {link.CollabName} could not be read - {ex.Message}");
+                }
+            }
+        }
+
+        private enum Outcome { Done, Later, AuthRequired }
+
+        private async Task<Outcome> JoinOneAsync(ProjectListing listing, string code, CancellationToken ct, bool acceptTerms = false) {
+            var link = links.Lookup(listing.Id) ?? new StackingLink { StarfrontProjectId = listing.Id };
+            link.StarfrontName = string.IsNullOrEmpty(listing.Name) ? link.StarfrontName : listing.Name;
+            link.JoinCode = code;
+            var client = api();
+            try {
+                var resolved = await client.ResolveJoinCodeAsync(code, ct).ConfigureAwait(false);
+                link.CollabProjectId = resolved.Project.ProjectId;
+                link.CollabName = resolved.Project.Name;
+                link.RequireStrip = resolved.Policy.RequireCoordinateStrip;
+                link.DeclaredFilters = resolved.Project.Filters.ToList();
+                link.TermsUrl = resolved.TermsUrl;
+
+                if (resolved.AlreadyMember) {
+                    var membership = await client.GetMembershipAsync(resolved.Project.ProjectId, ct).ConfigureAwait(false);
+                    return Joined(link, membership, "already a member");
+                }
+
+                // The rig, from what the camera and the profile say.
+                var rigId = settings.StackingRigId;
+                if (rigId.Length == 0) {
+                    var missing = RigProfile.WhatIsMissing(host, settings);
+                    if (missing != null) return Hold(link, LinkStatus.NeedsRig, missing, AfterTransient);
+                    var saved = await client.UpsertRigAsync(DescribeRig()).ConfigureAwait(false);
+                    if (!saved.Confirmed) saved = await client.PatchRigAsync(saved.RigId, new RigPatchRequest { Confirmed = true }, ct).ConfigureAwait(false);
+                    rigId = saved.RigId;
+                    settings.StackingRigId = rigId;
+                    Logger.Info($"Starfront stacking: this telescope is rig {rigId} on Rapid Stacker Collab");
+                }
+                link.RigId = rigId;
+
+                // The filters, from the person's own table and the names.
+                normalizer ??= FilterNormalizer.LoadBundled();
+                var mapping = StackingMapping.Build(RigProfile.FilterNames(settings), resolved.Project.Filters, settings.Colour, settings.FilterMap, normalizer);
+                if (mapping.AllSkipped) return Hold(link, LinkStatus.NoFilters, mapping.Summary, AfterNoFilters);
+
+                var name = DisplayName();
+                link.DisplayName = name;
+                Membership joined;
+                try {
+                    joined = await client.JoinProjectAsync(resolved.Project.ProjectId, Request(code, name, resolved.TermsVersion, mapping.Entries), ct).ConfigureAwait(false);
+                } catch (ApiException ex) when (ex.Code == ApiCodes.DisplayNameTaken) {
+                    // Somebody else in the project has this name; the telescope's tells them apart.
+                    name = Clamp($"{name} ({settings.TelescopeName})");
+                    link.DisplayName = name;
+                    joined = await client.JoinProjectAsync(resolved.Project.ProjectId, Request(code, name, resolved.TermsVersion, mapping.Entries), ct).ConfigureAwait(false);
+                } catch (ApiException ex) when (ex.Code == ApiCodes.AlreadyMember) {
+                    joined = await client.GetMembershipAsync(resolved.Project.ProjectId, ct).ConfigureAwait(false);
+                }
+                link.TermsVersion = resolved.TermsVersion;
+                Logger.Info($"Starfront stacking: filters for {link.CollabName}: {mapping.Summary}");
+                return Joined(link, joined, "joined");
+            } catch (OperationCanceledException) {
+                throw;
+            } catch (ApiException ex) when (ex.Code == ApiCodes.TermsOutdated) {
+                // The terms changed under the join: the plugin accepts a
+                // version it has seen, never one it has not, so a person reads
+                // the new ones and presses Accept on the options page. (A join
+                // from that button sends the version the resolve just gave.)
+                return Hold(link, LinkStatus.TermsOutdated, acceptTerms ? "the terms changed again while joining; try once more" : "the terms of contribution changed", null);
+            } catch (ApiException ex) when (ex.IsAuthenticationFailure) {
+                Hold(link, LinkStatus.Failed, "not signed in to Rapid Stacker Collab", AfterTransient);
+                Raise(AuthRequired);
+                return Outcome.AuthRequired;
+            } catch (ApiException ex) when (ex.Code is ApiCodes.InvalidCode or ApiCodes.ProjectNotOpen or ApiCodes.ProjectDeleted or ApiCodes.NotFound) {
+                return Hold(link, LinkStatus.Failed, Describe(ex), AfterFailure);
+            } catch (ApiException ex) when (ex.IsTransient) {
+                return Hold(link, LinkStatus.Failed, "Rapid Stacker Collab could not be reached: " + ex.Message, AfterTransient);
+            } catch (Exception ex) when (ex is ApiException or HttpRequestException) {
+                return Hold(link, LinkStatus.Failed, ex.Message, AfterFailure);
+            } catch (Exception ex) {
+                Logger.Error($"Starfront stacking: joining the stacking project of {link.StarfrontName} failed", ex);
+                return Hold(link, LinkStatus.Failed, ex.Message, AfterFailure);
+            }
+        }
+
+        private Outcome Joined(StackingLink link, Membership membership, string how) {
+            link.Status = membership.Status == MemberStatuses.Active ? LinkStatus.Active
+                        : membership.Status == MemberStatuses.Pending ? LinkStatus.Pending : LinkStatus.Failed;
+            link.Message = link.Status == LinkStatus.Failed ? $"the membership of {link.CollabName} is {membership.Status}" : "";
+            link.NextAttemptUtc = link.Status == LinkStatus.Failed ? DateTime.UtcNow + AfterFailure : null;
+            if (membership.FilterMapping.Count > 0) link.Mapping = membership.FilterMapping.ToDictionary(m => m.Raw, m => m.Canonical, StringComparer.Ordinal);
+            if (!string.IsNullOrEmpty(membership.DisplayName)) link.DisplayName = membership.DisplayName;
+            if (!string.IsNullOrEmpty(membership.AcceptedTermsVersion)) link.TermsVersion = membership.AcceptedTermsVersion;
+            links.Upsert(link);
+            Logger.Info($"Starfront stacking: {link.StarfrontName} -> {link.CollabName} ({how}): {link.Describe()}");
+            return Outcome.Done;
+        }
+
+        private Outcome Hold(StackingLink link, string status, string message, TimeSpan? retryAfter) {
+            link.Status = status;
+            link.Message = message ?? "";
+            link.NextAttemptUtc = retryAfter is TimeSpan wait ? DateTime.UtcNow + wait : null;
+            links.Upsert(link);
+            Logger.Warning($"Starfront stacking: {link.StarfrontName}: {link.Describe()}");
+            return Outcome.Later;
+        }
+
+        private RigUpsertRequest DescribeRig() {
+            var profile = host.Profile.ActiveProfile;
+            var camera = host.Camera.GetInfo();
+            var pixel = settings.PixelSize > 0 ? settings.PixelSize : profile.CameraSettings.PixelSize;
+            return new RigUpsertRequest {
+                Camera = (camera?.Connected == true ? camera.Name : null) ?? profile.CameraSettings.Id ?? "camera",
+                Telescope = string.IsNullOrWhiteSpace(profile.TelescopeSettings.Name) ? "telescope" : profile.TelescopeSettings.Name,
+                FocalLengthMm = profile.TelescopeSettings.FocalLength,
+                PixelSizeUm = pixel,
+                Binning = Math.Max(1, (int)settings.Binning),
+                BayerPattern = settings.Colour ? BayerPattern(camera?.SensorType) : null,
+                WidthPx = settings.SensorWidth > 0 ? settings.SensorWidth : null,
+                HeightPx = settings.SensorHeight > 0 ? settings.SensorHeight : null,
+                Name = settings.TelescopeName,
+            };
+        }
+
+        /// <summary>The sensor's Bayer order as the service spells it. The frames carry their own BAYERPAT, which is what the stack is built from; this only describes the rig.</summary>
+        private static string BayerPattern(SensorType? sensor) => sensor switch {
+            SensorType.BGGR => "BGGR",
+            SensorType.GRBG => "GRBG",
+            SensorType.GBRG => "GBRG",
+            _ => "RGGB",
+        };
+
+        private string DisplayName() {
+            var name = settings.StackingDisplayName;
+            if (name.Length == 0) name = settings.UserName;
+            if (name.Length == 0) name = settings.TelescopeName;
+            return Clamp(name);
+        }
+
+        /// <summary>Two to forty characters, as the service asks.</summary>
+        private static string Clamp(string name) {
+            name = (name ?? "").Trim();
+            if (name.Length < 2) name = "Starfront telescope";
+            return name.Length > 40 ? name[..40].TrimEnd() : name;
+        }
+
+        private static JoinRequest Request(string code, string name, string termsVersion, IReadOnlyList<ContributorMappingEntry> mapping) => new() {
+            Code = code,
+            DisplayName = name,
+            AcceptedTermsVersion = termsVersion,
+            AllowOwnerRawDownload = false,
+            FilterMapping = mapping,
+        };
+
+        private static string Describe(ApiException ex) => ex.Code switch {
+            ApiCodes.InvalidCode => "the join code is not one Rapid Stacker Collab knows; check it on the collaboration",
+            ApiCodes.ProjectNotOpen => "the stacking project is not taking new members",
+            ApiCodes.ProjectDeleted => "the stacking project was deleted",
+            ApiCodes.NotFound => "the stacking project was not found",
+            _ => ex.Message,
+        };
+
+        private void Raise(EventHandler handler) {
+            try { handler?.Invoke(this, EventArgs.Empty); } catch (Exception ex) { Logger.Error("Starfront stacking: a handler failed", ex); }
+        }
+    }
+}
