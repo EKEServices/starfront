@@ -460,6 +460,9 @@ class CollabProjectRequest(BaseModel):
     notes: str = Field(default="", max_length=2000)
     # Collect contributors' lights on the server, for stacking.
     collectFiles: bool = False
+    # The Rapid Stacker Collab join code that stacks the lights as they land;
+    # blank for none. The server checks and normalises it.
+    stackingJoinCode: str = Field(default="", max_length=40)
 
 
 class CollabDelegateRequest(BaseModel):
@@ -3043,7 +3046,7 @@ def collab_add_project(body: CollabProjectRequest) -> dict[str, Any]:
     made = _admin(collab_admin.add_project, body.name.strip(), region,
                   body.requirements, body.goals,
                   str(config.get("collab", "coordinator", "") or ""),
-                  body.notes, kind, body.collectFiles)
+                  body.notes, kind, body.collectFiles, body.stackingJoinCode)
     # So it appears in the list straight away. A collaboration you started that
     # you cannot see is one you cannot join, and the list is fetched as an
     # *agent* while this was created as a coordinator — two different calls, and
@@ -3094,6 +3097,8 @@ class CollabProjectUpdateRequest(BaseModel):
     goals: dict[str, float] | None = None
     notes: str | None = Field(default=None, max_length=2000)
     collectFiles: bool | None = None
+    # Sent only when the coordinator changed it; blank clears it.
+    stackingJoinCode: str | None = Field(default=None, max_length=40)
     status: str | None = Field(default=None, pattern="^(open|closed)$")
 
 

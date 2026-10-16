@@ -376,6 +376,13 @@
     // Editing keeps the region it has unless a new one was chosen; starting
     // needs one either way.
     const editing = col.editing;
+    // The stacking join code is sent on an edit only when it was changed.
+    // The server hands the code only to telescopes on the collaboration and
+    // to its owner's; a project started on the coordinator token has no
+    // owner, so this form may have loaded it blank, and sending that back
+    // would clear a code nobody meant to touch.
+    const stackCode = (($('colPStackCode') && $('colPStackCode').value) || '').trim();
+    if (!editing || stackCode !== (editing.stackingJoinCode || '')) body.stackingJoinCode = stackCode;
     const wantsRegion = !editing || col.regionChanged;
     if (wantsRegion && shape() === 'mosaic') {
       const region = app.state.collabRegion;
@@ -450,6 +457,7 @@
       $('colPName').value = '';
       $('colPNotes').value = '';
       if ($('colPCollect')) $('colPCollect').checked = false;
+      if ($('colPStackCode')) $('colPStackCode').value = '';
       col.filters = [];
       app.state.collabRegion = null;
       drawFilterRows();
@@ -962,6 +970,7 @@
     set('colPName', project.name || '');
     set('colPNotes', project.notes || '');
     if ($('colPCollect')) $('colPCollect').checked = !!project.collectFiles;
+    set('colPStackCode', project.stackingJoinCode || '');
     set('colRMinFocal', wants.minFocalLength);
     set('colRMaxFocal', wants.maxFocalLength);
     const takesColour = wants.acceptColour !== false;

@@ -397,6 +397,18 @@ case("it can start a project", bool(project.get("id")))
 case("and the project comes back with its region",
      admin.project(project["id"])["project"]["payload"]["region"]["dec"] == 60.0)
 
+# The Collab form's join code for live stacking travels with the project,
+# canonical, and an edit that leaves it out leaves it alone.
+stacked = admin.add_project(
+    "Check stacked", region={"ra": 90.0, "dec": 60.0, "width": 8.0, "height": 2.0},
+    stacking_join_code="h4rt 92bk wnpc")["project"]
+case("a project can carry a stacking join code, stored canonical",
+     stacked["payload"].get("stackingJoinCode") == "H4RT-92BK-WNPC",
+     str(stacked["payload"].get("stackingJoinCode")))
+admin.update_project(stacked["id"], {"notes": "edited"})
+case("...and an edit that does not send it leaves it alone",
+     admin.project(stacked["id"])["project"]["payload"].get("stackingJoinCode") == "H4RT-92BK-WNPC")
+
 # --------------------------------------------------------- the two tokens
 print("\n-- the two credentials --")
 
