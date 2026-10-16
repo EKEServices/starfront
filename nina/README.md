@@ -79,6 +79,7 @@ not required; the scripts run on Windows PowerShell as well.
 cd nina
 dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release
 dotnet test tests/RapidStackerCollab.Core.Tests     # the live-stacking upload engine; runs on macOS too
+dotnet test tests/Starfront.Collab.Tests            # live stacking's join-code and filter-mapping rules
 ```
 
 `Starfront.sln` holds the plugin, the upload engine it ships
