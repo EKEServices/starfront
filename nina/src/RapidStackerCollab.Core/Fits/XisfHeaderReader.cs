@@ -45,7 +45,10 @@ public static class XisfHeaderReader
         return Read(s);
     }
 
-    public static InitHeader Read(Stream stream)
+    public static InitHeader Read(Stream stream) => FitsHeaderReader.FromHeader(ReadCards(stream));
+
+    /// <summary>The <c>FITSKeyword</c> cards of the first image (plus synthesised <c>NAXIS1</c>, <c>NAXIS2</c> and <c>BITPIX</c>), for a caller that needs a keyword the allow-list does not carry.</summary>
+    public static FitsHeader ReadCards(Stream stream)
     {
         var fixedPart = new byte[16];
         if (FitsHeader.ReadFully(stream, fixedPart) != 16 || !fixedPart.AsSpan(0, 8).SequenceEqual(Signature))
@@ -93,7 +96,7 @@ public static class XisfHeaderReader
         {
             throw new FitsFormatException("The XISF header is not valid XML: " + ex.Message);
         }
-        return FitsHeaderReader.FromHeader(new FitsHeader(cards, 0));
+        return new FitsHeader(cards, 0);
     }
 
     // PixInsight stores FITS string values with their apostrophes; N.I.N.A. and others may not. Accept both.

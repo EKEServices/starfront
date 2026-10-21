@@ -139,12 +139,17 @@ public class FitsHeaderReaderTests
         Assert.That(FrameKinds.Classify(imagetyp), Is.EqualTo(expected));
 
     [Test]
-    public void Calibration_frames_are_uploaded_only_when_the_option_is_on_and_snapshots_never()
+    public void Flats_follow_their_own_option_other_calibration_the_old_one_and_snapshots_never()
     {
-        Assert.That(FrameKinds.ShouldUpload(FrameKind.Light, false), Is.True);
-        Assert.That(FrameKinds.ShouldUpload(FrameKind.Dark, false), Is.False);
-        Assert.That(FrameKinds.ShouldUpload(FrameKind.Dark, true), Is.True);
-        Assert.That(FrameKinds.ShouldUpload(FrameKind.Flat, true), Is.True);
-        Assert.That(FrameKinds.ShouldUpload(FrameKind.Other, true), Is.False);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Light, false, false), Is.True);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Dark, true, false), Is.False);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Dark, false, true), Is.True);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Bias, false, true), Is.True);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.DarkFlat, false, true), Is.True);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Flat, true, false), Is.True);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.MasterFlat, true, false), Is.True, "a master flat is a flat");
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Flat, false, true), Is.False, "flats ignore the darks option");
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.MasterDark, true, false), Is.False);
+        Assert.That(FrameKinds.ShouldUpload(FrameKind.Other, true, true), Is.False);
     }
 }

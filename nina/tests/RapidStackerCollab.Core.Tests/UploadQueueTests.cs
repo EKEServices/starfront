@@ -250,6 +250,23 @@ public class UploadQueueTests
     }
 
     [Test]
+    public void Lights_of_another_target_are_counted_by_rig_and_night_once_per_file_and_forgotten_with_the_history()
+    {
+        using var q = Open();
+        q.AddOtherTargetLight("/d/bubble1.fits", "rig_1", "HA", "2026-10-20", "Bubble Nebula");
+        q.AddOtherTargetLight("/d/bubble1.fits", "rig_1", "HA", "2026-10-20", "Bubble Nebula");
+        q.AddOtherTargetLight("/d/bubble2.fits", "rig_1", "OIII", "2026-10-20", null);
+        q.AddOtherTargetLight("/d/bubble3.fits", null, "HA", "2026-10-20", null);
+        Assert.That(q.CountOtherTargetLights("rig_1", "2026-10-20"), Is.EqualTo(2), "any filter, once per path");
+        Assert.That(q.CountOtherTargetLights("rig_1", "2026-10-21"), Is.Zero);
+        Assert.That(q.CountOtherTargetLights(null, "2026-10-20"), Is.EqualTo(1), "no rig is a rig of its own");
+
+        clock.Advance(TimeSpan.FromDays(40));
+        q.Purge(clock.Now.AddDays(-30));
+        Assert.That(q.CountOtherTargetLights("rig_1", "2026-10-20"), Is.Zero);
+    }
+
+    [Test]
     public void List_filters_by_state_and_project()
     {
         using var q = Open();
@@ -273,6 +290,104 @@ public class UploadQueueTests
             cmd.ExecuteNonQuery();
         }
         Assert.Throws<InvalidOperationException>(() => Open());
+    }
+
+    private void CreateV1Database(params (string Project, string Path, string Kind, string Header)[] rows)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(db)!);
+        using var c = new SqliteConnection($"Data Source={db};Pooling=False");
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+            CREATE TABLE items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, project_ref TEXT NOT NULL, path TEXT NOT NULL, filename TEXT NOT NULL,
+                frame_kind TEXT NOT NULL, header_json TEXT NOT NULL, rig_id TEXT NULL, size INTEGER NULL, sha256 TEXT NULL, frame_id TEXT NULL,
+                state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NULL, last_error_code TEXT NULL,
+                next_attempt_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                uploaded_at INTEGER NULL, verdict TEXT NULL, verdict_detail TEXT NULL, UNIQUE (project_ref, path));
+            CREATE INDEX items_due ON items (state, next_attempt_at);
+            CREATE TABLE project_pauses (project_ref TEXT PRIMARY KEY, reason TEXT NOT NULL, code TEXT NULL, paused_at INTEGER NOT NULL,
+                resume_at INTEGER NULL, by_user INTEGER NOT NULL DEFAULT 0);
+            """;
+        cmd.ExecuteNonQuery();
+        foreach (var (project, path, kind, header) in rows)
+        {
+            using var ins = c.CreateCommand();
+            ins.CommandText = "INSERT INTO items (project_ref, path, filename, frame_kind, header_json, rig_id, state, created_at, updated_at) " +
+                              "VALUES ($p, $path, 'f.fits', $k, $h, 'rig_1', 'uploaded', 1, 1)";
+            ins.Parameters.AddWithValue("$p", project);
+            ins.Parameters.AddWithValue("$path", path);
+            ins.Parameters.AddWithValue("$k", kind);
+            ins.Parameters.AddWithValue("$h", header);
+            ins.ExecuteNonQuery();
+        }
+    }
+
+    [Test]
+    public void A_v1_database_migrates_to_v2_keeping_every_row_and_derives_the_flat_keys_from_the_headers()
+    {
+        CreateV1Database(
+            ("prj_a", "/d/1.fits", "Light", """{"FILTER":"Ha","IMAGETYP":"LIGHT","DATE-OBS":"2026-10-14T03:00:00"}"""),
+            ("prj_b", "/d/2.fits", "Light", """{"FILTER":" HA ","IMAGETYP":"LIGHT","DATE-OBS":"2026-10-14T04:00:00"}"""),
+            ("prj_a", "/d/3.fits", "Light", """{"FILTER":"OIII","IMAGETYP":"LIGHT","DATE-OBS":"2026-10-14T03:30:00"}"""),
+            ("prj_a", "/d/4.fits", "Light", """{"FILTER":"Ha","IMAGETYP":"LIGHT"}"""),
+            ("prj_a", "/d/dark.fits", "Dark", """{"FILTER":"Ha","IMAGETYP":"DARK","DATE-OBS":"2026-10-14T03:00:00"}"""));
+
+        using var q = Open();
+        Assert.That(q.List(limit: 100), Has.Count.EqualTo(5), "no row is lost");
+        Assert.That(q.List(projectRef: "prj_a", limit: 100).Select(i => i.Path), Is.EquivalentTo(new[] { "/d/1.fits", "/d/3.fits", "/d/4.fits", "/d/dark.fits" }));
+        Assert.That(q.CountHeldFlats(), Is.Zero, "flat_routes exists and is empty");
+
+        // UTC-8: 03:00 and 04:00 UTC on 14 Oct are the evening of 13 Oct, one night.
+        var tz = TimeZoneInfo.CreateCustomTimeZone("utc-8", TimeSpan.FromHours(-8), "UTC-8", "UTC-8");
+        Assert.That(q.LightProjects("rig_1", "ha", "2026-10-13", tz), Is.EqualTo(new[] { "prj_a", "prj_b" }), "derived lazily, filter trimmed and case-folded");
+        Assert.That(q.LightProjects("rig_1", "oiii", "2026-10-13", tz), Is.EqualTo(new[] { "prj_a" }));
+        Assert.That(q.LightProjects("rig_other", "ha", "2026-10-13", tz), Is.Empty);
+        Assert.That(q.LightProjects("rig_1", "ha", "2026-10-14", tz), Is.Empty);
+        Assert.That(q.LightNights("rig_1", "ha", tz).Select(n => n.Night).Distinct(), Is.EqualTo(new[] { "2026-10-13" }), "the light without DATE-OBS has no night");
+    }
+
+    [Test]
+    public void A_migrated_database_reopens_as_v2_and_new_rows_carry_their_keys()
+    {
+        CreateV1Database(("prj_a", "/d/1.fits", "Light", """{"FILTER":"Ha","DATE-OBS":"2026-10-14T03:00:00"}"""));
+        using (var first = Open()) { }
+        using var q = Open();
+        q.Enqueue(Item("prj_a", "new.fits") with { NightLocal = "2026-10-13", FilterKey = "ha" });
+        var tz = TimeZoneInfo.Utc;
+        Assert.That(q.LightProjects("rig_9c1d4e7a02bb", "ha", "2026-10-13", tz), Is.EqualTo(new[] { "prj_a" }));
+        Assert.That(q.List(limit: 10), Has.Count.EqualTo(2));
+    }
+
+    [Test]
+    public void Flat_routes_are_recorded_once_per_path_and_counted_while_held()
+    {
+        using var q = Open();
+        var h = new InitHeader { Filter = "Ha", ImageTyp = "FLAT" };
+        var a = q.AddFlatRoute("/f/a.fits", h, "rig_1", "ha", "2026-10-13", clock.Now.AddHours(10));
+        Assert.That(a.State, Is.EqualTo(FlatRouteStates.Held));
+        q.AddFlatRoute("/f/a.fits", h, "rig_1", "ha", "2026-10-13", clock.Now.AddHours(99));
+        q.AddFlatRoute("/f/b.fits", h, "rig_1", "oiii", "2026-10-13", clock.Now.AddHours(10));
+        Assert.That(q.CountHeldFlats(), Is.EqualTo(2));
+        Assert.That(q.GetFlatRoute("/f/a.fits")!.HoldUntil, Is.EqualTo(a.HoldUntil), "the first hold stands");
+        q.SetFlatRoute("/f/a.fits", FlatRouteStates.Routed, new[] { "prj_a" }, "why");
+        Assert.That(q.CountHeldFlats(), Is.EqualTo(1));
+        Assert.That(q.FlatsMatching("rig_1", "ha", "2026-10-13").Single().RoutedTo, Is.EqualTo(new[] { "prj_a" }));
+        Assert.That(q.FlatsMatching("rig_1", "oiii", "2026-10-13").Single().State, Is.EqualTo(FlatRouteStates.Held));
+    }
+
+    [Test]
+    public void The_folder_lookup_finds_lights_below_a_folder_on_either_separator_style()
+    {
+        using var q = Open();
+        q.Enqueue(Item("prj_a", "x.fits") with { });
+        q.Enqueue(new NewQueueItem("prj_b", @"D:\Astro\M42\2026-10-13\LIGHT\a.fits", "a.fits", FrameKind.Light, new InitHeader { Filter = "Ha" }, "rig_1", "", "ha"));
+        Assert.That(q.LightProjectsUnder(@"D:\Astro\M42\2026-10-13"), Is.EqualTo(new[] { "prj_b" }));
+        Assert.That(q.LightProjectsUnder(@"d:\astro\m42\2026-10-13\"), Is.EqualTo(new[] { "prj_b" }), "case-insensitive, trailing separator ignored");
+        Assert.That(q.LightProjectsUnder(@"D:\Astro\M42\2026-10-1"), Is.Empty, "a prefix of a name is not a parent");
+        Assert.That(q.LightProjectsUnder("/data"), Is.EqualTo(new[] { "prj_a" }));
     }
 
     [Test]

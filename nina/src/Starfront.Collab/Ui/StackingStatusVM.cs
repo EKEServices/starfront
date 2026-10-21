@@ -24,6 +24,7 @@ namespace Starfront.Collab.Ui {
         private string reasonText = "";
         private string lastText = "";
         private string hint = "";
+        private string calibrationText = "";
 
         public StackingStatusVM(StackingUploader stacking, StarfrontSettings settings) {
             this.stacking = stacking;
@@ -46,6 +47,8 @@ namespace Starfront.Collab.Ui {
         public string LastText { get => lastText; private set { if (lastText != value) { lastText = value; RaisePropertyChanged(); } } }
         /// <summary>Something the person has to do: sign in, accept terms, link a collaboration.</summary>
         public string Hint { get => hint; private set { if (hint != value) { hint = value; RaisePropertyChanged(); } } }
+        /// <summary>Flats waiting for their night's lights, and the calibration library; empty when there is nothing to say.</summary>
+        public string CalibrationText { get => calibrationText; private set { if (calibrationText != value) { calibrationText = value; RaisePropertyChanged(); } } }
         public string PauseLabel => settings.StackingPaused ? "Resume uploads" : "Pause uploads";
 
         public RelayCommand TogglePauseCommand { get; }
@@ -86,12 +89,12 @@ namespace Starfront.Collab.Ui {
                 TogglePauseCommand.NotifyCanExecuteChanged();
                 UploadNowCommand.NotifyCanExecuteChanged();
                 if (!settings.StackingEnabled) {
-                    Headline = CurrentText = ReasonText = LastText = Hint = "";
+                    Headline = CurrentText = ReasonText = LastText = Hint = CalibrationText = "";
                     return;
                 }
                 if (!stacking.Running) {
                     Headline = "Live stacking is starting, or could not start; the N.I.N.A. log says which.";
-                    CurrentText = ReasonText = LastText = "";
+                    CurrentText = ReasonText = LastText = CalibrationText = "";
                     Hint = HintText();
                     return;
                 }
@@ -115,6 +118,7 @@ namespace Starfront.Collab.Ui {
                 var decision = stacking.Decision;
                 ReasonText = waiting > 0 && decision is { Allow: false } ? decision.Reason : "";
                 LastText = stacking.LastResult;
+                CalibrationText = stacking.CalibrationText();
                 Hint = HintText();
             } catch (Exception ex) {
                 Logger.Debug($"Starfront stacking: the panel could not be updated - {ex.Message}");

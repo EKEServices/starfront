@@ -81,6 +81,16 @@ public static class SkyMath
         return r < 0 ? r + 360.0 : r;
     }
 
+    /// <summary>Angular distance between two sky positions, degrees (the haversine form, sound at small separations).</summary>
+    public static double SeparationDeg(double ra1Deg, double dec1Deg, double ra2Deg, double dec2Deg)
+    {
+        const double rad = Math.PI / 180;
+        var sinDDec = Math.Sin((dec2Deg - dec1Deg) * rad / 2);
+        var sinDRa = Math.Sin((ra2Deg - ra1Deg) * rad / 2);
+        var h = sinDDec * sinDDec + Math.Cos(dec1Deg * rad) * Math.Cos(dec2Deg * rad) * sinDRa * sinDRa;
+        return 2 * Math.Asin(Math.Sqrt(Math.Clamp(h, 0, 1))) / rad;
+    }
+
     /// <summary>
     /// Whether (<paramref name="raDeg"/>, <paramref name="decDeg"/>) falls inside <paramref name="grid"/>, shrunk by
     /// <paramref name="marginPx"/> on every side. The grid is a TAN projection centred on its (RA, Dec) with CRPIX at the

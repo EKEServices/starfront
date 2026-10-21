@@ -34,7 +34,34 @@ public sealed record NewQueueItem(
     string Filename,
     FrameKind Kind,
     InitHeader Header,
-    string? RigId = null);
+    string? RigId = null,
+    /// <summary>The local night of the frame (<c>yyyy-MM-dd</c>, "" when it has no <c>DATE-OBS</c>); flats are matched to lights by it. Null: derived later from the header.</summary>
+    string? NightLocal = null,
+    /// <summary>The filter as <c>FlatRouting.FilterKey</c> compares it. Null: derived later from the header.</summary>
+    string? FilterKey = null);
+
+/// <summary>A flat the router has seen: where it waits or went. <see cref="State"/> is one of <see cref="FlatRouteStates"/>.</summary>
+public sealed record FlatRoute(
+    string Path,
+    InitHeader Header,
+    string? RigId,
+    string FilterKey,
+    string NightLocal,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset HoldUntil,
+    IReadOnlyList<string> RoutedTo,
+    string State,
+    string? Detail);
+
+public static class FlatRouteStates
+{
+    /// <summary>No project yet: waiting for lights of its night, or for its hold to end.</summary>
+    public const string Held = "held";
+    /// <summary>Queued for at least one project.</summary>
+    public const string Routed = "routed";
+    /// <summary>Nothing eligible took it; it is not uploaded.</summary>
+    public const string Skipped = "skipped";
+}
 
 public sealed record QueueItem(
     long Id,
@@ -58,6 +85,9 @@ public sealed record QueueItem(
     string? Verdict,
     string? VerdictDetail);
 
+/// <summary>What the library sync remembers of a file: its size and modified time when it was stripped and hashed, and the SHA-256 of the stripped copy (calibration library plan B6).</summary>
+public sealed record LibraryFileEntry(string Path, long Size, long ModifiedMs, string StrippedSha256);
+
 public sealed record ProjectPause(string ProjectRef, string Reason, string? Code, DateTimeOffset PausedAt, DateTimeOffset? ResumeAt, bool ByUser);
 
 /// <summary>
@@ -68,7 +98,7 @@ public sealed record ProjectPause(string ProjectRef, string Reason, string? Code
 /// </summary>
 public sealed class UploadQueue : IDisposable
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 4;
     private const string Columns =
         "id, project_ref, path, filename, frame_kind, header_json, rig_id, size, sha256, frame_id, state, attempts, last_error, " +
         "last_error_code, next_attempt_at, created_at, updated_at, uploaded_at, verdict, verdict_detail";
@@ -120,8 +150,8 @@ public sealed class UploadQueue : IDisposable
         {
             using var tx = db.BeginTransaction();
             var insert = Command("""
-                INSERT INTO items (project_ref, path, filename, frame_kind, header_json, rig_id, state, attempts, next_attempt_at, created_at, updated_at)
-                VALUES ($project, $path, $filename, $kind, $header, $rig, 'pending', 0, $now, $now, $now)
+                INSERT INTO items (project_ref, path, filename, frame_kind, header_json, rig_id, night_local, filter_key, state, attempts, next_attempt_at, created_at, updated_at)
+                VALUES ($project, $path, $filename, $kind, $header, $rig, $night, $filterKey, 'pending', 0, $now, $now, $now)
                 ON CONFLICT(project_ref, path) DO NOTHING
                 """, tx);
             insert.Parameters.AddWithValue("$project", item.ProjectRef);
@@ -130,6 +160,8 @@ public sealed class UploadQueue : IDisposable
             insert.Parameters.AddWithValue("$kind", item.Kind.ToString());
             insert.Parameters.AddWithValue("$header", ApiJson.Serialize(item.Header));
             insert.Parameters.AddWithValue("$rig", (object?)item.RigId ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$night", (object?)item.NightLocal ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$filterKey", (object?)item.FilterKey ?? DBNull.Value);
             insert.Parameters.AddWithValue("$now", now);
             var added = insert.ExecuteNonQuery() == 1;
             var select = Command($"SELECT {Columns} FROM items WHERE project_ref = $project AND path = $path", tx);
@@ -225,7 +257,14 @@ public sealed class UploadQueue : IDisposable
         {
             var cmd = Command("DELETE FROM items WHERE state IN ('uploaded','duplicate','cancelled') AND updated_at < $t");
             cmd.Parameters.AddWithValue("$t", Ms(olderThan));
-            return cmd.ExecuteNonQuery();
+            var n = cmd.ExecuteNonQuery();
+            var routes = Command("DELETE FROM flat_routes WHERE state <> 'held' AND created_at < $t");
+            routes.Parameters.AddWithValue("$t", Ms(olderThan));
+            routes.ExecuteNonQuery();
+            var other = Command("DELETE FROM other_target_lights WHERE created_at < $t");
+            other.Parameters.AddWithValue("$t", Ms(olderThan));
+            other.ExecuteNonQuery();
+            return n;
         }
     }
 
@@ -377,7 +416,7 @@ public sealed class UploadQueue : IDisposable
         {
             var cmd = Command($"""
                 SELECT {Columns} FROM items
-                WHERE state IN ('uploaded','duplicate') AND frame_id IS NOT NULL
+                WHERE state IN ('uploaded','duplicate') AND frame_id IS NOT NULL AND project_ref NOT LIKE 'lib:%'
                   AND (verdict IS NULL OR verdict IN ('uploading','uploaded','preparing'))
                 ORDER BY uploaded_at LIMIT $limit
                 """);
@@ -402,6 +441,317 @@ public sealed class UploadQueue : IDisposable
             var v = cmd.ExecuteScalar();
             return v is long ms ? FromMs(ms) : null;
         }
+    }
+
+    // ---- the calibration library ---------------------------------------------------------------------------------
+
+    /// <summary>The queue's rows for the library (<c>lib:{rig}</c>, or one rig's) by state.</summary>
+    public IReadOnlyDictionary<string, int> LibraryCounts(string? rigId = null)
+    {
+        lock (gate)
+        {
+            var cmd = Command("SELECT state, COUNT(*) FROM items WHERE project_ref LIKE 'lib:%' AND ($ref IS NULL OR project_ref = $ref) GROUP BY state");
+            cmd.Parameters.AddWithValue("$ref", rigId is null ? DBNull.Value : Library.LibraryRef.For(rigId));
+            using var r = cmd.ExecuteReader();
+            var d = QueueStates.All.ToDictionary(s => s, _ => 0);
+            while (r.Read()) d[r.GetString(0)] = r.GetInt32(1);
+            return d;
+        }
+    }
+
+    /// <summary>The remembered hash of a file, or null. It is only valid while the file still has this size and modified time.</summary>
+    public LibraryFileEntry? GetLibraryFile(string path)
+    {
+        lock (gate)
+        {
+            var cmd = Command("SELECT path, size, mtime_ms, stripped_sha256 FROM library_files WHERE path = $path");
+            cmd.Parameters.AddWithValue("$path", path);
+            using var r = cmd.ExecuteReader();
+            return r.Read() ? new LibraryFileEntry(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetString(3)) : null;
+        }
+    }
+
+    public void PutLibraryFile(LibraryFileEntry entry)
+    {
+        lock (gate)
+        {
+            var cmd = Command("""
+                INSERT INTO library_files (path, size, mtime_ms, stripped_sha256, updated_at) VALUES ($path, $size, $mtime, $sha, $now)
+                ON CONFLICT(path) DO UPDATE SET size = $size, mtime_ms = $mtime, stripped_sha256 = $sha, updated_at = $now
+                """);
+            cmd.Parameters.AddWithValue("$path", entry.Path);
+            cmd.Parameters.AddWithValue("$size", entry.Size);
+            cmd.Parameters.AddWithValue("$mtime", entry.ModifiedMs);
+            cmd.Parameters.AddWithValue("$sha", entry.StrippedSha256);
+            cmd.Parameters.AddWithValue("$now", Ms(clock.Now));
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Forget remembered hashes for files that are no longer in the folder (everything not in <paramref name="keep"/>).</summary>
+    public int PruneLibraryFiles(IReadOnlySet<string> keep)
+    {
+        lock (gate)
+        {
+            var gone = new List<string>();
+            using (var cmd = Command("SELECT path FROM library_files"))
+            using (var r = cmd.ExecuteReader())
+                while (r.Read()) if (!keep.Contains(r.GetString(0))) gone.Add(r.GetString(0));
+            foreach (var p in gone)
+            {
+                var del = Command("DELETE FROM library_files WHERE path = $path");
+                del.Parameters.AddWithValue("$path", p);
+                del.ExecuteNonQuery();
+            }
+            return gone.Count;
+        }
+    }
+
+    /// <summary>
+    /// A library row that finished earlier (uploaded, duplicate, failed) but whose content the server no longer lists goes back to pending;
+    /// pending, uploading and cancelled rows are left alone. Returns whether the row was requeued.
+    /// </summary>
+    public bool RequeueFinished(long id)
+    {
+        lock (gate)
+        {
+            var cmd = Command("""
+                UPDATE items SET state = 'pending', attempts = 0, next_attempt_at = $now, updated_at = $now, last_error = NULL, last_error_code = NULL,
+                                 frame_id = NULL, verdict = NULL, verdict_detail = NULL
+                WHERE id = $id AND state IN ('uploaded','duplicate','failed')
+                """);
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.Parameters.AddWithValue("$now", Ms(clock.Now));
+            return cmd.ExecuteNonQuery() == 1;
+        }
+    }
+
+    // ---- flats: matching lights and the flat routes ----------------------------------------------------------------
+
+    /// <summary>
+    /// The projects that hold a light (not cancelled) of this rig, filter and local night. Rows queued before schema 2 have no
+    /// night or filter key yet; they are derived from their header with <paramref name="tz"/> on first use.
+    /// </summary>
+    public IReadOnlyList<string> LightProjects(string? rigId, string filterKey, string night, TimeZoneInfo tz)
+    {
+        lock (gate)
+        {
+            DeriveMissingKeys(tz);
+            var cmd = Command("""
+                SELECT DISTINCT project_ref FROM items
+                WHERE frame_kind = 'Light' AND state <> 'cancelled' AND rig_id IS $rig AND filter_key = $filter AND night_local = $night
+                ORDER BY project_ref
+                """);
+            cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$filter", filterKey);
+            cmd.Parameters.AddWithValue("$night", night);
+            return ReadStrings(cmd);
+        }
+    }
+
+    /// <summary>Every (project, night) with a light of this rig and filter, for the nearest-night fallback.</summary>
+    public IReadOnlyList<(string ProjectRef, string Night)> LightNights(string? rigId, string filterKey, TimeZoneInfo tz)
+    {
+        lock (gate)
+        {
+            DeriveMissingKeys(tz);
+            var cmd = Command("""
+                SELECT DISTINCT project_ref, night_local FROM items
+                WHERE frame_kind = 'Light' AND state <> 'cancelled' AND rig_id IS $rig AND filter_key = $filter AND night_local <> ''
+                """);
+            cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$filter", filterKey);
+            using var r = cmd.ExecuteReader();
+            var list = new List<(string, string)>();
+            while (r.Read()) list.Add((r.GetString(0), r.GetString(1)));
+            return list;
+        }
+    }
+
+    /// <summary>The projects that hold a light (not cancelled) whose file is inside <paramref name="folder"/> or below it.</summary>
+    public IReadOnlyList<string> LightProjectsUnder(string folder)
+    {
+        var prefix = folder.TrimEnd('/', '\\');
+        if (prefix.Length == 0) return Array.Empty<string>();
+        lock (gate)
+        {
+            var cmd = Command("""
+                SELECT DISTINCT project_ref FROM items
+                WHERE frame_kind = 'Light' AND state <> 'cancelled'
+                  AND (substr(path, 1, $len + 1) = $withSlash COLLATE NOCASE OR substr(path, 1, $len + 1) = $withBack COLLATE NOCASE)
+                ORDER BY project_ref
+                """);
+            cmd.Parameters.AddWithValue("$len", prefix.Length);
+            cmd.Parameters.AddWithValue("$withSlash", prefix + "/");
+            cmd.Parameters.AddWithValue("$withBack", prefix + "\\");
+            return ReadStrings(cmd);
+        }
+    }
+
+    /// <summary>
+    /// Remember a light that was not queued because it shows another target than the active project's (idempotent per path): the flats of
+    /// its night that no queued light claims are then left out too.
+    /// </summary>
+    public void AddOtherTargetLight(string path, string? rigId, string filterKey, string night, string? objectName)
+    {
+        lock (gate)
+        {
+            var cmd = Command("""
+                INSERT INTO other_target_lights (path, rig_id, filter_key, night_local, object, created_at)
+                VALUES ($path, $rig, $filter, $night, $object, $now)
+                ON CONFLICT(path) DO NOTHING
+                """);
+            cmd.Parameters.AddWithValue("$path", path);
+            cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$filter", filterKey);
+            cmd.Parameters.AddWithValue("$night", night);
+            cmd.Parameters.AddWithValue("$object", (object?)objectName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$now", Ms(clock.Now));
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>How many lights of this rig and local night (any filter) were left out as another target's.</summary>
+    public int CountOtherTargetLights(string? rigId, string night)
+    {
+        lock (gate)
+        {
+            var cmd = Command("SELECT COUNT(*) FROM other_target_lights WHERE rig_id IS $rig AND night_local = $night");
+            cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$night", night);
+            return cmd.ExecuteScalar() is long n ? (int)n : 0;
+        }
+    }
+
+    /// <summary>Record a flat (idempotent per path) and return the row as it now stands.</summary>
+    public FlatRoute AddFlatRoute(string path, InitHeader header, string? rigId, string filterKey, string night, DateTimeOffset holdUntil)
+    {
+        lock (gate)
+        {
+            var cmd = Command("""
+                INSERT INTO flat_routes (path, header_json, rig_id, filter_key, night_local, created_at, hold_until, routed_json, state)
+                VALUES ($path, $header, $rig, $filter, $night, $now, $hold, '[]', 'held')
+                ON CONFLICT(path) DO NOTHING
+                """);
+            cmd.Parameters.AddWithValue("$path", path);
+            cmd.Parameters.AddWithValue("$header", ApiJson.Serialize(header));
+            cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$filter", filterKey);
+            cmd.Parameters.AddWithValue("$night", night);
+            cmd.Parameters.AddWithValue("$now", Ms(clock.Now));
+            cmd.Parameters.AddWithValue("$hold", Ms(holdUntil));
+            cmd.ExecuteNonQuery();
+            return GetFlatRouteLocked(path)!;
+        }
+    }
+
+    public FlatRoute? GetFlatRoute(string path)
+    {
+        lock (gate) return GetFlatRouteLocked(path);
+    }
+
+    /// <summary>Flats that wait for a project, oldest first.</summary>
+    public IReadOnlyList<FlatRoute> HeldFlats() => FlatRoutes("state = 'held'", null);
+
+    /// <summary>Held or routed flats of this rig, filter and night: a light that just arrived may take them to its project too.</summary>
+    public IReadOnlyList<FlatRoute> FlatsMatching(string? rigId, string filterKey, string night) =>
+        FlatRoutes("state IN ('held','routed') AND rig_id IS $rig AND filter_key = $filter AND night_local = $night",
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("$rig", (object?)rigId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$filter", filterKey);
+                cmd.Parameters.AddWithValue("$night", night);
+            });
+
+    public int CountHeldFlats()
+    {
+        lock (gate)
+        {
+            var v = Scalar("SELECT COUNT(*) FROM flat_routes WHERE state = 'held'");
+            return v is long n ? (int)n : 0;
+        }
+    }
+
+    public void SetFlatRoute(string path, string state, IReadOnlyList<string> routedTo, string? detail)
+    {
+        lock (gate)
+        {
+            var cmd = Command("UPDATE flat_routes SET state = $state, routed_json = $routed, detail = $detail WHERE path = $path");
+            cmd.Parameters.AddWithValue("$state", state);
+            cmd.Parameters.AddWithValue("$routed", ApiJson.Serialize(routedTo));
+            cmd.Parameters.AddWithValue("$detail", (object?)detail ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$path", path);
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    private IReadOnlyList<FlatRoute> FlatRoutes(string where, Action<SqliteCommand>? bind)
+    {
+        lock (gate)
+        {
+            var cmd = Command($"SELECT {FlatColumns} FROM flat_routes WHERE {where} ORDER BY created_at, path");
+            bind?.Invoke(cmd);
+            using var r = cmd.ExecuteReader();
+            var list = new List<FlatRoute>();
+            while (r.Read()) list.Add(ReadFlat(r));
+            return list;
+        }
+    }
+
+    private FlatRoute? GetFlatRouteLocked(string path)
+    {
+        var cmd = Command($"SELECT {FlatColumns} FROM flat_routes WHERE path = $path");
+        cmd.Parameters.AddWithValue("$path", path);
+        using var r = cmd.ExecuteReader();
+        return r.Read() ? ReadFlat(r) : null;
+    }
+
+    private const string FlatColumns = "path, header_json, rig_id, filter_key, night_local, created_at, hold_until, routed_json, state, detail";
+
+    private static FlatRoute ReadFlat(SqliteDataReader r) => new(
+        r.GetString(0),
+        ApiJson.Deserialize<InitHeader>(r.GetString(1)) ?? new InitHeader(),
+        r.IsDBNull(2) ? null : r.GetString(2),
+        r.GetString(3),
+        r.GetString(4),
+        FromMs(r.GetInt64(5)),
+        FromMs(r.GetInt64(6)),
+        ApiJson.Deserialize<List<string>>(r.GetString(7)) ?? new List<string>(),
+        r.GetString(8),
+        r.IsDBNull(9) ? null : r.GetString(9));
+
+    private static List<string> ReadStrings(SqliteCommand cmd)
+    {
+        using var r = cmd.ExecuteReader();
+        var list = new List<string>();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
+
+    /// <summary>Rows queued by a v1 plugin (or without keys) get their night and filter key from the stored header.</summary>
+    private void DeriveMissingKeys(TimeZoneInfo tz)
+    {
+        var pending = new List<(long Id, string Night, string Filter)>();
+        using (var cmd = Command("SELECT id, header_json FROM items WHERE night_local IS NULL OR filter_key IS NULL"))
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var h = ApiJson.Deserialize<InitHeader>(r.GetString(1)) ?? new InitHeader();
+                pending.Add((r.GetInt64(0), Frames.FlatRouting.NightOf(h, tz) ?? "", Frames.FlatRouting.FilterKey(h.Filter)));
+            }
+        }
+        if (pending.Count == 0) return;
+        using var tx = db.BeginTransaction();
+        foreach (var (id, night, filter) in pending)
+        {
+            var up = Command("UPDATE items SET night_local = $night, filter_key = $filter WHERE id = $id", tx);
+            up.Parameters.AddWithValue("$night", night);
+            up.Parameters.AddWithValue("$filter", filter);
+            up.Parameters.AddWithValue("$id", id);
+            up.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
     // ---- plumbing ------------------------------------------------------------------------------------------------
@@ -451,8 +801,64 @@ public sealed class UploadQueue : IDisposable
                         by_user INTEGER NOT NULL DEFAULT 0
                     );
                     """);
-                Exec($"INSERT INTO meta (key, value) VALUES ('schema_version', '{SchemaVersion}') ON CONFLICT(key) DO UPDATE SET value = excluded.value;");
             }
+            if (current < 2)
+            {
+                // Schema 2 (calibration library plan A5): the keys flats are matched to lights by, and the flats the router holds.
+                var hasNight = false;
+                using (var info = db.CreateCommand())
+                {
+                    info.CommandText = "PRAGMA table_info(items)";
+                    using var r = info.ExecuteReader();
+                    while (r.Read()) if (r.GetString(1) == "night_local") hasNight = true;
+                }
+                if (!hasNight) Exec("ALTER TABLE items ADD COLUMN night_local TEXT NULL; ALTER TABLE items ADD COLUMN filter_key TEXT NULL;");
+                Exec("""
+                    CREATE INDEX IF NOT EXISTS items_match ON items (frame_kind, rig_id, filter_key, night_local);
+                    CREATE TABLE IF NOT EXISTS flat_routes (
+                        path TEXT NOT NULL UNIQUE,
+                        header_json TEXT NOT NULL,
+                        rig_id TEXT NULL,
+                        filter_key TEXT NOT NULL,
+                        night_local TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        hold_until INTEGER NOT NULL,
+                        routed_json TEXT NOT NULL DEFAULT '[]',
+                        state TEXT NOT NULL,
+                        detail TEXT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS flat_routes_match ON flat_routes (state, rig_id, filter_key, night_local);
+                    """);
+            }
+            if (current < 3)
+            {
+                // Schema 3 (calibration library plan B6): a file in the library folder is stripped and hashed once, then remembered by size and modified time.
+                Exec("""
+                    CREATE TABLE IF NOT EXISTS library_files (
+                        path TEXT PRIMARY KEY,
+                        size INTEGER NOT NULL,
+                        mtime_ms INTEGER NOT NULL,
+                        stripped_sha256 TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    );
+                    """);
+            }
+            if (current < 4)
+            {
+                // Schema 4: lights left out because they show another target than the active project's, so their night's flats are left out too.
+                Exec("""
+                    CREATE TABLE IF NOT EXISTS other_target_lights (
+                        path TEXT PRIMARY KEY,
+                        rig_id TEXT NULL,
+                        filter_key TEXT NOT NULL,
+                        night_local TEXT NOT NULL,
+                        object TEXT NULL,
+                        created_at INTEGER NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS other_target_lights_night ON other_target_lights (rig_id, night_local);
+                    """);
+            }
+            Exec($"INSERT INTO meta (key, value) VALUES ('schema_version', '{SchemaVersion}') ON CONFLICT(key) DO UPDATE SET value = excluded.value;");
         }
     }
 

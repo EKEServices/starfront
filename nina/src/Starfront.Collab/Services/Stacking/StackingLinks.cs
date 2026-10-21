@@ -1,6 +1,7 @@
 using System.IO;
 using Newtonsoft.Json;
 using NINA.Core.Utility;
+using RapidStackerCollab.Core.Api;
 
 namespace Starfront.Collab.Services.Stacking {
 
@@ -36,6 +37,14 @@ namespace Starfront.Collab.Services.Stacking {
         /// <summary>The project insists on frames with the observer's location removed.</summary>
         public bool RequireStrip { get; set; }
         public List<string> DeclaredFilters { get; set; } = new();
+        /// <summary>The stacking project's target, as its owner typed it; the other-target rule compares <c>OBJECT</c> with it.</summary>
+        public string TargetName { get; set; } = "";
+        /// <summary>The stacking project's frame on the sky; null until it is known. A light pointed well away from it is not sent.</summary>
+        public Grid Grid { get; set; }
+        /// <summary>The frame waits for its first light, which sets its centre and scale: the rule then allows three degrees.</summary>
+        public bool GridPending { get; set; }
+        /// <summary>The project's calibration policy; "none" takes no flats.</summary>
+        public string Calibration { get; set; } = "preferred";
         /// <summary>The wheel's names and the project's filter each delivers, or SKIP; what the membership holds.</summary>
         public Dictionary<string, string> Mapping { get; set; } = new();
         public DateTime UpdatedUtc { get; set; }
@@ -44,6 +53,13 @@ namespace Starfront.Collab.Services.Stacking {
 
         [JsonIgnore] public bool Active => Status == LinkStatus.Active && CollabProjectId.Length > 0;
         [JsonIgnore] public bool Feeds => CollabProjectId.Length > 0 && Status is LinkStatus.Active or LinkStatus.Pending;
+
+        /// <summary>Whether the project takes calibration frames at all.</summary>
+        [JsonIgnore] public bool TakesCalibration => !string.Equals(Calibration, "none", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Why a light is another target's than this project's, or null when it is the project's or cannot be told (no frame yet).</summary>
+        public string OtherTargetReason(InitHeader header) =>
+            StackingTargets.OtherTargetReason(header, StackingTargets.Project(CollabProjectId, CollabName, TargetName, Grid, GridPending));
 
         /// <summary>Whether a light through this wheel filter is one the project never wants.</summary>
         public bool Skips(string rawFilter) {

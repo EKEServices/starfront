@@ -142,4 +142,27 @@ public sealed class FitsBuilder
         }
         return new FitsBuilder().Primary(cards, 16, new[] { width, height });
     }
+
+    /// <summary>
+    /// A bias, dark or dark-flat frame (or a master: pass <paramref name="imageTyp"/> "Master Dark"), with the cards N.I.N.A. writes and, by default, the
+    /// observer location. <paramref name="seed"/> makes the pixel data (and so the SHA-256) differ from every other frame.
+    /// </summary>
+    public static FitsBuilder Calibration(string imageTyp = "Dark", double exposure = 120, int seed = 1, string? instrume = "ASI2600MM",
+        double? gain = 100, double? offset = 50, double? setTemp = -10, double? ccdTemp = null, int binning = 1, int width = 64, int height = 48,
+        string dateObs = "2026-10-12T02:15:03.512", bool withLocation = true)
+    {
+        var cards = new List<string>
+        {
+            Str("IMAGETYP", imageTyp), Num("EXPOSURE", exposure), Num("EXPTIME", exposure), Str("DATE-OBS", dateObs),
+            Int("XBINNING", binning), Int("YBINNING", binning),
+        };
+        if (gain is { } g) cards.Add(Num("GAIN", g));
+        if (offset is { } o) cards.Add(Num("OFFSET", o));
+        if (instrume is not null) cards.Add(Str("INSTRUME", instrume));
+        if (setTemp is { } t) cards.Add(Num("SET-TEMP", t));
+        if (ccdTemp is { } c) cards.Add(Num("CCD-TEMP", c));
+        if (withLocation)
+            cards.AddRange(new[] { Num("SITELAT", 41.2345), Num("SITELONG", -73.5432), Num("SITEELEV", 123.4), Str("OBSERVER", "Jane Q. Imager") });
+        return new FitsBuilder().Primary(cards, 16, new[] { width, height }, Pattern(width * height * 2, seed * 7919));
+    }
 }

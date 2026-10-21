@@ -17,7 +17,7 @@ public sealed class ApiClientOptions
     /// <summary>The API root, ending in <c>/api/</c>. Defaults to production.</summary>
     public Uri BaseUri { get; init; } = new("https://collab.astro.ekeservices.com/api/");
 
-    /// <summary>Sent as <c>User-Agent</c>, for example <c>RapidStackerCollab-NINA/0.1.0</c>.</summary>
+    /// <summary>Sent as <c>User-Agent</c>, for example <c>RapidStackerCollab-NINA/0.2.2</c>.</summary>
     public string UserAgent { get; init; } = "RapidStackerCollab-NINA/0.1";
 }
 
@@ -170,6 +170,23 @@ public sealed class ApiClient : IApiClient
 
     public Task<WithdrawResponse> WithdrawFrameAsync(string project, string frameId, CancellationToken ct = default) =>
         SendAsync<WithdrawResponse>(HttpMethod.Post, $"projects/{Esc(project)}/frames/{Esc(frameId)}/withdraw", null, Auth.Required, ct);
+
+    // ---- Calibration library (contract 1.23.0) -----------------------------------------------------------------
+
+    public Task<LibraryResponse> GetLibraryAsync(string rigId, int? limit = null, string? cursor = null, CancellationToken ct = default) =>
+        SendAsync<LibraryResponse>(HttpMethod.Get,
+            $"rigs/{Esc(rigId)}/library" + Query(("limit", limit?.ToString(CultureInfo.InvariantCulture)), ("cursor", cursor)),
+            null, Auth.Required, ct);
+
+    public Task<LibraryFrameInitResponse> InitLibraryFrameAsync(string rigId, LibraryFrameInitRequest request, CancellationToken ct = default) =>
+        SendAsync<LibraryFrameInitResponse>(HttpMethod.Post, $"rigs/{Esc(rigId)}/library/frames/init", request, Auth.Required, ct);
+
+    public Task<LibraryFrameCompleteResponse> CompleteLibraryFrameAsync(string rigId, string frameId, IReadOnlyList<CompletedPart> etags, CancellationToken ct = default) =>
+        SendAsync<LibraryFrameCompleteResponse>(HttpMethod.Post, $"rigs/{Esc(rigId)}/library/frames/{Esc(frameId)}/complete",
+            new FrameCompleteRequest { Etags = etags }, Auth.Required, ct);
+
+    public Task<WithdrawResponse> WithdrawLibraryFrameAsync(string rigId, string frameId, CancellationToken ct = default) =>
+        SendAsync<WithdrawResponse>(HttpMethod.Post, $"rigs/{Esc(rigId)}/library/frames/{Esc(frameId)}/withdraw", null, Auth.Required, ct);
 
     public Task RevokeOwnTokenAsync(CancellationToken ct = default) =>
         SendAsync<AckResponse>(HttpMethod.Delete, "auth/token", null, Auth.Required, ct);

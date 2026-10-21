@@ -67,8 +67,13 @@ header carries `STARFRNT` (the project) and `SFPANEL`.
    linked collaboration it is on, and from then on each light the container
    saves for it is sent there as it lands: a copy with your location taken
    out, never your file itself. The Starfront panel shows what is waiting
-   and going. With the switch off the plugin connects to nothing new and
-   behaves exactly as before.
+   and going. A light pointed well away from the stacking project's field is
+   not sent. Flats go to the projects that got the night's lights of their
+   filter (an evening flat waits for them), and a night spent on another
+   target keeps its flats here. Darks, bias and dark flats go to the
+   telescope's calibration library, which serves every project; a folder of
+   them can be kept in step with it under *Calibration library*. With the
+   switch off the plugin connects to nothing new and behaves exactly as before.
 
 ## For people building it
 
@@ -79,7 +84,7 @@ not required; the scripts run on Windows PowerShell as well.
 cd nina
 dotnet build src/Starfront.Collab/Starfront.Collab.csproj -c Release
 dotnet test tests/RapidStackerCollab.Core.Tests     # the live-stacking upload engine; runs on macOS too
-dotnet test tests/Starfront.Collab.Tests            # live stacking's join-code and filter-mapping rules
+dotnet test tests/Starfront.Collab.Tests            # live stacking's join codes, filter mapping, flat routing, field check and library sync
 ```
 
 `Starfront.sln` holds the plugin, the upload engine it ships
@@ -130,7 +135,7 @@ public repositories only, and asks for an accountable human maintainer.
 | `Ledger/` | what was shot, on disk, until the server has taken it |
 | `Sequencer/` | the *Starfront collaboration* container, its panels, the altitude gate, the once-through strategy |
 | `Ui/` | the options page, the exposure table, the Imaging-tab panel |
-| `Services/Stacking/` | live stacking: the Rapid Stacker Collab sign-in, the link to each collaboration's stacking project and the join, the queue and the uploads, and the switch that turns all of it on and off |
+| `Services/Stacking/` | live stacking: the Rapid Stacker Collab sign-in, the link to each collaboration's stacking project and the join, the queue and the uploads, the flat router (`StackingFlats`), the field check (`StackingTargets`), the calibration library's folder sync (`StackingLibrary`), and the switch that turns all of it on and off |
 | `../RapidStackerCollab.Core/` | the upload engine (resumable multipart upload, the SQLite queue, location stripping), copied from Rapid Stacker Collab's own N.I.N.A. plugin; see its `SOURCE.md` |
 
 Everything the plugin owns is in the zip; nothing of N.I.N.A.'s is.

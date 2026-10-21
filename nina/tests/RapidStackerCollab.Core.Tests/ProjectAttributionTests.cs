@@ -270,15 +270,96 @@ public class ProjectAttributionTests
         var elsewhere = new FramePointing("Andromeda", 10.7, 41.3);
         var inHorsehead = new FramePointing("whatever", 85.25, -2.45);
 
-        Assert.That(ProjectAttribution.Attribute(inHorsehead, projects, "prj_m42", AttributionMode.ActiveOnly).Project!.ProjectId, Is.EqualTo("prj_m42"));
+        var nearOrion = new FramePointing("whatever", 83.0, -6.5); // outside M42's footprint, well inside its on-target radius
+
+        Assert.That(ProjectAttribution.Attribute(nearOrion, projects, "prj_m42", AttributionMode.ActiveOnly).Project!.ProjectId, Is.EqualTo("prj_m42"));
         Assert.That(ProjectAttribution.Attribute(inHorsehead, projects, null, AttributionMode.ActiveOnly).Project, Is.Null);
         Assert.That(ProjectAttribution.Attribute(inHorsehead, projects, "ghost", AttributionMode.ActiveOnly).Project, Is.Null, "an active id we have not joined");
+        var other = ProjectAttribution.Attribute(elsewhere, projects, "prj_m42", AttributionMode.ActiveOnly);
+        Assert.That((other.Project, other.Reason), Is.EqualTo(((JoinedProject?)null, AttributionReason.OtherTarget)), "active only, but another target");
 
         Assert.That(ProjectAttribution.Attribute(elsewhere, projects, "prj_m42", AttributionMode.Auto).Project, Is.Null);
-        var fb = ProjectAttribution.Attribute(elsewhere, projects, "prj_m42", AttributionMode.AutoWithActiveFallback);
+        var fb = ProjectAttribution.Attribute(nearOrion, projects, "prj_m42", AttributionMode.AutoWithActiveFallback);
         Assert.That((fb.Project!.ProjectId, fb.Reason), Is.EqualTo(("prj_m42", AttributionReason.ActiveProject)));
+        var away = ProjectAttribution.Attribute(elsewhere, projects, "prj_m42", AttributionMode.AutoWithActiveFallback);
+        Assert.That((away.Project, away.Reason), Is.EqualTo(((JoinedProject?)null, AttributionReason.OtherTarget)), "no fallback for another target");
         Assert.That(ProjectAttribution.Attribute(inHorsehead, projects, "prj_m42", AttributionMode.AutoWithActiveFallback).Project!.ProjectId, Is.EqualTo("prj_hh"),
             "a real match beats the fallback");
+    }
+
+    // ---- frames of another target (the user moved on) -----------------------------------------------------------
+
+    // M33 as the live project has it: 3840 x 2160 px at 1.1876"/px (1.27 x 0.71 deg), half-diagonal 0.73 deg.
+    private static readonly Grid M33 = MakeGrid(23.47155, 30.66404, 31.42, 1.1876, 3840, 2160);
+
+    [Test]
+    public void A_frame_of_another_target_is_refused_instead_of_falling_back_to_the_active_project()
+    {
+        var projects = new[] { Project("prj_m33", "M33", M33) };
+        // The Bubble Nebula frames that reached M33 on 2026-10-21: RA/DEC and OBJCTRA/OBJCTDEC both on the Bubble.
+        var bubble = FramePointing.FromHeader(new InitHeader { Object = "Bubble Nebula", Ra = 350.204, Dec = 61.201, ObjctRa = "23 20 48", ObjctDec = "+61 12 06" });
+        foreach (var mode in new[] { AttributionMode.ActiveOnly, AttributionMode.AutoWithActiveFallback })
+        {
+            var r = ProjectAttribution.Attribute(bubble, projects, "prj_m33", mode);
+            Assert.That((r.Project, r.Reason, r.Ambiguous), Is.EqualTo(((JoinedProject?)null, AttributionReason.OtherTarget, false)), mode.ToString());
+        }
+        Assert.That(ProjectAttribution.SeparationDeg(bubble, projects[0]), Is.GreaterThan(30));
+    }
+
+    [Test]
+    public void A_frame_of_the_target_still_goes_to_the_active_project_when_only_part_of_its_header_agrees()
+    {
+        var m33 = Project("prj_m33", "M33", M33);
+        var projects = new[] { m33 };
+        AttributionResult Fallback(FramePointing f) => ProjectAttribution.Attribute(f, projects, "prj_m33", AttributionMode.AutoWithActiveFallback);
+
+        // Off the grid but within its half-diagonal plus a degree (a typed centre 20' out, a slightly different framing).
+        Assert.That(Fallback(new FramePointing("M33_FRA600", 25.0, 30.66)).Reason, Is.EqualTo(AttributionReason.ActiveProject));
+        // The mount lost its sync (RA/DEC 3 deg out) while OBJCTRA/OBJCTDEC stayed on the target: the target's position counts.
+        var lostSync = FramePointing.FromHeader(new InitHeader { Object = "M33_UC131", Ra = 27.0, Dec = 31.5, ObjctRa = "01 33 51", ObjctDec = "+30 39 36" });
+        Assert.That(Fallback(lostSync).Reason, Is.EqualTo(AttributionReason.ActiveProject));
+        // OBJECT names the project: the name is taken at its word, wherever the mount says it was.
+        Assert.That(Fallback(new FramePointing("M33", 120.0, -10.0)).Project!.ProjectId, Is.EqualTo("prj_m33"));
+        // No position at all: nothing says it is elsewhere.
+        Assert.That(Fallback(new FramePointing("Bubble Nebula", null, null)).Reason, Is.EqualTo(AttributionReason.ActiveProject));
+        // A project without a grid cannot tell either.
+        Assert.That(ProjectAttribution.IsOtherTarget(new FramePointing("x", 350, 61), Project("prj_n", "N", null)), Is.False);
+    }
+
+    [Test]
+    public void The_on_target_radius_is_the_half_diagonal_plus_a_degree_and_at_least_three_degrees_while_the_grid_waits_for_first_light()
+    {
+        var m33 = Project("prj_m33", "M33", M33);
+        Assert.That(ProjectAttribution.OnTargetRadiusDeg(m33), Is.EqualTo(1.0 + Math.Sqrt(3840.0 * 3840 + 2160.0 * 2160) / 2 * 1.1876 / 3600).Within(1e-9));
+        var pending = m33 with { GridPending = true };
+        Assert.That(ProjectAttribution.OnTargetRadiusDeg(pending), Is.EqualTo(3.0));
+        var twoAndAHalfOut = new FramePointing("x", 23.47155, 30.66404 + 2.5);
+        Assert.That(ProjectAttribution.IsOtherTarget(twoAndAHalfOut, m33), Is.True);
+        Assert.That(ProjectAttribution.IsOtherTarget(twoAndAHalfOut, pending), Is.False, "a placeholder centre is given more room");
+        // A mosaic's derived grid is large; its radius grows with it.
+        var mosaic = Project("prj_mos", "Veil", MakeGrid(312.0, 31.0, 0, 2.0, 30000, 20000));
+        Assert.That(ProjectAttribution.IsOtherTarget(new FramePointing("x", 312.0, 36.5), mosaic), Is.False);
+    }
+
+    [Test]
+    public void Separation_is_the_angle_on_the_sky()
+    {
+        Assert.That(SkyMath.SeparationDeg(10, 0, 11, 0), Is.EqualTo(1.0).Within(1e-9));
+        Assert.That(SkyMath.SeparationDeg(0, 60, 1, 60), Is.EqualTo(0.5).Within(1e-4), "RA shrinks by cos(dec)");
+        Assert.That(SkyMath.SeparationDeg(359.5, 0, 0.5, 0), Is.EqualTo(1.0).Within(1e-9), "across RA 0");
+        Assert.That(SkyMath.SeparationDeg(0, 89.9, 180, 89.9), Is.EqualTo(0.2).Within(1e-9), "over the pole");
+        Assert.That(SkyMath.SeparationDeg(5, 5, 5, 5), Is.EqualTo(0.0));
+    }
+
+    [Test]
+    public void The_header_gives_the_target_position_beside_the_mounts()
+    {
+        var f = FramePointing.FromHeader(new InitHeader { Ra = 27.0, Dec = 31.5, ObjctRa = "01 33 51", ObjctDec = "+30 39 36" });
+        Assert.That((f.RaDeg, f.DecDeg), Is.EqualTo((27.0, 31.5)));
+        Assert.That(f.TargetRaDeg, Is.EqualTo(23.4625).Within(1e-9));
+        Assert.That(f.Positions().Count(), Is.EqualTo(2));
+        var only = FramePointing.FromHeader(new InitHeader { ObjctRa = "01 33 51", ObjctDec = "+30 39 36" });
+        Assert.That(only.Positions().Count(), Is.EqualTo(1), "the target's position is not counted twice");
     }
 
     [Test]

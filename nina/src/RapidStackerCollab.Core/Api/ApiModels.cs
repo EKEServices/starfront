@@ -85,7 +85,18 @@ public sealed class Rig
     public bool Confirmed { get; init; }
     public int FrameCount { get; init; }
     public DateTimeOffset? LastFrameAt { get; init; }
+    /// <summary>The camera's last solved orientation (contract 1.21.0); null until a light carrying one is accepted.</summary>
+    public RigOrientation? Orientation { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
+}
+
+/// <summary>A rig's latest solved orientation (contract 1.21.0): what the website's grid forms offer as "use my camera".</summary>
+public sealed class RigOrientation
+{
+    public double PositionAngleDeg { get; init; }
+    public double? ScaleArcsecPx { get; init; }
+    public DateTimeOffset? ObservedAt { get; init; }
+    public DateTimeOffset MeasuredAt { get; init; }
 }
 
 public sealed class RigUpsertRequest
@@ -257,6 +268,8 @@ public sealed class ProjectDetail
     public string? DeletedByRole { get; init; }
     /// <summary>The mosaic layout (contract 1.17.0), or null for a single-field project. <see cref="Grid"/> is derived from it.</summary>
     public Mosaic? Mosaic { get; init; }
+    /// <summary>True while the grid's rotation waits for the first light (contract 1.24.0): <see cref="Grid"/>'s rotation is a placeholder until then.</summary>
+    public bool? RotationFromFirstLight { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
 }
@@ -628,6 +641,11 @@ public sealed class FrameMetrics
     public int? StarsReached { get; init; }
     public double? GridOverlap { get; init; }
     public double? ScaleRatio { get; init; }
+    /// <summary>The sub's up direction, degrees east of north, as <c>Grid.rotation_deg</c> (contract 1.21.0).</summary>
+    public double? PositionAngleDeg { get; init; }
+    /// <summary>The sky position of the sub's centre pixel, degrees (contract 1.25.0): where the camera pointed.</summary>
+    public double? CentreRaDeg { get; init; }
+    public double? CentreDecDeg { get; init; }
     public double? FitSystematicPx { get; init; }
     public double? FitSystematicSigmaPx { get; init; }
     public double? FitWorstCellPx { get; init; }
@@ -692,6 +710,12 @@ public sealed class AppliedMaster
     public string? Filter { get; init; }
     public int? Frames { get; init; }
     public double? ExposureS { get; init; }
+    /// <summary>For a flat, the earliest <c>DATE-OBS</c> of the cluster of flats it was built from (UTC; contract 1.22.0).</summary>
+    public DateTimeOffset? TakenFrom { get; init; }
+    /// <summary>For a flat, the latest <c>DATE-OBS</c> of its cluster (UTC; contract 1.22.0).</summary>
+    public DateTimeOffset? TakenTo { get; init; }
+    /// <summary>The master came from the rig's calibration library rather than the project's own calibration frames (contract 1.23.0); false for a frame prepared before.</summary>
+    public bool Library { get; init; }
 }
 
 public sealed class FrameResponse
@@ -779,4 +803,93 @@ public sealed class PanelStreamProgress
     public IReadOnlyList<string> Contributors { get; init; } = Array.Empty<string>();
     public double? Coverage { get; init; }
     public double? TargetS { get; init; }
+}
+
+
+// ---- Calibration library (contract 1.23.0, README open points 98 to 104) -------------------------------------------
+
+/// <summary>Body of <c>POST /rigs/{rig_id}/library/frames/init</c>. Unlike a project frame there is no rig hint (the rig is in the path), and <c>stripped</c> must be true.</summary>
+public sealed class LibraryFrameInitRequest
+{
+    public string Sha256 { get; init; } = "";
+    /// <summary>Bytes of the stripped file as uploaded.</summary>
+    public long Size { get; init; }
+    public string Filename { get; init; } = "";
+    public InitHeader Header { get; init; } = new();
+    /// <summary>Always true: a library frame is always uploaded with its location cards removed (open point 104).</summary>
+    public bool Stripped { get; init; } = true;
+}
+
+public sealed class LibraryFrameInitResponse
+{
+    public string FrameId { get; init; } = "";
+    public string Status { get; init; } = FrameStatuses.Uploading;
+    public bool Resumed { get; init; }
+    /// <summary>One of <see cref="LibraryFrameTypes"/>.</summary>
+    public string FrameType { get; init; } = "";
+    public string RigId { get; init; } = "";
+    public UploadInstructions Upload { get; init; } = new();
+}
+
+public sealed class LibraryFrameCompleteResponse
+{
+    public string FrameId { get; init; } = "";
+    /// <summary>One of <see cref="LibraryFrameStatuses"/>.</summary>
+    public string Status { get; init; } = "";
+    public bool AlreadyComplete { get; init; }
+}
+
+/// <summary>One frame of a rig's library as its owner sees it.</summary>
+public sealed class LibraryFrame
+{
+    public string FrameId { get; init; } = "";
+    public string FrameType { get; init; } = "";
+    public string Status { get; init; } = "";
+    public string Sha256 { get; init; } = "";
+    public long Size { get; init; }
+    public string Filename { get; init; } = "";
+    public double? ExposureS { get; init; }
+    public double? Gain { get; init; }
+    public double? Offset { get; init; }
+    public int? Binning { get; init; }
+    public double? SetTempC { get; init; }
+    public string? DateObs { get; init; }
+    public DateTimeOffset? UploadedAt { get; init; }
+    /// <summary>Null until the worker has built the library with this frame in view; then whether it was used.</summary>
+    public bool? Usable { get; init; }
+    /// <summary>One of <see cref="LibraryProblems"/> when <see cref="Usable"/> is false.</summary>
+    public string? Problem { get; init; }
+}
+
+/// <summary>One master the worker built (or took as uploaded) from the library.</summary>
+public sealed class LibraryMaster
+{
+    /// <summary><c>bias</c>, <c>dark</c> or <c>dark_flat</c>.</summary>
+    public string Kind { get; init; } = "";
+    /// <summary><c>built</c> or <c>uploaded</c>.</summary>
+    public string Source { get; init; } = "";
+    public double? ExposureS { get; init; }
+    public double? Gain { get; init; }
+    public double? Offset { get; init; }
+    public int? Binning { get; init; }
+    public double? SetTempC { get; init; }
+    public int? Frames { get; init; }
+}
+
+public sealed class LibraryUsage
+{
+    public long BytesUsed { get; init; }
+    public long FramesUsed { get; init; }
+    public long MaxBytes { get; init; }
+    public long MaxFrames { get; init; }
+}
+
+public sealed class LibraryResponse
+{
+    public string RigId { get; init; } = "";
+    public LibraryUsage Usage { get; init; } = new();
+    public IReadOnlyList<LibraryFrame> Frames { get; init; } = Array.Empty<LibraryFrame>();
+    public IReadOnlyList<LibraryMaster> Masters { get; init; } = Array.Empty<LibraryMaster>();
+    public DateTimeOffset? BuiltAt { get; init; }
+    public string? NextCursor { get; init; }
 }

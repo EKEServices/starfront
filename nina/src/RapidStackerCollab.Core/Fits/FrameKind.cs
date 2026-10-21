@@ -45,7 +45,14 @@ public static class FrameKinds
 
     public static bool IsCalibration(FrameKind k) => k is not (FrameKind.Light or FrameKind.Other);
 
-    /// <summary>Whether a frame of this kind is queued: lights always, calibration only when the option is on, never <see cref="FrameKind.Other"/>.</summary>
-    public static bool ShouldUpload(FrameKind k, bool includeCalibration) =>
-        k == FrameKind.Light || (includeCalibration && IsCalibration(k));
+    /// <summary>A flat or a master flat.</summary>
+    public static bool IsFlat(FrameKind k) => k is FrameKind.Flat or FrameKind.MasterFlat;
+
+    /// <summary>
+    /// Whether a frame of this kind is queued: lights always, flats (and master flats) when <paramref name="uploadFlats"/> is on,
+    /// the other calibration kinds (darks, bias, dark flats and their masters) when <paramref name="includeCalibration"/> is on,
+    /// never <see cref="FrameKind.Other"/>.
+    /// </summary>
+    public static bool ShouldUpload(FrameKind k, bool uploadFlats, bool includeCalibration) =>
+        k == FrameKind.Light || (IsFlat(k) ? uploadFlats : includeCalibration && IsCalibration(k));
 }

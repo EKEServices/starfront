@@ -67,6 +67,54 @@ public static class QuotaNames
     public const string ContributorBytes = "contributor_bytes";
     public const string ContributorFrames = "contributor_frames";
     public const string ProjectBytes = "project_bytes";
+    /// <summary>The per-user calibration library quota (contract 1.23.0).</summary>
+    public const string LibraryBytes = "library_bytes";
+    public const string LibraryFrames = "library_frames";
+
+    /// <summary>The library quotas refuse the library only; the others refuse a project.</summary>
+    public static bool IsLibrary(string? quota) => quota is LibraryBytes or LibraryFrames;
+}
+
+/// <summary>The frame types a calibration library holds (<c>LibraryFrameType</c>, contract 1.23.0).</summary>
+public static class LibraryFrameTypes
+{
+    public const string Bias = "bias";
+    public const string Dark = "dark";
+    public const string DarkFlat = "dark_flat";
+    public const string MasterBias = "master_bias";
+    public const string MasterDark = "master_dark";
+    public const string MasterDarkFlat = "master_dark_flat";
+}
+
+/// <summary>Library frame statuses (<c>LibraryFrameStatus</c>).</summary>
+public static class LibraryFrameStatuses
+{
+    public const string Uploading = "uploading";
+    public const string Ready = "ready";
+    public const string Withdrawn = "withdrawn";
+}
+
+/// <summary>Why the worker did not use a library frame (<c>LibraryFrame.problem</c>).</summary>
+public static class LibraryProblems
+{
+    public const string Sha256Mismatch = "sha256_mismatch";
+    public const string Unreadable = "unreadable";
+    public const string WrongType = "wrong_type";
+    public const string WrongCamera = "wrong_camera";
+    public const string WrongSize = "wrong_size";
+    public const string Superseded = "superseded";
+
+    /// <summary>A plain-language sentence for an options page or the dock.</summary>
+    public static string Describe(string? problem) => problem switch
+    {
+        Sha256Mismatch => "its bytes do not match what was announced; upload it again",
+        Unreadable => "its header could not be read",
+        WrongType => "it is not a bias, dark or dark flat",
+        WrongCamera => "it was taken with a different camera than the rig",
+        WrongSize => "its size or binning is not the rig's",
+        Superseded => "a master built from your raw frames replaced this uploaded master",
+        _ => problem ?? "",
+    };
 }
 
 /// <summary>Values of <c>SKIP</c> in a contributor mapping: never upload frames with this wheel name.</summary>

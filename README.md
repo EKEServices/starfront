@@ -1987,10 +1987,24 @@ per-filter stacks. The decisions behind it:
   a light's collaboration exactly the way the ledger does, by the target name
   N.I.N.A. stamped. The ledger and the reporting are untouched, and with the
   switch off the plugin opens, hooks and connects nothing new.
-- **Only lights the container shot for a linked collaboration go.** Calibration
-  frames carry no target, so when asked for they go to the project of the last
-  light sent; on a night split between two collaborations the later one gets
-  the darks.
+- **Only lights the container shot for a linked collaboration go, and only if
+  they were pointed at its stacking project's field.** The target name says
+  what the sequence meant to shoot, not where the telescope was; a light
+  pointed well away (farther from the field's centre than its half-diagonal
+  plus a degree, and not named after it) is one the stacking service could
+  only reject, after it had cost the person quota.
+- **Flats follow their lights.** A flat carries no target, so it goes to the
+  stacking projects that got this telescope's lights of the same filter that
+  night; an evening flat, taken before any light, waits for them until the
+  next midday. A night spent on another target keeps its flats here: sending
+  them to whichever project the last light went to calibrated nothing and
+  used up quota.
+- **Darks, bias and dark flats go to the telescope's calibration library** on
+  Rapid Stacker Collab, which calibrates its lights in every project, instead
+  of to one project; a folder of them can be kept in step with it. The old
+  switch still sends them to the project of the last light sent, for anyone
+  who turns the library off. This, the flats and the field check are ported
+  from Rapid Stacker Collab's own plugin, so the two behave alike.
 - **The plugin joins by itself, and joining accepts the stacking service's
   terms of contribution as they stand.** The text beside the switch says so.
   It only ever accepts the version the service has just shown it: if the terms

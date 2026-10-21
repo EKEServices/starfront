@@ -38,6 +38,9 @@ namespace Starfront.Collab.Ui {
                 if (e.PropertyName is nameof(StarfrontSettings.StackingEnabled) or nameof(StarfrontSettings.StackingUploadMode) || string.IsNullOrEmpty(e.PropertyName)) Dispatch.OnUi(Refresh);
             };
             stacking.Links.Changed += (_, _) => Dispatch.OnUi(RebuildLinks);
+            stacking.Changed += (_, _) => Dispatch.OnUi(RefreshLibrary);
+            BrowseLibraryCommand = new RelayCommand(BrowseLibrary);
+            SyncLibraryNowCommand = new AsyncRelayCommand(SyncLibraryNowAsync, () => stacking.Library?.CanSync == true);
             RebuildLinks();
         }
 
@@ -52,6 +55,49 @@ namespace Starfront.Collab.Ui {
         public ObservableCollection<StackingLinkRowVM> Links { get; }
         public bool HasLinks => Links.Count > 0;
 
+        // -- the calibration library ------------------------------------------
+
+        /// <summary>What the library sync is doing, or what it needs first.</summary>
+        public string LibraryStatusText => stacking.Library?.StatusText
+            ?? (Settings.StackingEnabled ? "Starting..." : "Turn live stacking on to use the calibration library.");
+
+        /// <summary>The counts of the last pass, or empty.</summary>
+        public string LibraryDetailText => stacking.Library?.DetailText ?? "";
+
+        /// <summary>Frames the stacking service could not use, and files that could not be read, one per line.</summary>
+        public string LibraryProblemsText => stacking.Library?.ProblemsText ?? "";
+
+        public RelayCommand BrowseLibraryCommand { get; }
+        public AsyncRelayCommand SyncLibraryNowCommand { get; }
+
+        private void RefreshLibrary() {
+            RaisePropertyChanged(nameof(LibraryStatusText));
+            RaisePropertyChanged(nameof(LibraryDetailText));
+            RaisePropertyChanged(nameof(LibraryProblemsText));
+            SyncLibraryNowCommand.NotifyCanExecuteChanged();
+        }
+
+        private void BrowseLibrary() {
+            try {
+                var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Your folder of bias, dark and dark-flat frames" };
+                var current = Settings.StackingLibraryFolder;
+                if (current.Length > 0 && System.IO.Directory.Exists(current)) dialog.InitialDirectory = current;
+                if (dialog.ShowDialog() == true) Settings.StackingLibraryFolder = dialog.FolderName;
+            } catch (Exception ex) {
+                Logger.Error("Starfront stacking: the folder could not be chosen", ex);
+            }
+        }
+
+        private async Task SyncLibraryNowAsync() {
+            try {
+                if (stacking.Library is StackingLibrary library) await library.SyncAsync();
+            } catch (Exception ex) {
+                Logger.Error("Starfront stacking: the calibration library could not be synced", ex);
+            } finally {
+                Dispatch.OnUi(RefreshLibrary);
+            }
+        }
+
         public AsyncRelayCommand SignInCommand { get; }
         public AsyncRelayCommand SignOutCommand { get; }
         public RelayCommand CancelSignInCommand { get; }
@@ -64,6 +110,7 @@ namespace Starfront.Collab.Ui {
             OpenBrowserCommand.NotifyCanExecuteChanged();
             foreach (var row in Links) row.Refresh();
             RaisePropertyChanged(nameof(UsesWindow));
+            RefreshLibrary();
         }
 
         private void RebuildLinks() {

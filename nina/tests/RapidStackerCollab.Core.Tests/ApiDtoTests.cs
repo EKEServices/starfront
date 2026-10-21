@@ -42,6 +42,7 @@ public class ApiDtoTests
         ("TokenInfo", typeof(TokenInfo), Array.Empty<string>()),
         ("User", typeof(UserInfo), Array.Empty<string>()),
         ("Rig", typeof(Rig), Array.Empty<string>()),
+        ("RigOrientation", typeof(RigOrientation), Array.Empty<string>()),
         ("RigUpsertRequest", typeof(RigUpsertRequest), Array.Empty<string>()),
         ("RigPatchRequest", typeof(RigPatchRequest), Array.Empty<string>()),
         ("RigResponse", typeof(RigResponse), Array.Empty<string>()),
@@ -84,6 +85,14 @@ public class ApiDtoTests
         ("FrameResponse", typeof(FrameResponse), Array.Empty<string>()),
         ("FrameListResponse", typeof(FrameListResponse), Array.Empty<string>()),
         ("WithdrawResponse", typeof(WithdrawResponse), Array.Empty<string>()),
+        // Calibration library (contract 1.23.0).
+        ("LibraryFrameInitRequest", typeof(LibraryFrameInitRequest), Array.Empty<string>()),
+        ("LibraryFrameInitResponse", typeof(LibraryFrameInitResponse), Array.Empty<string>()),
+        ("LibraryFrameCompleteResponse", typeof(LibraryFrameCompleteResponse), Array.Empty<string>()),
+        ("LibraryFrame", typeof(LibraryFrame), Array.Empty<string>()),
+        ("LibraryMaster", typeof(LibraryMaster), Array.Empty<string>()),
+        ("LibraryResponse", typeof(LibraryResponse), Array.Empty<string>()),
+        ("AppliedMaster", typeof(AppliedMaster), Array.Empty<string>()),
         // Mosaic (contract 1.17.0). UpdateMosaicRequest, MosaicOperation and PanelSelector are the owner's: the plugin never sends them.
         ("Mosaic", typeof(Mosaic), Array.Empty<string>()),
         ("MosaicPanel", typeof(MosaicPanel), Array.Empty<string>()),

@@ -20,11 +20,14 @@ public static class FitsHeaderReader
         return Read(s);
     }
 
-    public static InitHeader Read(Stream stream)
+    public static InitHeader Read(Stream stream) => FromHeader(ReadCards(stream));
+
+    /// <summary>The primary header with all its cards, for a caller that needs a keyword the allow-list does not carry (<c>CCD-TEMP</c>).</summary>
+    public static FitsHeader ReadCards(Stream stream)
     {
         var header = FitsHeader.Read(stream) ?? throw new FitsFormatException("The file is empty.");
         if (!header.IsPrimary) throw new FitsFormatException("The file does not start with a primary HDU.");
-        return FromHeader(header);
+        return header;
     }
 
     public static InitHeader FromHeader(FitsHeader h)

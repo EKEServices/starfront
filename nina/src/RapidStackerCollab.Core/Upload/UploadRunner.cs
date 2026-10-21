@@ -5,6 +5,7 @@
 using System.Text;
 using RapidStackerCollab.Core.Api;
 using RapidStackerCollab.Core.Fits;
+using RapidStackerCollab.Core.Library;
 using RapidStackerCollab.Core.Util;
 
 namespace RapidStackerCollab.Core.Upload;
@@ -222,7 +223,8 @@ public sealed class UploadRunner
         if (!File.Exists(item.Path))
             return new Prepared(null, false, ("file_missing", "The file is no longer there: " + item.Path));
 
-        if (!(options.StripPredicate?.Invoke(item) ?? options.StripLocation))
+        // A library frame is always uploaded stripped, whatever the toggle says: it serves projects the user has not joined yet (README open point 104).
+        if (!LibraryRef.IsLibrary(item.ProjectRef) && !(options.StripPredicate?.Invoke(item) ?? options.StripLocation))
             return new Prepared(item.Path, false, null);
 
         var isXisf = XisfHeaderReader.IsXisf(item.Path);

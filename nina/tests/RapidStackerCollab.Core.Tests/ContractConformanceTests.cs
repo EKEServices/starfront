@@ -71,6 +71,14 @@ public class ContractConformanceTests
             () => c.RevokeOwnTokenAsync(),
             () => c.GetMosaicAsync("m31-lrgb"),
             () => c.PutClaimsAsync("m31-lrgb", new[] { "r1c1", "r2c3" }),
+            () => c.GetLibraryAsync("rig_9c1d4e7a02bb", 50, "cursor"),
+            () => c.InitLibraryFrameAsync("rig_9c1d4e7a02bb", new LibraryFrameInitRequest
+            {
+                Sha256 = new string('b', 64), Size = 40_000_000, Filename = "Dark_120s.fits", Stripped = true,
+                Header = new InitHeader { ImageTyp = "Dark Frame", ExpTime = 120, Gain = 100, Offset = 50, XBinning = 1, YBinning = 1, Instrume = "ZWO ASI2600MM Pro", SetTemp = -10, Naxis1 = 6248, Naxis2 = 4176, BitPix = 16 },
+            }),
+            () => c.CompleteLibraryFrameAsync("rig_9c1d4e7a02bb", "frm_01hzx8k3m9q2x5v8d1hn4t6wzc", new[] { new CompletedPart { PartNumber = 1, Etag = "\"abc\"" } }),
+            () => c.WithdrawLibraryFrameAsync("rig_9c1d4e7a02bb", "frm_01hzx8k3m9q2x5v8d1hn4t6wzc"),
         };
         foreach (var call in calls)
         {
@@ -107,6 +115,6 @@ public class ContractConformanceTests
             }
         }
         Assert.That(problems, Is.Empty, string.Join(Environment.NewLine, problems));
-        Assert.That(seen.Count, Is.EqualTo(21), "every method of IApiClient reached a distinct operation (NormalizeFilters is called twice, with and without a project; GetPanelsDocumentAsync reads a static file and is no operation)");
+        Assert.That(seen.Count, Is.EqualTo(25), "every method of IApiClient reached a distinct operation (NormalizeFilters is called twice, with and without a project; GetPanelsDocumentAsync reads a static file and is no operation)");
     }
 }
