@@ -4,6 +4,7 @@
 
 using System.Collections.Concurrent;
 using RapidStackerCollab.Core.Api;
+using RapidStackerCollab.Core.Library;
 using RapidStackerCollab.Core.Util;
 
 namespace RapidStackerCollab.Core.Upload;
@@ -63,6 +64,9 @@ public sealed class UploadEngine
         }
         if (digest.Size < 1)
             return Fail(digest.Sha256, "file_empty", "The file is empty.");
+        var libraryRig = LibraryRef.RigOf(request.ProjectRef);
+        if (LibraryRef.IsLibrary(request.ProjectRef) && (libraryRig is null || !request.Stripped))
+            return Fail(digest.Sha256, ApiCodes.StripRequired, "A calibration library frame is only uploaded with the observer location removed.");
 
         var sent = 0;
         var resumedAny = false;
@@ -70,15 +74,17 @@ public sealed class UploadEngine
         {
             // ---- init (idempotent: also the resume call) -----------------------------------------------------------
             progress?.Report(new UploadProgress(UploadStage.Initialising, digest.Sha256, null, 0, digest.Size, 0, 0));
-            var (init, initError) = await CallAsync(() => api.InitFrameAsync(request.ProjectRef, new FrameInitRequest
-            {
-                Sha256 = digest.Sha256,
-                Size = digest.Size,
-                Filename = request.Filename,
-                Header = request.Header,
-                RigHint = request.RigId is null ? null : new RigHint { RigId = request.RigId },
-                Stripped = request.Stripped,
-            }, ct), ct).ConfigureAwait(false);
+            var (init, initError) = libraryRig is not null
+                ? await CallAsync(() => InitLibraryAsync(libraryRig, request, digest, ct), ct).ConfigureAwait(false)
+                : await CallAsync(() => api.InitFrameAsync(request.ProjectRef, new FrameInitRequest
+                {
+                    Sha256 = digest.Sha256,
+                    Size = digest.Size,
+                    Filename = request.Filename,
+                    Header = request.Header,
+                    RigHint = request.RigId is null ? null : new RigHint { RigId = request.RigId },
+                    Stripped = request.Stripped,
+                }, ct), ct).ConfigureAwait(false);
             if (init is null) return Classify(initError!, digest.Sha256, null, sent);
 
             var up = init.Upload;
@@ -105,7 +111,9 @@ public sealed class UploadEngine
             // ---- complete -----------------------------------------------------------------------------------------------
             progress?.Report(new UploadProgress(UploadStage.Completing, digest.Sha256, init.FrameId, digest.Size, digest.Size, up.PartCount, up.PartCount));
             var etags = completed.OrderBy(kv => kv.Key).Select(kv => new CompletedPart { PartNumber = kv.Key, Etag = kv.Value }).ToList();
-            var (done, completeError) = await CallAsync(() => api.CompleteFrameAsync(request.ProjectRef, init.FrameId, etags, ct), ct).ConfigureAwait(false);
+            var (done, completeError) = libraryRig is not null
+                ? await CallAsync(() => CompleteLibraryAsync(libraryRig, init.FrameId, etags, ct), ct).ConfigureAwait(false)
+                : await CallAsync(() => api.CompleteFrameAsync(request.ProjectRef, init.FrameId, etags, ct), ct).ConfigureAwait(false);
             if (done is not null)
             {
                 progress?.Report(new UploadProgress(UploadStage.Done, digest.Sha256, init.FrameId, digest.Size, digest.Size, up.PartCount, up.PartCount));
@@ -245,6 +253,26 @@ public sealed class UploadEngine
     }
 
     // ---- API calls --------------------------------------------------------------------------------------------------
+
+    // The library routes answer their own shapes; the flow after init is the same, so they are folded into the project types.
+    private async Task<FrameInitResponse> InitLibraryAsync(string rigId, UploadRequest request, FileDigest digest, CancellationToken ct)
+    {
+        var r = await api.InitLibraryFrameAsync(rigId, new LibraryFrameInitRequest
+        {
+            Sha256 = digest.Sha256,
+            Size = digest.Size,
+            Filename = request.Filename,
+            Header = request.Header,
+            Stripped = true,
+        }, ct).ConfigureAwait(false);
+        return new FrameInitResponse { FrameId = r.FrameId, Status = r.Status, Resumed = r.Resumed, FrameType = r.FrameType, RigId = r.RigId, Upload = r.Upload };
+    }
+
+    private async Task<FrameCompleteResponse> CompleteLibraryAsync(string rigId, string frameId, IReadOnlyList<CompletedPart> etags, CancellationToken ct)
+    {
+        var r = await api.CompleteLibraryFrameAsync(rigId, frameId, etags, ct).ConfigureAwait(false);
+        return new FrameCompleteResponse { FrameId = r.FrameId, Status = r.Status, AlreadyComplete = r.AlreadyComplete };
+    }
 
     // Runs an API call; retries transient failures (no response, garbled body, 5xx) with jitter, up to MaxApiAttempts.
     // rate_limited and ingest_paused are NOT retried here: they carry a Retry-After the queue must honour.

@@ -17,12 +17,16 @@ namespace Starfront.Collab.Services.Stacking {
     /// the plugin it was before. With it on: the links learn their join codes
     /// from each check-in and join; every light the Starfront container
     /// saves is looked up by its target name, exactly as the ledger does, and
-    /// queued for its collaboration's stacking project; a runner sends the
-    /// queue when the policy allows, through a copy with the observer's
-    /// location removed; and the verdicts come back into the queue for the
-    /// dock to show. Turning the setting off stops all of it without a
-    /// restart. Nothing in here can stop a night: every entry N.I.N.A. calls
-    /// catches everything and logs.
+    /// queued for its collaboration's stacking project (unless it was pointed
+    /// at another target); flats follow the night's lights to their projects
+    /// (<see cref="StackingFlats"/>); darks, bias and dark flats go to the
+    /// telescope's calibration library, which a folder is also kept in step
+    /// with (<see cref="StackingLibrary"/>); a runner sends the queue when the
+    /// policy allows, through a copy with the observer's location removed;
+    /// and the verdicts come back into the queue for the dock to show.
+    /// Turning the setting off stops all of it without a restart. Nothing in
+    /// here can stop a night: every entry N.I.N.A. calls catches everything
+    /// and logs.
     /// </summary>
     public sealed class StackingUploader : IDisposable {
         private readonly object gate = new();
@@ -42,6 +46,8 @@ namespace Starfront.Collab.Services.Stacking {
         private BandwidthLimiter limiter;
         private UploadRunner runner;
         private StackingIntake intake;
+        private StackingFlats flats;
+        private StackingLibrary library;
         private VerdictPoller verdicts;
         private CameraStateConsumer cameraConsumer;
         private Channel<(SavedFrame Frame, StackingLink Link)> frames;
@@ -64,6 +70,9 @@ namespace Starfront.Collab.Services.Stacking {
 
         public StackingSignIn SignIn { get; }
         public StackingLinks Links { get; }
+
+        /// <summary>The calibration library's sync; null while the setting is off.</summary>
+        public StackingLibrary Library => library;
         public StackingJoiner Joiner { get; }
         public ImagingStateTracker Imaging { get; }
 
@@ -92,6 +101,18 @@ namespace Starfront.Collab.Services.Stacking {
             var q = queue;
             if (q == null) return new Dictionary<string, int>();
             try { return q.CountsByState(); } catch (Exception) { return new Dictionary<string, int>(); }
+        }
+
+        /// <summary>The dock's calibration line: flats waiting for their night's lights, and the library; empty when there is nothing to say.</summary>
+        public string CalibrationText() {
+            try {
+                var parts = new List<string>();
+                if (flats?.Waiting is int waiting && waiting > 0) parts.Add(waiting == 1 ? "1 flat waiting for its night's lights." : $"{waiting} flats waiting for their night's lights.");
+                if (library?.DockText() is string text && text.Length > 0) parts.Add(text);
+                return string.Join(" ", parts);
+            } catch (Exception) {
+                return "";
+            }
         }
 
         /// <summary>The API client, made on first use. Only called while the setting is on.</summary>
@@ -144,8 +165,16 @@ namespace Starfront.Collab.Services.Stacking {
                     runner.OnProgress = (item, progress) => { Current = (item, progress); RaiseChanged(); };
                     runner.OnItemFinished = OnItemFinished;
                     runner.OnAuthRequired = OnAuthRequired;
-                    intake = new StackingIntake(queue, settings);
+                    intake = new StackingIntake(queue, settings, TimeZoneInfo.Local);
                     intake.Enqueued += _ => runner.Wake();
+                    flats = new StackingFlats(queue, new FlatProjects(this), () => settings.StackingRigId, SystemClock.Instance, TimeZoneInfo.Local,
+                                              message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
+                    intake.Enqueued += flats.OnLightEnqueued;
+                    flats.Enqueued += _ => runner.Wake();
+                    library = new StackingLibrary(() => Api, queue, new LibrarySettings(settings), SystemClock.Instance, () => settings.StackingSignedIn, TempDirectory,
+                                                  message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
+                    library.Queued += runner.Wake;
+                    library.Changed += RaiseChanged;
                     verdicts = new VerdictPoller(() => Api, queue);
                     Imaging.Changed += runner.Wake;
                     frames = Channel.CreateUnbounded<(SavedFrame, StackingLink)>(new UnboundedChannelOptions { SingleReader = true });
@@ -159,6 +188,8 @@ namespace Starfront.Collab.Services.Stacking {
                     tasks.Add(Task.Run(() => RunnerLoopAsync(runner, token)));
                     tasks.Add(Task.Run(() => MaintenanceLoopAsync(token)));
                     tasks.Add(Task.Run(() => VerdictLoopAsync(token)));
+                    tasks.Add(Task.Run(() => FlatsLoopAsync(token)));
+                    tasks.Add(Task.Run(() => library.RunAsync(token)));
                     Running = true;
                 } catch (Exception ex) {
                     Logger.Error("Starfront stacking could not start; it is off until N.I.N.A. is restarted or the setting is turned off and on", ex);
@@ -192,6 +223,7 @@ namespace Starfront.Collab.Services.Stacking {
             try { session.Updated -= OnSessionUpdated; } catch (Exception) { }
             if (cameraConsumer != null) { try { host.Camera.RemoveConsumer(cameraConsumer); } catch (Exception) { } }
             if (runner != null) Imaging.Changed -= runner.Wake;
+            if (library != null) library.Changed -= RaiseChanged;
             try { frames?.Writer.TryComplete(); } catch (Exception) { }
             try { cts?.Cancel(); } catch (Exception) { }
             foreach (var task in tasks) {
@@ -200,7 +232,7 @@ namespace Starfront.Collab.Services.Stacking {
             tasks.Clear();
             try { queue?.Dispose(); } catch (Exception) { }
             try { cts?.Dispose(); } catch (Exception) { }
-            cts = null; queue = null; limiter = null; runner = null; intake = null; verdicts = null; cameraConsumer = null; frames = null;
+            cts = null; queue = null; limiter = null; runner = null; intake = null; flats = null; library = null; verdicts = null; cameraConsumer = null; frames = null;
             Current = null;
             DropClients();
         }
@@ -217,9 +249,12 @@ namespace Starfront.Collab.Services.Stacking {
         /// Every saved image, on a thread-pool thread after the file is at its
         /// final path. A light is matched to its collaboration by the target
         /// name N.I.N.A. stamped, exactly as the ledger does it, and posted to
-        /// the intake; a calibration frame, when asked for, goes to the
-        /// project of the last light sent, calibration having no target of
-        /// its own. Cheap, and never throws.
+        /// the intake; a light of anything else is posted too while flats are
+        /// sent, only so its night is remembered (that night's flats are its
+        /// target's, not a collaboration's). A calibration frame is posted
+        /// with the link of the last light sent, calibration having no target
+        /// of its own; the intake sends it to the flat router, the library or
+        /// that project. Cheap, and never throws.
         /// </summary>
         private void OnImageSaved(object sender, ImageSavedEventArgs args) {
             try {
@@ -230,22 +265,17 @@ namespace Starfront.Collab.Services.Stacking {
                 StackingLink link;
                 if (type == "LIGHT") {
                     var context = reporter.Lookup(args.MetaData?.Target?.Name);
-                    if (context == null) return;                 // not shot for a collaboration
-                    link = Links.Lookup(context.ProjectId);
+                    link = context == null ? null : Links.Lookup(context.ProjectId);
+                    if (context != null && (link == null || !link.Feeds) && NoteOnce(context.ProjectId)) {
+                        Logger.Info($"Starfront stacking: {context.ProjectName} is not linked to a stacking project"
+                                    + (link == null ? "" : $" ({link.Describe()})") + "; its lights stay here");
+                    }
                     if (link == null || !link.Feeds) {
-                        if (NoteOnce(context.ProjectId)) {
-                            Logger.Info($"Starfront stacking: {context.ProjectName} is not linked to a stacking project"
-                                        + (link == null ? "" : $" ({link.Describe()})") + "; its lights stay here");
-                        }
-                        return;
+                        if (!settings.StackingUploadFlats) return;   // nothing would read its night
+                        link = null;
                     }
                 } else {
-                    if (!settings.StackingIncludeCalibration) return;
                     link = Links.Lookup(reporter.LastProject);
-                    if (link == null || !link.Feeds) {
-                        if (NoteOnce("calibration")) Logger.Info("Starfront stacking: a calibration frame was saved before any light of a linked collaboration; it stays here");
-                        return;
-                    }
                 }
                 var frame = new SavedFrame(path, args.Filter, args.Duration, args.IsBayered, args.FileType.ToString());
                 frames?.Writer.TryWrite((frame, link));
@@ -280,6 +310,7 @@ namespace Starfront.Collab.Services.Stacking {
                 runner?.ClearAuthRequired();
                 _ = ReconcileAsync();
             }
+            library?.Wake();
             runner?.Wake();
             RaiseChanged();
         }
@@ -340,12 +371,23 @@ namespace Starfront.Collab.Services.Stacking {
                         try {
                             var current = intake;
                             if (current == null) return;
-                            var decision = current.Evaluate(next.Frame.Path, next.Frame.Filter, next.Link, settings.StackingIncludeCalibration);
-                            if (decision.Enqueue) {
-                                var added = current.Enqueue(next.Frame.Path, decision, next.Link);
-                                if (added?.Added == true) Logger.Info($"Starfront stacking: {Path.GetFileName(next.Frame.Path)} {decision.Reason}");
-                            } else {
-                                Logger.Info($"Starfront stacking: not sending {Path.GetFileName(next.Frame.Path)}: {decision.Reason}");
+                            var name = Path.GetFileName(next.Frame.Path);
+                            var decision = current.Evaluate(next.Frame.Path, next.Frame.Filter, next.Link, Options());
+                            switch (decision.Route) {
+                                case IntakeRoute.Project:
+                                    if (current.Enqueue(next.Frame.Path, decision, next.Link)?.Added == true) Logger.Info($"Starfront stacking: {name} {decision.Reason}");
+                                    break;
+                                case IntakeRoute.Library:
+                                    if (current.EnqueueLibrary(next.Frame.Path, decision)?.Added == true) Logger.Info($"Starfront stacking: {name} {decision.Reason}");
+                                    break;
+                                case IntakeRoute.Flat:
+                                    flats?.OnFlat(next.Frame.Path, decision.Header, immediate: false);
+                                    break;
+                                default:
+                                    current.RecordOtherTarget(next.Frame.Path, decision);
+                                    if (decision.Quiet) Logger.Debug($"Starfront stacking: not sending {name}: {decision.Reason}");
+                                    else Logger.Info($"Starfront stacking: not sending {name}: {decision.Reason}");
+                                    break;
                             }
                         } catch (Exception ex) {
                             Logger.Error("Starfront stacking: a saved frame could not be queued", ex);
@@ -353,6 +395,32 @@ namespace Starfront.Collab.Services.Stacking {
                     }
                 }
             } catch (OperationCanceledException) {
+            }
+        }
+
+        /// <summary>The switches the intake follows; the library needs the rig.</summary>
+        private IntakeOptions Options() =>
+            new(settings.StackingUploadFlats, settings.StackingLibraryLive && settings.StackingRigId.Length > 0, settings.StackingIncludeCalibration);
+
+        /// <summary>
+        /// Once a minute: flats whose wait for lights is over take the
+        /// fallbacks. The cadence is real time; the clock only says which
+        /// flats are due.
+        /// </summary>
+        private async Task FlatsLoopAsync(CancellationToken ct) {
+            while (!ct.IsCancellationRequested) {
+                try {
+                    if (flats?.Tick(DateTimeOffset.Now) > 0) {
+                        runner?.Wake();
+                        RaiseChanged();
+                    }
+                    await Task.Delay(TimeSpan.FromMinutes(1), ct).ConfigureAwait(false);
+                } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+                    return;
+                } catch (Exception ex) {
+                    Logger.Error("Starfront stacking: the held flats could not be looked at", ex);
+                    try { await Task.Delay(TimeSpan.FromMinutes(1), ct).ConfigureAwait(false); } catch (OperationCanceledException) { return; }
+                }
             }
         }
 
@@ -421,6 +489,13 @@ namespace Starfront.Collab.Services.Stacking {
                         // New connections for a new server: the running parts hold the old ones, so they go round.
                         Task.Run(() => { Stop(); Apply(); });
                         break;
+                    case nameof(StarfrontSettings.StackingRigId):
+                    case nameof(StarfrontSettings.StackingLibraryFolder):
+                    case nameof(StarfrontSettings.StackingLibraryPreferRaw):
+                    case nameof(StarfrontSettings.StackingLibrarySyncHours):
+                        library?.SettingsChanged();
+                        RaiseChanged();
+                        break;
                     case nameof(StarfrontSettings.StackingBandwidthKBps):
                         limiter?.SetLimit(settings.StackingBandwidthKBps);
                         runner?.Wake();
@@ -438,6 +513,40 @@ namespace Starfront.Collab.Services.Stacking {
             } catch (Exception ex) {
                 Logger.Error("Starfront stacking: a setting change could not be applied", ex);
             }
+        }
+
+        // -- what the flat router and the library read ------------------------------
+
+        /// <summary>The links and the ledger, as the flat router asks about them.</summary>
+        private sealed class FlatProjects : IFlatProjects {
+            private readonly StackingUploader owner;
+
+            public FlatProjects(StackingUploader owner) => this.owner = owner;
+
+            public string Eligible(string collabProjectId, string rawFilter) {
+                var link = owner.Links.ByCollabProject(collabProjectId);
+                return link != null && link.Feeds && link.TakesCalibration && !link.Skips(rawFilter) ? link.CollabName : null;
+            }
+
+            public string ProjectOfTarget(string objectName) {
+                if (string.IsNullOrWhiteSpace(objectName)) return null;
+                var context = owner.reporter.Lookup(objectName.Trim());
+                return context == null ? null : owner.Links.Lookup(context.ProjectId)?.CollabProjectId;
+            }
+
+            public string LastProject => owner.Links.Lookup(owner.reporter.LastProject)?.CollabProjectId;
+        }
+
+        /// <summary>The settings, as the library sync reads them.</summary>
+        private sealed class LibrarySettings : ILibrarySettings {
+            private readonly StarfrontSettings settings;
+
+            public LibrarySettings(StarfrontSettings settings) => this.settings = settings;
+
+            public string RigId => settings.StackingRigId;
+            public string LibraryFolder => settings.StackingLibraryFolder;
+            public int LibrarySyncHours => settings.StackingLibrarySyncHours;
+            public bool LibraryPreferRaw => settings.StackingLibraryPreferRaw;
         }
 
         private void RaiseChanged() {

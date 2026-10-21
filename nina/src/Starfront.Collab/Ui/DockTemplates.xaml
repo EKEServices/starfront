@@ -57,6 +57,7 @@
                     <TextBlock Opacity="0.85" Text="{Binding CurrentText}" TextWrapping="Wrap" Visibility="{Binding CurrentText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                     <TextBlock Opacity="0.7" Text="{Binding ReasonText}" TextWrapping="Wrap" Visibility="{Binding ReasonText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                     <TextBlock Opacity="0.7" Text="{Binding LastText}" TextWrapping="Wrap" Visibility="{Binding LastText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
+                    <TextBlock Opacity="0.7" Text="{Binding CalibrationText}" TextWrapping="Wrap" Visibility="{Binding CalibrationText, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                     <TextBlock Margin="0,2,0,0" FontWeight="SemiBold" Text="{Binding Hint}" TextWrapping="Wrap" Visibility="{Binding Hint, Converter={StaticResource Starfront_Dock_ShowWhenSomething}}" />
                     <StackPanel Margin="0,4,0,0" Orientation="Horizontal">
                         <Button Padding="8,1" Command="{Binding TogglePauseCommand}" Content="{Binding PauseLabel}" />

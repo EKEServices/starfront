@@ -50,6 +50,7 @@ public sealed class FakeCollabServer : IAsyncDisposable
 {
     public const string ProjectId = "prj_7k3m9q2x5v8d1hn4t6wz";
     public const string Slug = "horsehead-sho";
+    public const string RigId = "rig_9c1d4e7a02bb";
     public const string UserCode = "K7QM-3XWD";
     public static readonly string DeviceCode = "rscd_" + new string('d', 64);
     public static readonly string Token = "rscu_" + new string('a', 64);
@@ -308,6 +309,9 @@ public sealed class FakeCollabServer : IAsyncDisposable
                 return;
             case "rigs" when m == "GET": await WriteOkAsync(ctx, new JsonObject { ["rigs"] = new JsonArray(RigJson()) }); return;
             case "rigs" when m == "POST": await WriteOkAsync(ctx, new JsonObject { ["rig"] = RigJson(json) }); return;
+            case var r when r.StartsWith("rigs/", StringComparison.Ordinal) && r.Contains("/library", StringComparison.Ordinal):
+                await LibraryRouteAsync(ctx, rec, r, json);
+                return;
             case var r when r.StartsWith("rigs/", StringComparison.Ordinal) && m == "PATCH": await WriteOkAsync(ctx, new JsonObject { ["rig"] = RigJson(json) }); return;
             case "filters/normalize": await NormalizeAsync(ctx, rec.Query); return;
             case "projects" when m == "GET": await WriteOkAsync(ctx, new JsonObject { ["projects"] = new JsonArray(MineItemJson()), ["directory_enabled"] = false, ["next_cursor"] = null }); return;
@@ -409,20 +413,30 @@ public sealed class FakeCollabServer : IAsyncDisposable
         return WriteOkAsync(ctx, new JsonObject { ["results"] = results, ["aliases_version"] = "fake-1" });
     }
 
-    private static JsonObject RigJson(JsonObject? req = null) => new()
+    /// <summary>The fake rig's camera (<c>GET /rigs</c>); a library frame whose <c>INSTRUME</c> differs is refused at <c>library/frames/init</c>.</summary>
+    public string RigCamera { get; set; } = "ASI2600MM";
+
+    /// <summary>The fake rig's sensor size; null reports and checks none.</summary>
+    public int? RigWidthPx { get; set; } = 6248;
+
+    public int? RigHeightPx { get; set; } = 4176;
+
+    public int RigBinning { get; set; } = 1;
+
+    private JsonObject RigJson(JsonObject? req = null) => new()
     {
-        ["rig_id"] = "rig_9c1d4e7a02bb",
+        ["rig_id"] = RigId,
         ["name"] = req?["name"]?.GetValue<string>() ?? "Main rig",
-        ["camera"] = req?["camera"]?.GetValue<string>() ?? "ASI2600MM",
+        ["camera"] = req?["camera"]?.GetValue<string>() ?? RigCamera,
         ["telescope"] = req?["telescope"]?.GetValue<string>() ?? "RedCat 51",
         ["focal_length_mm"] = 250,
         ["pixel_size_um"] = 3.76,
-        ["binning"] = 1,
+        ["binning"] = RigBinning,
         ["osc"] = false,
         ["bayer_pattern"] = null,
         ["pixel_scale_arcsec"] = 3.1,
-        ["width_px"] = 6248,
-        ["height_px"] = 4176,
+        ["width_px"] = RigWidthPx,
+        ["height_px"] = RigHeightPx,
         ["confirmed"] = true,
         ["frame_count"] = 0,
         ["last_frame_at"] = null,
@@ -516,13 +530,13 @@ public sealed class FakeCollabServer : IAsyncDisposable
 
     private static readonly HashSet<string> AllowedHeader = new(InitHeader.AllowedKeys);
 
-    private FakeFrame NewFrame(string sha, long size, string filename, JsonObject header, bool stripped, int partCount, long partSize)
+    private FakeFrame NewFrame(string sha, long size, string filename, JsonObject header, bool stripped, int partCount, long partSize, string? owner = null)
     {
         var n = Interlocked.Increment(ref frameCounter);
         var id = "frm_" + IdPrefix + n.ToString("D6");
         var frame = new FakeFrame
         {
-            FrameId = id, ProjectId = ProjectId, Sha256 = sha, Size = size, Filename = filename, UploadId = "upl" + n,
+            FrameId = id, ProjectId = owner ?? ProjectId, Sha256 = sha, Size = size, Filename = filename, UploadId = "upl" + n,
             Header = header, Stripped = stripped, PartCount = partCount, PartSize = partSize,
         };
         framesById[id] = frame;
@@ -561,7 +575,7 @@ public sealed class FakeCollabServer : IAsyncDisposable
         string failureCode = "";
         lock (gate)
         {
-            var existing = framesById.Values.FirstOrDefault(f => f.Sha256 == sha);
+            var existing = framesById.Values.FirstOrDefault(f => f.ProjectId == ProjectId && f.Sha256 == sha);
             if (existing is not null && existing.Status != "uploading")
             {
                 failureStatus = 409;
@@ -713,7 +727,7 @@ public sealed class FakeCollabServer : IAsyncDisposable
     private async Task FrameListAsync(HttpContext ctx)
     {
         JsonArray arr;
-        lock (gate) arr = new JsonArray(framesById.Values.Select(f => (JsonNode)FrameJson(f)).ToArray());
+        lock (gate) arr = new JsonArray(framesById.Values.Where(f => f.ProjectId == ProjectId).Select(f => (JsonNode)FrameJson(f)).ToArray());
         await WriteOkAsync(ctx, new JsonObject { ["frames"] = arr, ["next_cursor"] = null });
     }
 
@@ -730,6 +744,228 @@ public sealed class FakeCollabServer : IAsyncDisposable
         FakeFrame? f;
         lock (gate) framesById.TryGetValue(frameId, out f);
         if (f is null) { await WriteErrorAsync(ctx, 400, "not_found", "No such frame."); return; }
+        f.Status = "withdrawn";
+        await WriteOkAsync(ctx, new JsonObject { ["frame_id"] = frameId, ["status"] = "withdrawn", ["raw_delete_after"] = "2026-10-20T12:00:00.000Z" });
+    }
+
+    // ---- Calibration library (contract 1.23.0) -----------------------------------------------------------------
+
+    /// <summary>The per-user library quota the fake enforces (defaults of the contract: 30 GiB and 1 500 frames).</summary>
+    public long LibraryMaxBytes { get; set; } = 30L << 30;
+
+    public long LibraryMaxFrames { get; set; } = 1500;
+
+    /// <summary>The most frames one inventory page returns, whatever <c>limit</c> says; small values exercise <c>next_cursor</c>.</summary>
+    public int LibraryPageCap { get; set; } = int.MaxValue;
+
+    /// <summary>Problems the fake reports for a frame once "built": sha256 -> problem code (<c>usable</c> becomes false).</summary>
+    public Dictionary<string, string> LibraryFrameProblems { get; } = new();
+
+    public IReadOnlyList<FakeFrame> LibraryFrames
+    {
+        get { lock (gate) return framesById.Values.Where(f => f.ProjectId.StartsWith("lib:", StringComparison.Ordinal)).ToList(); }
+    }
+
+    private static string LibraryTypeOf(string? imageTyp)
+    {
+        var key = new string((imageTyp ?? "").Where(char.IsLetter).ToArray()).ToLowerInvariant().Replace("frame", "");
+        return key switch
+        {
+            "dark" => "dark", "bias" or "offset" => "bias", "darkflat" or "flatdark" => "dark_flat",
+            "masterdark" => "master_dark", "masterbias" or "masteroffset" => "master_bias", "masterdarkflat" => "master_dark_flat",
+            _ => "",
+        };
+    }
+
+    private async Task LibraryRouteAsync(HttpContext ctx, RecordedRequest rec, string route, JsonObject? body)
+    {
+        var seg = route.Split('/'); // rigs/{rig}/library[/frames/init | /frames/{id}/complete | /frames/{id}/withdraw]
+        if (seg.Length < 3 || seg[2] != "library") { await WriteErrorAsync(ctx, 400, "invalid_request", "fake: no such library route"); return; }
+        if (seg[1] != RigId) { await WriteErrorAsync(ctx, 400, "not_found", "No such rig."); return; }
+        var m = rec.Method;
+        if (seg.Length == 3 && m == "GET") { await LibraryGetAsync(ctx, rec.Query); return; }
+        if (seg.Length == 5 && seg[3] == "frames" && seg[4] == "init" && m == "POST") { await LibraryInitAsync(ctx, body!); return; }
+        if (seg.Length == 6 && seg[3] == "frames" && seg[5] == "complete" && m == "POST") { await LibraryCompleteAsync(ctx, seg[4], body!); return; }
+        if (seg.Length == 6 && seg[3] == "frames" && seg[5] == "withdraw" && m == "POST") { await LibraryWithdrawAsync(ctx, seg[4]); return; }
+        await WriteErrorAsync(ctx, 400, "invalid_request", $"fake: no route for {m} {route}");
+    }
+
+    private (long Bytes, long Frames) LibraryUsageNow()
+    {
+        lock (gate)
+        {
+            var ready = framesById.Values.Where(f => f.ProjectId.StartsWith("lib:", StringComparison.Ordinal) && f.Status == "ready").ToList();
+            return (ready.Sum(f => f.Size), ready.Count);
+        }
+    }
+
+    private async Task LibraryGetAsync(HttpContext ctx, string query)
+    {
+        var limit = 50;
+        string? cursor = null;
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            if (kv[0] == "limit" && int.TryParse(kv[1], out var l)) limit = l;
+            if (kv[0] == "cursor") cursor = Uri.UnescapeDataString(kv[1]);
+        }
+        // The real route validates `limit` against the contract (1-100) and refuses anything else; the fake does the same, so a client
+        // that asks for more fails here and not only against the real server (plugin 0.2.0.0 asked for 200).
+        if (limit < 1 || limit > 100)
+        {
+            await WriteErrorAsync(ctx, 400, "invalid_request", "Invalid parameter 'limit': must be at most 100.");
+            return;
+        }
+        limit = Math.Min(limit, LibraryPageCap);
+        List<FakeFrame> all;
+        lock (gate) all = framesById.Values.Where(f => f.ProjectId.StartsWith("lib:", StringComparison.Ordinal) && f.Status != "withdrawn").Reverse().ToList();
+        var start = cursor is null ? 0 : int.Parse(cursor);
+        var page = all.Skip(start).Take(limit).ToList();
+        var (bytes, frames) = LibraryUsageNow();
+        var arr = new JsonArray(page.Select(f =>
+        {
+            LibraryFrameProblems.TryGetValue(f.Sha256, out var problem);
+            var exp = f.Header["EXPTIME"]?.GetValue<double>();
+            return (JsonNode)new JsonObject
+            {
+                ["frame_id"] = f.FrameId, ["frame_type"] = LibraryTypeOf(f.Header["IMAGETYP"]?.GetValue<string>()), ["status"] = f.Status, ["sha256"] = f.Sha256,
+                ["size"] = f.Size, ["filename"] = f.Filename, ["exposure_s"] = exp, ["gain"] = f.Header["GAIN"]?.GetValue<double>(), ["offset"] = f.Header["OFFSET"]?.GetValue<double>(),
+                ["binning"] = f.Header["XBINNING"]?.GetValue<int>(), ["set_temp_c"] = f.Header["SET-TEMP"]?.GetValue<double>(), ["date_obs"] = f.Header["DATE-OBS"]?.GetValue<string>(),
+                ["uploaded_at"] = "2026-10-13T12:00:00.000Z", ["usable"] = problem is null ? null : false, ["problem"] = problem,
+            };
+        }).ToArray());
+        await WriteOkAsync(ctx, new JsonObject
+        {
+            ["rig_id"] = RigId,
+            ["usage"] = new JsonObject { ["bytes_used"] = bytes, ["frames_used"] = frames, ["max_bytes"] = LibraryMaxBytes, ["max_frames"] = LibraryMaxFrames },
+            ["frames"] = arr, ["masters"] = new JsonArray(), ["built_at"] = null,
+            ["next_cursor"] = start + page.Count < all.Count ? (start + page.Count).ToString() : null,
+        });
+    }
+
+    private async Task LibraryInitAsync(HttpContext ctx, JsonObject body)
+    {
+        var header = body["header"]?.AsObject() ?? new JsonObject();
+        var bad = header.Select(kv => kv.Key).Where(k => !AllowedHeader.Contains(k)).ToList();
+        if (bad.Count > 0)
+        {
+            await WriteErrorAsync(ctx, 400, "header_rejected", "Header contains keys outside the allow-list.");
+            return;
+        }
+        if (body["stripped"]?.GetValue<bool>() != true)
+        {
+            await WriteErrorAsync(ctx, 400, "strip_required", "A library frame is always uploaded stripped.");
+            return;
+        }
+        var type = LibraryTypeOf(header["IMAGETYP"]?.GetValue<string>());
+        if (type == "") { await WriteErrorAsync(ctx, 400, "unsupported_frame_type", "Only bias, dark and dark flat frames go in the library."); return; }
+        var camera = header["INSTRUME"]?.GetValue<string>();
+        if (camera is null || !string.Equals(camera.Trim(), RigCamera.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteErrorAsync(ctx, 400, "validation_failed", "The header does not name the rig's camera.");
+            return;
+        }
+        if ((header["XBINNING"]?.GetValue<int>() ?? 1) != RigBinning) { await WriteErrorAsync(ctx, 400, "validation_failed", "Binning differs from the rig's."); return; }
+        if (RigWidthPx is { } rw && RigHeightPx is { } rh && (header["NAXIS1"]?.GetValue<int>() != rw || header["NAXIS2"]?.GetValue<int>() != rh))
+        {
+            await WriteErrorAsync(ctx, 400, "validation_failed", "Size differs from the rig's.");
+            return;
+        }
+        var sha = body["sha256"]!.GetValue<string>();
+        var size = body["size"]!.GetValue<long>();
+        var filename = body["filename"]!.GetValue<string>();
+
+        FakeFrame? frame = null;
+        var resumed = false;
+        string? failCode = null;
+        int failStatus = 0;
+        string? quota = null;
+        lock (gate)
+        {
+            var existing = framesById.Values.FirstOrDefault(f => f.ProjectId == "lib:" + RigId && f.Sha256 == sha && f.Status != "withdrawn");
+            if (existing is { Status: "ready" }) { failCode = "duplicate"; failStatus = 409; }
+            else if (existing is not null) { frame = existing; resumed = true; }
+            else
+            {
+                var (bytes, frames) = LibraryUsageNow();
+                if (bytes + size > LibraryMaxBytes) { failCode = "quota_exceeded"; failStatus = 429; quota = "library_bytes"; }
+                else if (frames + 1 > LibraryMaxFrames) { failCode = "quota_exceeded"; failStatus = 429; quota = "library_frames"; }
+                else
+                {
+                    var partCount = (int)Math.Max(1, (size + PartSize - 1) / PartSize);
+                    frame = NewFrame(sha, size, filename, header, true, partCount, PartSize, "lib:" + RigId);
+                }
+            }
+        }
+        if (frame is null)
+        {
+            await WriteErrorAsync(ctx, failStatus, failCode!, failCode!, extra: quota is null ? null : new JsonObject { ["quota"] = quota });
+            return;
+        }
+        JsonArray completed, urls;
+        lock (gate)
+        {
+            var done = parts[frame.UploadId];
+            completed = new JsonArray(done.OrderBy(kv => kv.Key).Select(kv => (JsonNode)new JsonObject { ["part_number"] = kv.Key, ["etag"] = kv.Value.Etag }).ToArray());
+            urls = new JsonArray();
+            for (var p = 1; p <= frame.PartCount; p++)
+            {
+                if (done.ContainsKey(p)) continue;
+                var partSize = p < frame.PartCount ? frame.PartSize : frame.Size - frame.PartSize * (frame.PartCount - 1);
+                urls.Add(new JsonObject { ["part_number"] = p, ["url"] = new Uri(BaseAddress, $"s3/{frame.UploadId}/{p}?sig=fake").AbsoluteUri, ["size"] = partSize });
+            }
+        }
+        await WriteOkAsync(ctx, new JsonObject
+        {
+            ["frame_id"] = frame.FrameId, ["status"] = "uploading", ["resumed"] = resumed, ["frame_type"] = type, ["rig_id"] = RigId,
+            ["upload"] = new JsonObject
+            {
+                ["type"] = "multipart", ["upload_id"] = frame.UploadId, ["part_size"] = frame.PartSize, ["part_count"] = frame.PartCount,
+                ["part_urls"] = urls, ["completed_parts"] = completed, ["expires_at"] = "2026-10-13T13:00:00.000Z",
+            },
+        });
+    }
+
+    private async Task LibraryCompleteAsync(HttpContext ctx, string frameId, JsonObject body)
+    {
+        FakeFrame? frame;
+        lock (gate) framesById.TryGetValue(frameId, out frame);
+        if (frame is null || !frame.ProjectId.StartsWith("lib:", StringComparison.Ordinal)) { await WriteErrorAsync(ctx, 400, "not_found", "No such library frame."); return; }
+        var sent = body["etags"]!.AsArray().ToDictionary(n => n!["part_number"]!.GetValue<int>(), n => n!["etag"]!.GetValue<string>());
+        List<int> missing;
+        var already = false;
+        var sizeMismatch = false;
+        var overQuota = false;
+        lock (gate)
+        {
+            already = frame.Status == "ready";
+            var have = parts[frame.UploadId];
+            missing = Enumerable.Range(1, frame.PartCount).Where(p => !have.ContainsKey(p) || !sent.TryGetValue(p, out var e) || e != have[p].Etag).ToList();
+            if (!already && missing.Count == 0)
+            {
+                var total = have.Values.Sum(v => (long)v.Data.Length);
+                var (bytes, frames) = LibraryUsageNow();
+                if (total != frame.Size) { sizeMismatch = true; parts[frame.UploadId] = new(); }
+                else if (bytes + total > LibraryMaxBytes || frames + 1 > LibraryMaxFrames) overQuota = true;
+                else
+                {
+                    frame.Object = have.OrderBy(kv => kv.Key).SelectMany(kv => kv.Value.Data).ToArray();
+                    frame.Status = "ready";
+                }
+            }
+        }
+        if (already) { await WriteOkAsync(ctx, new JsonObject { ["frame_id"] = frameId, ["status"] = "ready", ["already_complete"] = true }); return; }
+        if (missing.Count > 0) { await WriteErrorAsync(ctx, 409, "upload_incomplete", "Parts are missing.", extra: new JsonObject { ["outstanding_parts"] = new JsonArray(missing.Select(p => (JsonNode)p).ToArray()) }); return; }
+        if (sizeMismatch) { await WriteErrorAsync(ctx, 409, "size_mismatch", "Size differs; start again."); return; }
+        if (overQuota) { await WriteErrorAsync(ctx, 429, "quota_exceeded", "The library is full.", extra: new JsonObject { ["quota"] = "library_bytes" }); return; }
+        await WriteOkAsync(ctx, new JsonObject { ["frame_id"] = frameId, ["status"] = "ready", ["already_complete"] = false });
+    }
+
+    private async Task LibraryWithdrawAsync(HttpContext ctx, string frameId)
+    {
+        FakeFrame? f;
+        lock (gate) framesById.TryGetValue(frameId, out f);
+        if (f is null || !f.ProjectId.StartsWith("lib:", StringComparison.Ordinal)) { await WriteErrorAsync(ctx, 400, "not_found", "No such library frame."); return; }
         f.Status = "withdrawn";
         await WriteOkAsync(ctx, new JsonObject { ["frame_id"] = frameId, ["status"] = "withdrawn", ["raw_delete_after"] = "2026-10-20T12:00:00.000Z" });
     }

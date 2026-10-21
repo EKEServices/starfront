@@ -31,7 +31,7 @@ public sealed class ApiException : Exception
 
     public IReadOnlyList<FieldError> Errors { get; init; } = Array.Empty<FieldError>();
 
-    /// <summary><c>quota_exceeded</c>: <c>contributor_bytes</c>, <c>contributor_frames</c> or <c>project_bytes</c>.</summary>
+    /// <summary><c>quota_exceeded</c>: <c>contributor_bytes</c>, <c>contributor_frames</c>, <c>project_bytes</c>, <c>library_bytes</c> or <c>library_frames</c>.</summary>
     public string? Quota { get; init; }
 
     /// <summary><c>token_scope</c>: the scope the route needs.</summary>

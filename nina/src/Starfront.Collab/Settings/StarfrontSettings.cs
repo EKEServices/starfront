@@ -86,6 +86,10 @@ namespace Starfront.Collab.Settings {
             public int StackingBandwidthKBps { get; set; }
             public bool StackingStripLocation { get; set; } = true;
             public bool StackingIncludeCalibration { get; set; }
+            public bool StackingUploadFlats { get; set; } = true;
+            public bool StackingLibraryLive { get; set; } = true;
+            public bool StackingLibraryPreferRaw { get; set; }
+            public int StackingLibrarySyncHours { get; set; } = 24;
             public int StackingTempRetentionHours { get; set; } = 24;
             public int StackingHistoryDays { get; set; } = 30;
             public bool StackingPaused { get; set; }
@@ -325,10 +329,48 @@ namespace Starfront.Collab.Settings {
             set { global.StackingStripLocation = value; Save(); RaisePropertyChanged(); }
         }
 
-        /// <summary>Also send darks, flats, bias and dark flats, to the project of the last light sent. Default off.</summary>
+        /// <summary>
+        /// Also send darks, bias and dark flats to the project of the last
+        /// light sent, when they do not go to the rig's calibration library
+        /// (<see cref="StackingLibraryLive"/>). Default off. Flats follow
+        /// <see cref="StackingUploadFlats"/>.
+        /// </summary>
         public bool StackingIncludeCalibration {
             get => global.StackingIncludeCalibration;
             set { global.StackingIncludeCalibration = value; Save(); RaisePropertyChanged(); }
+        }
+
+        /// <summary>
+        /// Send flats, each to the stacking projects that got this telescope's
+        /// lights of the same filter that night (an evening flat waits for
+        /// them). Default on: a light without its flat is stacked uncorrected.
+        /// </summary>
+        public bool StackingUploadFlats {
+            get => global.StackingUploadFlats;
+            set { global.StackingUploadFlats = value; Save(); RaisePropertyChanged(); }
+        }
+
+        /// <summary>
+        /// The darks, bias and dark flats N.I.N.A. saves go to this
+        /// telescope's calibration library on Rapid Stacker Collab, which
+        /// serves every project, instead of to one project. Default on; needs
+        /// the rig, which the first join makes.
+        /// </summary>
+        public bool StackingLibraryLive {
+            get => global.StackingLibraryLive;
+            set { global.StackingLibraryLive = value; Save(); RaisePropertyChanged(); }
+        }
+
+        /// <summary>Send a folder's raw calibration frames rather than its masters, for masters made by tools that already subtract the bias. Default off.</summary>
+        public bool StackingLibraryPreferRaw {
+            get => global.StackingLibraryPreferRaw;
+            set { global.StackingLibraryPreferRaw = value; Save(); RaisePropertyChanged(); }
+        }
+
+        /// <summary>Hours between two syncs of the calibration folder, 1 to 720.</summary>
+        public int StackingLibrarySyncHours {
+            get => Math.Max(1, Math.Min(720, global.StackingLibrarySyncHours));
+            set { global.StackingLibrarySyncHours = Math.Max(1, Math.Min(720, value)); Save(); RaisePropertyChanged(); }
         }
 
         /// <summary>Leftover temporary copies older than this many hours are deleted, 1 to 720.</summary>
@@ -359,6 +401,16 @@ namespace Starfront.Collab.Settings {
         public string StackingRigId {
             get => options.GetValueString(nameof(StackingRigId), "");
             set { options.SetValueString(nameof(StackingRigId), (value ?? "").Trim()); RaisePropertyChanged(); }
+        }
+
+        /// <summary>
+        /// The folder of bias, dark and dark-flat frames (and their masters)
+        /// kept in step with this telescope's calibration library; blank for
+        /// none. Per profile, like the rig it belongs to.
+        /// </summary>
+        public string StackingLibraryFolder {
+            get => options.GetValueString(nameof(StackingLibraryFolder), "");
+            set { options.SetValueString(nameof(StackingLibraryFolder), (value ?? "").Trim()); RaisePropertyChanged(); }
         }
 
         /// <summary>What this telescope is called on the chart: the profile's name unless typed over.</summary>

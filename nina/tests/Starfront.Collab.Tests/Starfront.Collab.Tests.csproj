@@ -11,6 +11,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/RapidStackerCollab.Core/RapidStackerCollab.Core.csproj" />
+    <!-- The upload engine's own fakes: the fake Rapid Stacker Collab server, the clock and the FITS builder. -->
+    <ProjectReference Include="../RapidStackerCollab.Core.Tests/RapidStackerCollab.Core.Tests.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The plugin itself is a WPF library that only runs inside N.I.N.A.; the
@@ -19,5 +21,8 @@
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/BrowserUrls.cs" Link="Linked/BrowserUrls.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/JoinCodes.cs" Link="Linked/JoinCodes.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingMapping.cs" Link="Linked/StackingMapping.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingFlats.cs" Link="Linked/StackingFlats.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingLibrary.cs" Link="Linked/StackingLibrary.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingTargets.cs" Link="Linked/StackingTargets.cs" />
   </ItemGroup>
 </Project>

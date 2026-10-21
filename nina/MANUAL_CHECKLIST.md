@@ -78,10 +78,22 @@ the top of your copy.
   `SITEELEV`, `OBSERVER`, `CENTALT`, `CENTAZ`, `OBJCTALT`, `OBJCTAZ` or `AIRMASS` in its header; `stacking\tmp\` is
   empty afterwards; the original file in your image folder is byte for byte as N.I.N.A. wrote it.
 - [ ] A light shot outside the Starfront container (a plain Deep Sky Object). *Expected:* not queued; nothing logged
-  for it.
+  for it above debug level.
 - [ ] Save as XISF for one run. *Expected:* sent like FITS, with the location properties gone.
-- [ ] Turn on *Also send darks, flats, bias* and take a few darks after the lights. *Expected:* queued for the
-  project of the last light sent. Turn it off: darks are not sent.
+- [ ] Take flats the next morning (or the evening before the lights). *Expected:* each flat is logged `flat …: lights of
+  the same filter and night went to …` and queued for that project; an evening flat is counted on the panel as *waiting
+  for its night's lights* until a light of its filter is queued. A flat of a filter no light used that night waits
+  until the next midday, then goes by the fallbacks or is logged `not sending flat …`.
+- [ ] Shoot a few lights of a target that is no collaboration's, then flats of their filter. *Expected:* the flats are
+  logged `not sending flat …: this night's lights of that filter were of another target` once their wait is over.
+- [ ] Point the container's target somewhere far from the stacking project's field (or save a light with another
+  target's coordinates). *Expected:* `not sending …: it shows another target …: pointed N° from the field of …`.
+- [ ] With the rig known (after the first join), take a few darks. *Expected:* `… queued for this telescope's
+  calibration library`; the panel shows *Calibration library: …*. Turn *Send new darks there* off and *Also send
+  darks, bias* on: the next darks go to the project of the last light sent. Both off: darks are not sent.
+- [ ] Under *Calibration library*, choose a folder of darks and bias (a master among them) and press *Sync the library
+  now*. *Expected:* *Synced: N file(s) queued*, the master rather than its raw frames; a second press says *up to
+  date* and queues nothing; *Prefer raw frames* queues the raw frames.
 - [ ] *Pause uploads*: frames queue and wait (*Uploads are paused*); *Resume uploads*: they go. Choose *Only inside a
   daily time window* outside the window: they wait with the reason; *Upload now* sends them.
 - [ ] Set a speed limit of 200 KB/s during an upload. *Expected:* the upload slows at once.

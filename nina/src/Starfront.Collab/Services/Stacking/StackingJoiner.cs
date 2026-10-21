@@ -86,17 +86,27 @@ namespace Starfront.Collab.Services.Stacking {
             }
         }
 
-        /// <summary>A pending membership may have been approved, and an active one may have been removed: ask.</summary>
+        /// <summary>
+        /// A pending membership may have been approved, and an active one may
+        /// have been removed: ask. The project's frame is read again too: its
+        /// first light sets its centre, rotation and scale, and its owner can
+        /// move it, and the other-target rule must judge against the frame as
+        /// it is now.
+        /// </summary>
         public async Task RefreshMembershipsAsync(CancellationToken ct) {
             if (!settings.StackingEnabled || !settings.StackingSignedIn) return;
             foreach (var link in links.All()) {
                 ct.ThrowIfCancellationRequested();
                 if (link.CollabProjectId.Length == 0 || link.Status is not (LinkStatus.Pending or LinkStatus.Active)) continue;
                 try {
+                    var framed = await RefreshProjectAsync(link, ct).ConfigureAwait(false);
                     var membership = await api().GetMembershipAsync(link.CollabProjectId, ct).ConfigureAwait(false);
                     var status = membership.Status == MemberStatuses.Active ? LinkStatus.Active
                                : membership.Status == MemberStatuses.Pending ? LinkStatus.Pending : LinkStatus.Failed;
-                    if (status == link.Status) continue;
+                    if (status == link.Status) {
+                        if (framed) links.Upsert(link);
+                        continue;
+                    }
                     link.Status = status;
                     link.Message = status == LinkStatus.Failed ? $"removed from {link.CollabName}" : "";
                     link.NextAttemptUtc = status == LinkStatus.Failed ? DateTime.UtcNow + AfterFailure : null;
@@ -112,6 +122,30 @@ namespace Starfront.Collab.Services.Stacking {
             }
         }
 
+        /// <summary>Read the project's frame, target and calibration policy into the link; true when any of them changed. A failure keeps what the link had.</summary>
+        private async Task<bool> RefreshProjectAsync(StackingLink link, CancellationToken ct) {
+            ProjectDetail project;
+            try {
+                project = await api().GetProjectAsync(link.CollabProjectId, ct).ConfigureAwait(false);
+            } catch (ApiException ex) when (!ex.IsAuthenticationFailure) {
+                Logger.Debug($"Starfront stacking: the project {link.CollabName} could not be read - {ex.Message}");
+                return false;
+            }
+            var pending = project.RotationFromFirstLight == true;
+            var calibration = project.Policy?.Calibration ?? link.Calibration;
+            var changed = !SameGrid(link.Grid, project.Grid) || link.GridPending != pending || link.Calibration != calibration || link.TargetName != project.TargetName;
+            if (project.Grid != null) link.Grid = project.Grid;
+            link.GridPending = pending;
+            link.Calibration = calibration;
+            link.TargetName = project.TargetName ?? "";
+            return changed;
+        }
+
+        private static bool SameGrid(Grid a, Grid b) =>
+            a == null ? b == null
+            : b != null && a.CenterRaDeg == b.CenterRaDeg && a.CenterDecDeg == b.CenterDecDeg && a.RotationDeg == b.RotationDeg
+              && a.ScaleArcsecPx == b.ScaleArcsecPx && a.WidthPx == b.WidthPx && a.HeightPx == b.HeightPx;
+
         private enum Outcome { Done, Later, AuthRequired }
 
         private async Task<Outcome> JoinOneAsync(ProjectListing listing, string code, CancellationToken ct, bool acceptTerms = false) {
@@ -125,6 +159,9 @@ namespace Starfront.Collab.Services.Stacking {
                 link.CollabName = resolved.Project.Name;
                 link.RequireStrip = resolved.Policy.RequireCoordinateStrip;
                 link.DeclaredFilters = resolved.Project.Filters.ToList();
+                link.TargetName = resolved.Project.TargetName ?? "";
+                link.Grid = resolved.Grid ?? resolved.Project.Grid ?? link.Grid;
+                link.Calibration = resolved.Policy.Calibration;
                 link.TermsUrl = resolved.TermsUrl;
 
                 if (resolved.AlreadyMember) {

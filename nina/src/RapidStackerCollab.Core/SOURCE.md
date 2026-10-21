@@ -8,8 +8,8 @@ Stacker Collab project for live stacking. It has no N.I.N.A., WPF or Windows dep
 |---|---|
 | Upstream repository | `github.com/EKE-Services/rapid-stacker-collab` (private; the plugin folder is to be mirrored publicly) |
 | Upstream path | `nina-plugin/src/RapidStackerCollab.Core/` and `nina-plugin/tests/RapidStackerCollab.Core.Tests/` |
-| Core copied from | commit `dab8b3b425d33cb30c12013644d37433531e08a8` (`master`, 2026-10-16) |
-| Tests copied from | commit `5047a00df519caed44b55cb2c92a0ede408004bf` (branch `fix/plugin-test-teardown-retry`: `master` plus the Windows temp-directory deletion retry in the tests; the Core sources are identical on both) |
+| Core copied from | commit `956fe161163dc3454fa882ef8bce24d6b6d4dbdb` (`master`, 2026-10-21: the upstream plugin 0.2.2.0) |
+| Tests copied from | the same commit |
 
 ## Rules
 
@@ -45,7 +45,11 @@ be diffed against upstream on a re-sync:
 | Starfront file | Upstream source |
 |---|---|
 | `StackingUploader.cs` | `RapidStackerCollab.Shell/Hosting/CollabServices.cs` (the object graph and lifetime) |
-| `StackingIntake.cs` | `RapidStackerCollab.Shell/Intake/FrameIntake.cs` (without attribution) |
+| `StackingIntake.cs` | `RapidStackerCollab.Shell/Intake/FrameIntake.cs` (without attribution: the ledger names the collaboration; with the other-target rule, flats to the router, darks to the library) |
+| `StackingFlats.cs` | `RapidStackerCollab.Shell/Intake/FlatRouter.cs` (the last light's project stands in for the active project, the links for the project catalog) |
+| `StackingLibrary.cs` | `RapidStackerCollab.Shell/Library/LibrarySyncService.cs` (without its MVVM base; the options page wraps it) |
+| `StackingTargets.cs` | `RapidStackerCollab.Shell/Intake/FrameIntake.cs` (`OtherTargetText`) over the Core's `ProjectAttribution.IsOtherTarget` |
+| `StackingUploader.cs` (`FlatsLoopAsync`, the library loop) | `RapidStackerCollab.Shell/Hosting/CollabServices.cs` (`FlatsLoopAsync`, `LibrarySync.RunAsync`) |
 | `StackingMapping.cs` | `RapidStackerCollab.Shell/Filters/FilterMappingGrid.cs` (the prefill rules) |
 | `JoinCodes.cs` | `RapidStackerCollab.Shell/Projects/JoinFlow.cs` (the code normaliser) |
 | `ImagingState.cs` | `RapidStackerCollab.Shell/Imaging/ImagingStateTracker.cs`, `RapidStackerCollab.Plugin/Services/NinaAdapters.cs` (`CameraStateConsumer`) |

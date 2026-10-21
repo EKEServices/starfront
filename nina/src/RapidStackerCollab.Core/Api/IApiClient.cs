@@ -58,6 +58,17 @@ public interface IApiClient
     Task<Frame> GetFrameAsync(string project, string frameId, CancellationToken ct = default);
     Task<WithdrawResponse> WithdrawFrameAsync(string project, string frameId, CancellationToken ct = default);
 
+    // Calibration library (contract 1.23.0)
+    /// <summary><c>GET /rigs/{rig_id}/library</c>: usage, the frames (newest first, paged) and the masters last built.</summary>
+    Task<LibraryResponse> GetLibraryAsync(string rigId, int? limit = null, string? cursor = null, CancellationToken ct = default);
+
+    /// <summary><c>POST /rigs/{rig_id}/library/frames/init</c>: start or resume a library upload. A repeat of a <c>ready</c> frame is 409 <c>duplicate</c>.</summary>
+    Task<LibraryFrameInitResponse> InitLibraryFrameAsync(string rigId, LibraryFrameInitRequest request, CancellationToken ct = default);
+
+    Task<LibraryFrameCompleteResponse> CompleteLibraryFrameAsync(string rigId, string frameId, IReadOnlyList<CompletedPart> etags, CancellationToken ct = default);
+
+    Task<WithdrawResponse> WithdrawLibraryFrameAsync(string rigId, string frameId, CancellationToken ct = default);
+
     // Auth
     /// <summary>
     /// <c>DELETE /auth/token</c>: revokes the token this client is signed in with (contract 1.8.0). A token that is already dead
