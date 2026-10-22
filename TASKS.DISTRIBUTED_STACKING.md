@@ -99,7 +99,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** any `Store` can be checked by one call, and `DirStore` passes.
       **Verify:** `cd worker && cargo test -p collab-engine`
 
-- [ ] T102 — Hub config, `check`, the error envelope and the app skeleton
+- [x] T102 — Hub config, `check`, the error envelope and the app skeleton
       **Files:** RSC `worker/crates/hub/src/{main,config,app,error}.rs`, `worker/crates/hub/tests/`
       **Do:** §1.2: `collab-hub.toml` + `COLLAB_HUB_*`, `check` (data root writable and free space, XPSD folder probe, exit non-zero on a problem), `HubError` with the contract envelope, the layer stack and a health route; TLS per D006.
       **Done when:** `collab-hub check` reports every missing or invalid setting, and the hub serves `/api/hub/v1/health`.
