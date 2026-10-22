@@ -68,8 +68,10 @@ jobs:
               continue
             fi
             echo "::group::$name"
-            python "$file"
-            rc=$?
+            # GitHub runs bash steps with -e: capture the exit code instead of letting
+            # the first failing check end the loop before the allow-list is read.
+            rc=0
+            python "$file" || rc=$?
             echo "::endgroup::"
             if [ "$rc" -eq 0 ]; then
               echo "PASS $name"
