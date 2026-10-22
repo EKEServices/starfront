@@ -2840,9 +2840,9 @@ status, got = front("GET", "/nope")
 case("an unknown path answers the envelope, not 403 or 404",
      status not in (403, 404) and got.get("ok") is False and got.get("code") in stack_envelope.ERROR_STATUS
      and status == stack_envelope.ERROR_STATUS[got["code"]], f"{status} {got}")
-for path in ("/auth/me", f"/projects/{FD_ID}/events", f"/projects/{FD_ID}/masters", f"/projects/{FD_ID}/mosaic"):
+for path in ("/auth/me", f"/projects/{FD_ID}/masters"):
     status, got = front("GET", path)
-    case(f"{path.rsplit('/', 1)[-1]} (not built yet) is still the envelope",
+    case(f"{path.rsplit('/', 1)[-1]} without a credential is the envelope",
          status not in (403, 404) and got.get("ok") is False and "code" in got, f"{status} {got}")
 status, got = front("DELETE", "/rigs")
 case("a method not allowed is the envelope too", status not in (403, 404, 405) and got.get("ok") is False, f"{status} {got}")
@@ -4037,6 +4037,238 @@ notify_module.notify_gold_published(server_app.store, {"id": "prj_nohook", "name
 notify_module.drain()
 quiet = server_app.store._one("SELECT COUNT(*) AS n FROM stack_notified WHERE project_id = 'prj_nohook'")
 case("a collaboration with no webhook posts nothing and claims nothing", len(POSTS) == 3 and quiet["n"] == 0)
+
+# ------------------------------------------- live stacking: push
+print("\n-- live stacking: push --")
+import io as _io                                                   # noqa: E402
+import secrets                                                     # noqa: E402
+import tarfile as _tar                                             # noqa: E402
+
+POSTS.clear()
+
+
+def multipart(parts):
+    """[(name, bytes)] as multipart/form-data; the `records` part is JSON."""
+    boundary = "----t407" + secrets.token_hex(8)
+    body = b""
+    for name, data in parts:
+        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{name.rsplit("/", 1)[-1]}"\r\n'
+                 f'Content-Type: application/octet-stream\r\n\r\n').encode() + data + b"\r\n"
+    return boundary, body + f"--{boundary}--\r\n".encode()
+
+
+def push(records, files=(), token=None, hub=None):
+    parts = [("records", json.dumps(records).encode()), *files]
+    boundary, body = multipart(parts)
+    request = urllib.request.Request(
+        f"{BASE}/api/v1/hubs/{hub or BH}/push", data=body, method="POST",
+        headers={"Authorization": f"Bearer {token or BHTOK}",
+                 "Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
+def tar_of(members):
+    buf = _io.BytesIO()
+    with _tar.open(fileobj=buf, mode="w") as t:
+        for name, data in members:
+            info = _tar.TarInfo(name)
+            info.size = len(data)
+            t.addfile(info, _io.BytesIO(data))
+    return buf.getvalue()
+
+
+def tree(root):
+    return sorted((str(p.relative_to(root)), p.stat().st_mtime_ns) for p in root.rglob("*") if p.is_file())
+
+
+PUBDIR = DATA / "stack" / "public"
+GRID = {"width_px": 6400, "height_px": 4400, "scale_arcsec_px": 1.5, "ra_deg": 84.0, "dec_deg": 0.0}
+PUSH_FRAME = "frm_" + "0" * 20 + "pvshts"        # an uploaded frame of the owner's, to give a verdict
+server_app.store._run("INSERT INTO stack_frames (frame_id, project_id, user_id, status, size, sha256, doc) VALUES (?, ?, ?, 'uploaded', 10, ?, ?)",
+                      PUSH_FRAME, FD_ID, OWNER_UID, "ab" * 32, json.dumps({**json.loads(server_app.store._one("SELECT doc FROM stack_frames WHERE frame_id = ?", FA)["doc"]),
+                                  "filename": "p.fits"}))
+SECOND_PID = server_app.store.stack_project_of(SECOND_ID)["project_id"]
+STATUS_DOC = {"schema_version": 1, "generated_at": "2026-10-22T01:00:00Z", "access": "public",
+              "totals": {"frames_accepted": 7, "integration_s": 2100.0, "last_update": "2026-10-22T01:00:00Z"},
+              "streams": [], "timeline": []}
+DZ = tar_of([("HA/g000003/image.dzi", b"<Image/>"), ("HA/g000003/image_files/0/0_0.jpg", b"\xff\xd8\xff\xd9")])
+MASTER_REC = {"stream_key": "HA", "gold_seq": 3, "format": "fits", "integration_s": 2100.0, "frames": 7,
+              "sessions": 2, "contributors": 2, "licence": "members_only", "created_at": "2026-10-22T01:00:00Z"}
+RECORDS = {
+    "frames": [{"frame_id": PUSH_FRAME, "project_id": FD_ID, "status": "rejected", "reject_reason": "fwhm_too_high",
+                "reject_detail": "FWHM 6.1 px", "metrics": {"fwhm_arcsec": 6.1, "n_stars": 120},
+                "integration_s": 0, "verdict_at": "2026-10-22T00:10:00.000Z"}],
+    "projects": [{"project_id": FD_ID, "grid": GRID, "grid_rev": 2}],
+    "streams": [{"project_id": FD_ID, "stream_key": "HA", "gold_seq": 3, "gold_published_at": "2026-10-22T01:00:00Z",
+                 "stats": {"frames_accepted": 7, "integration_s": 2100.0, "contributors": 2}}],
+    "events": [{"project_id": FD_ID, "event_id": "evt_0123456789abcdefghjkmnpqrs", "ts": "2026-10-22T01:00:00Z",
+                "type": "gold_published", "text": "Gold 3 published for HA", "stream_key": "HA"},
+               {"project_id": FD_ID, "ts": "2026-10-22T00:30:00Z", "type": "frames_accepted",
+                "text": "7 frames accepted", "count": 7}],
+}
+FILES = [("status.json", json.dumps(STATUS_DOC).encode()), ("HA/gold/latest.png", PNG),
+         ("masters/HA_g000003_fits.json", json.dumps(MASTER_REC).encode()),
+         ("masters/HA_g000003_fits.fits", b"SIMPLE  = T" + b"\0" * 50), ("deepzoom.tar", DZ)]
+
+status, got = push(RECORDS, FILES, token="sfh_" + "0" * 64)
+case("a push with an unknown hub token is 401", status == 401, str(status))
+status, got = push(RECORDS, FILES, hub="hub_other", token=BHTOK)
+case("a push to another hub's id is 401", status == 401, str(status))
+status, got = push(RECORDS, FILES)
+case("a push of records, status.json, a PNG, masters and a deep-zoom tar is accepted",
+     status == 200 and got["ok"] and got["files"]["written"] == 6 and got["frames"]["merged"] == 1
+     and got["projects"] == 1 and got["streams"] == 1 and got["events"] == 2, f"{status} {got}")
+status, headers, body = raw_get(f"/stack/public/{FD_ID}/status.json")
+case("status.json is served with the 60 s cache",
+     status == 200 and json.loads(body) == STATUS_DOC and headers.get("Cache-Control") == "public, max-age=60")
+status, headers, body = raw_get(f"/stack/public/{FD_ID}/HA/gold/latest.png")
+case("the PNG is served as image/png", status == 200 and body == PNG and headers.get("Content-Type") == "image/png")
+status, headers, body = raw_get(f"/stack/public/{FD_ID}/deepzoom/HA/g000003/image_files/0/0_0.jpg")
+case("a deep-zoom tile from the tar is served immutable",
+     status == 200 and headers.get("Cache-Control") == "public, max-age=31536000, immutable")
+status, _, _ = raw_get(f"/stack/public/{FD_ID}/masters/HA_g000003_fits.fits")
+case("masters are not served by the open route", status == 404, str(status))
+case("no temp file is left behind", not [p for p in (PUBDIR / FD_ID).rglob("*") if p.name.endswith(".tmp")])
+
+status, got = front("GET", f"/projects/{FD_ID}/frames/{PUSH_FRAME}", token=OWNER_GRANT)
+case("the verdict shows in the frame (status, reason, detail, metrics)",
+     status == 200 and got["frame"]["status"] == "rejected" and got["frame"]["reject_reason"] == "fwhm_too_high"
+     and got["frame"]["reject_detail"] == "FWHM 6.1 px" and got["frame"]["metrics"]["n_stars"] == 120
+     and conforms("FrameResponse", got), f"{status} {why('FrameResponse', got)}")
+status, got = front("GET", f"/projects/{FD_ID}/frames?mine=1&status=rejected", token=OWNER_GRANT)
+case("...and in frames?mine=1", status == 200 and any(f["frame_id"] == PUSH_FRAME for f in got["frames"]))
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("the project carries the pushed grid and the counts from status.json",
+     got["project"]["grid"] == GRID and got["project"]["counts"]["frames_accepted"] == 7
+     and got["project"]["counts"]["integration_s"] == 2100.0, str(got["project"].get("counts")))
+case("the grid_rev is kept", server_app.store.stack_project(FD_ID)["doc"]["grid_rev"] == 2)
+
+case("the gold was announced once", POSTS == [(HOOK, "Gold integration 3 published for HA: 0.6 h from 2 contributors.")], str(POSTS))
+before, rev_before = tree(PUBDIR / FD_ID), server_app.store.stack_project(FD_ID)["rev"]
+frame_rev = server_app.store._one("SELECT rev FROM stack_frames WHERE frame_id = ?", PUSH_FRAME)["rev"]
+status, got = push(RECORDS, FILES)
+notify_module.drain()
+case("the same push again writes nothing and changes nothing",
+     status == 200 and got["files"]["written"] == 0 and got["frames"] == {"merged": 0, "unchanged": 1, "skipped": 0}
+     and got["projects"] == got["streams"] == got["events"] == 0
+     and tree(PUBDIR / FD_ID) == before
+     and server_app.store.stack_project(FD_ID)["rev"] == rev_before
+     and server_app.store._one("SELECT rev FROM stack_frames WHERE frame_id = ?", PUSH_FRAME)["rev"] == frame_rev, str(got))
+case("...and pushing the same gold twice notified once", len(POSTS) == 1, str(POSTS))
+RECORDS2 = json.loads(json.dumps(RECORDS))
+RECORDS2["streams"][0]["gold_seq"] = 4
+push(RECORDS2, [])
+notify_module.drain()
+case("a higher gold_seq notifies again", len(POSTS) == 2 and "Gold integration 4 published for HA" in POSTS[-1][1], str(POSTS))
+RECORDS2["streams"][0]["gold_seq"] = 3
+push(RECORDS2, [])
+notify_module.drain()
+case("a lower gold_seq arriving late changes and announces nothing",
+     len(POSTS) == 2 and server_app.store.stack_project(FD_ID)["doc"]["streams"]["HA"]["gold_seq"] == 4)
+stale = json.loads(json.dumps(RECORDS))
+stale["frames"][0].update(status="accepted", reject_reason=None, verdict_at="2026-10-22T00:00:00.000Z")
+status, got = push(stale, [])
+case("an older verdict does not overwrite a newer one", got["frames"]["skipped"] == 1
+     and server_app.store._one("SELECT status FROM stack_frames WHERE frame_id = ?", PUSH_FRAME)["status"] == "rejected")
+
+status, got = front("GET", f"/projects/{FD_ID}/status", token=OWNER_GRANT)
+case("projects/{p}/status answers {ok, status_doc}",
+     status == 200 and got["ok"] is True and got["status_doc"] == STATUS_DOC and set(got) == {"ok", "status_doc"}, f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/status")
+case("...readable without a credential for an unlisted project", status == 200 and got["ok"])
+status, got = front("GET", f"/projects/{SECOND_PID}/status", token=SECOND_GRANT)
+case("...and a project with no status document is 400 not_found", status == 400 and got["code"] == "not_found", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/masters", token=OWNER_GRANT)
+case("the masters list answers the contract shape, one entry for the pushed fits",
+     status == 200 and conforms("MasterListResponse", got) and len(got["masters"]) == 1
+     and got["masters"][0]["stream_key"] == "HA" and got["masters"][0]["gold_seq"] == 3
+     and got["masters"][0]["size_bytes"] == 61
+     and got["masters"][0]["url"].endswith(f"/stack/api/projects/{FD_ID}/masters/HA_g000003_fits.fits"),
+     f"{status} {why('MasterListResponse', got)}")
+link = got["masters"][0]["url"].replace(BASE, "")
+request = urllib.request.Request(BASE + link, headers={"Authorization": f"Bearer {OWNER_GRANT}"})
+with urllib.request.urlopen(request, timeout=10) as response:
+    data = response.read()
+case("a member downloads the master through the gated link", data.startswith(b"SIMPLE"), str(len(data)))
+status, got = front("GET", f"/projects/{FD_ID}/masters")
+case("the masters list needs a member (401 not_authenticated)", status == 401 and got["code"] == "not_authenticated")
+try:
+    urllib.request.urlopen(BASE + link, timeout=10)
+    case("...and so does the file", False)
+except urllib.error.HTTPError as exc:
+    case("...and so does the file", exc.code == 401, str(exc.code))
+status, got = front("GET", f"/projects/{FD_ID}/events?limit=1", token=OWNER_GRANT)
+case("events: newest first, paged, contract shape",
+     status == 200 and conforms("EventListResponse", got) and [e["type"] for e in got["events"]] == ["gold_published"]
+     and got["next_cursor"], f"{status} {why('EventListResponse', got)}")
+status, got2 = front("GET", f"/projects/{FD_ID}/events?limit=1&cursor={got['next_cursor']}", token=OWNER_GRANT)
+case("...the second page ends it", status == 200 and [e["type"] for e in got2["events"]] == ["frames_accepted"]
+     and got2["next_cursor"] is None and conforms("EventListResponse", got2))
+status, got = front("GET", f"/projects/{SECOND_PID}/events", token=SECOND_GRANT)
+case("a project with no events answers an empty list", status == 200 and got["events"] == [] and got["next_cursor"] is None, f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/mosaic", token=OWNER_GRANT)
+case("mosaic answers null for a single field, in the contract shape",
+     status == 200 and got["mosaic"] is None and conforms("MosaicResponse", got))
+
+# Refusals: nothing may be written.
+OTHER = "hub_" + secrets.token_hex(8)
+server_app.store.add_hub(OTHER, "1002", "Other hub", "0" * 64, "AAAA", "")
+server_app.store.add_stack_project("prj_otherhub", "col_otherhub", OTHER, "other-hub-x", "ABCD-2345-EFGH", {"name": "Other"})
+snapshot = tree(PUBDIR)
+status, got = push({"frames": [], "projects": [{"project_id": "prj_otherhub", "grid": GRID, "grid_rev": 1}], "streams": []},
+                   [("status.json", b"{}")])
+case("a push for another hub's project is 409", status == 409, f"{status} {got}")
+status, got = push({"projects": [{"project_id": FD_ID, "grid": GRID, "grid_rev": 9}]},
+                   [("prj_otherhub/status.json", b"{}")])
+case("...also through a file part's project prefix, with the rest of the push unwritten",
+     status == 409 and server_app.store.stack_project(FD_ID)["doc"]["grid_rev"] == 2 and tree(PUBDIR) == snapshot)
+status, got = push({"projects": [{"project_id": "prj_nosuchproject", "grid": GRID, "grid_rev": 1}]})
+case("...and for a project that does not exist", status == 409)
+for label, name in (("a dot-dot part name", "../escape.json"), ("a nested dot-dot", "HA/../../escape.json"),
+                    ("an absolute part name", "/abs.json"), ("a backslash", "a\\b.json"),
+                    ("a part of a kind not accepted", "run.sh"), ("a deep masters path", "masters/x/y.fits"),
+                    ("a dot file", ".hidden.json")):
+    status, got = push({"projects": [{"project_id": FD_ID, "grid": GRID, "grid_rev": 9}]}, [(name, b"{}"), ("ok.json", b"{}")])
+    case(f"{label} is refused with nothing written", status == 400 and tree(PUBDIR) == snapshot
+         and server_app.store.stack_project(FD_ID)["doc"]["grid_rev"] == 2 and not (DATA / "stack" / "escape.json").exists(), f"{status} {got}")
+for label, members in (("a ../ tar member", [("../../escape.json", b"{}")]),
+                       ("a tar member that is absolute", [("/etc/x.json", b"{}")]),
+                       ("a tar member with a backslash", [("a\\b.json", b"{}")])):
+    status, got = push({"projects": [{"project_id": FD_ID, "grid": GRID, "grid_rev": 9}]}, [(f"{FD_ID}/deepzoom.tar", tar_of(members))])
+    case(f"{label} is refused with nothing written", status == 400 and tree(PUBDIR) == snapshot, f"{status} {got}")
+buf = _io.BytesIO()
+with _tar.open(fileobj=buf, mode="w") as t:
+    link_info = _tar.TarInfo("HA/link.json")
+    link_info.type, link_info.linkname = _tar.SYMTYPE, "../../../etc/passwd"
+    t.addfile(link_info)
+status, got = push({}, [(f"{FD_ID}/deepzoom.tar", buf.getvalue())])
+case("a tar symlink member is refused", status == 400 and tree(PUBDIR) == snapshot, f"{status} {got}")
+status, got = push({}, [(f"{FD_ID}/deepzoom.tar", b"not a tar at all")])
+case("a deepzoom.tar that is not a tar is refused", status == 400)
+outside = DATA / "stack" / "outside"
+outside.mkdir(exist_ok=True)
+(PUBDIR / FD_ID / "linked").symlink_to(outside, target_is_directory=True)
+status, got = push({}, [(f"{FD_ID}/linked/x.json", b"{}")])
+case("a path through a symlink inside the project is refused",
+     status == 400 and not (outside / "x.json").exists(), f"{status} {got}")
+(PUBDIR / FD_ID / "linked").unlink()
+status, got = push({"frames": [{"frame_id": "nope", "project_id": FD_ID, "status": "accepted", "verdict_at": "2026-10-22T00:00:00Z"}]})
+case("a malformed frame record is 400", status == 400)
+status, got = push({"bogus": []})
+case("an unknown records key is 400", status == 400)
+
+os.environ["STARFRONT_STACK_HUB_BUDGET_GB"] = "0.000002"       # about 2 kB
+status, got = push({}, [(f"{FD_ID}/big/a.png", b"\0" * 5000)])
+case("over the hub's byte budget is 429, with nothing written", status == 429 and tree(PUBDIR) == snapshot, f"{status} {got}")
+status, got = push({}, [(f"{FD_ID}/{n}", d) for n, d in FILES])
+case("...while a re-push that adds nothing is still fine", status == 200, f"{status} {got}")
+del os.environ["STARFRONT_STACK_HUB_BUDGET_GB"]
+status, got = push({}, [(f"{FD_ID}/big/a.png", b"\0" * 5000)])
+case("...and the default budget lets it in", status == 200 and (PUBDIR / FD_ID / "big" / "a.png").is_file(), f"{status} {got}")
 
 print()
 print(f"{sum(results)}/{len(results)} passed")

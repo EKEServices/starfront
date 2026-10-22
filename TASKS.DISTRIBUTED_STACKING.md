@@ -99,7 +99,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** any `Store` can be checked by one call, and `DirStore` passes.
       **Verify:** `cd worker && cargo test -p collab-engine`
 
-- [ ] T102 — Hub config, `check`, the error envelope and the app skeleton
+- [x] T102 — Hub config, `check`, the error envelope and the app skeleton
       **Files:** RSC `worker/crates/hub/src/{main,config,app,error}.rs`, `worker/crates/hub/tests/`
       **Do:** §1.2: `collab-hub.toml` + `COLLAB_HUB_*`, `check` (data root writable and free space, XPSD folder probe, exit non-zero on a problem), `HubError` with the contract envelope, the layer stack and a health route; TLS per D006.
       **Done when:** `collab-hub check` reports every missing or invalid setting, and the hub serves `/api/hub/v1/health`.
@@ -136,7 +136,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §1.5: `DirObjects` over `<data_root>/objects`; every `docs/api/examples/records/engine/*.json` loaded into `SqliteStore` and read back byte-identical.
       **Verify:** `cd worker && cargo test -p collab-hub --test record_fixtures`
 
-- [ ] T109 — The worker-route rules made generic over `&dyn Store`
+- [x] T109 — The worker-route rules made generic over `&dyn Store`
       **Files:** RSC `worker/crates/worker/src/daemon/fake/api.rs`, `worker/crates/worker/src/daemon/fake/`
       **Do:** §1.7: the five route functions take `&dyn Store` and a `RouteCtx` (clock, queue sender, gold trigger); the fake keeps calling them over `DirStore`.
       **Done when:** the daemon tests pass unchanged.
@@ -184,7 +184,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.4: a `Gate` before each receive; `busy` from `COLLAB_BUSY_FILE`, a `NINA.exe` process check, or `COLLAB_WORK_WINDOW`; jobs in flight finish; the heartbeat reports why the worker is idle.
       **Verify:** `cd worker && cargo test -p collab-worker && cargo test -p collab-uploader`
 
-- [ ] T207 — `collab-worker service install|uninstall|start|stop|status`
+- [x] T207 — `collab-worker service install|uninstall|start|stop|status`
       **Files:** RSC `worker/crates/worker/src/service.rs`, `worker/scripts/launch-agent.sh`, `docs/runbooks/worker-daemon.md`
       **Do:** §2.5: LaunchAgent as the script writes it; `systemd --user` with `RestartPreventExitStatus=3`; Windows logon Scheduled Task by default, `--as-service` via `windows-service`; exit 3 is "do not restart" everywhere; self-update is T418.
       **Verify:** `cd worker && cargo test -p collab-worker --test cli && cargo clippy --workspace --all-targets -- -D warnings`
@@ -274,7 +274,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.2: list uploaded frames, `Range` bytes, ack, deletion after `STARFRONT_STACK_RELAY_KEEP_DAYS`, a `collectFiles` project's frames also on `/files`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T407 — Push ingestion and `/stack/public`
+- [x] T407 — Push ingestion and `/stack/public`
       **Files:** SF `server/hubs.py`, `server/app.py`, `tools/check_server.py`
       **Do:** §4.2, §4.5: multipart push of records and files, atomic writes, per-hub byte budget; `/stack/public/{project_id}/…` with the hub's cache headers; verdicts shown by `frames?mine=1`.
       **Verify:** `python3 tools/check_server.py`
@@ -294,7 +294,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.6: `/download/collab-worker/{name}` and `/download/collab-hub/{name}` under strict regexes; `latest.json` and `latest.json.sig` served as files; archives git-ignored.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T411 — Release archives and the signed manifest (RSC)
+- [x] T411 — Release archives and the signed manifest (RSC)
       **Files:** RSC `worker/scripts/sign-manifest.sh`, `worker/scripts/build-manifest.sh`, `.github/workflows/worker-release.yml`
       **Do:** §4.6: per-OS archives of `collab-worker` and `collab-hub`; a manifest in rapid-stacker's shape plus `contract`; an Ed25519 signature by an offline key (key generation is the author's; the workflow never runs on its own).
       **Verify:** `bash worker/scripts/build-manifest.sh --dry-run`

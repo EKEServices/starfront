@@ -2535,13 +2535,15 @@ hubs = Hubs(app, store, _person, may_start)
 
 # The front door for hub-backed projects, in the Collab contract's envelope.
 # Its own sub-application so its error handlers cover exactly `/stack/api`.
-STACK_FRONT = stack_front.build(store, DATA / "stack" / "relay")
+STACK_FRONT = stack_front.build(store, DATA / "stack" / "relay", DATA / "stack" / "public")
 app.mount("/stack/api", STACK_FRONT)
 # The frame part PUTs (`/stack/s3/...`) and the sweep of abandoned uploads.
 stack_front.install(app, STACK_FRONT)
 # The frame relay for the hub: list, ranged bytes, ack, retention (server/stack/relay.py).
 STACK_RELAY = stack_relay.install(app, store, hubs, STACK_FRONT, files)
 STACK_FRONT.state.frames.after_upload = STACK_RELAY.collect
+# What a hub pushes back: POST /api/v1/hubs/{id}/push (server/stack/push.py).
+STACK_FRONT.state.pushed.install(app, hubs)
 
 
 # ---------------------------------------------------------------------------
@@ -2634,6 +2636,8 @@ def stack_public(project_id: str, path: str):
     parts = path.split("/")
     if (not _STACK_PROJECT.match(project_id) or not path
             or any(p in ("", ".", "..") or "\\" in p or "\0" in p for p in parts)):
+        raise HTTPException(status_code=404, detail="no such file")
+    if parts[0] == "masters":      # members only (the contract): see /stack/api/projects/{p}/masters
         raise HTTPException(status_code=404, detail="no such file")
     root = (STACK_PUBLIC / project_id).resolve()
     target = (root / path).resolve()
