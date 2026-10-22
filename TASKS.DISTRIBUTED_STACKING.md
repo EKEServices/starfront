@@ -164,7 +164,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.1: `HubStore` in `DdbStore`'s shape over the RPC; `LocalBlobs`/`LocalQueues` at the hub origin; backend selection in `start.rs`; a `hub` feature needing only `ureq`.
       **Verify:** `cd worker && cargo test -p collab-worker --test hub_ports && cargo build -p collab-worker --no-default-features --features hub,synthetic`
 
-- [ ] T203 — `daemon_e2e --hub` un-ignored: one worker, crashes, two workers
+- [x] T203 — `daemon_e2e --hub` un-ignored: one worker, crashes, two workers
       **Files:** RSC `worker/crates/worker/tests/daemon_e2e.rs`
       **Done when:** the daemon through the hub produces `simulate`'s output bit for bit, also with crashes and with two workers.
       **Verify:** `cd worker && cargo test -p collab-worker --test daemon_e2e`
