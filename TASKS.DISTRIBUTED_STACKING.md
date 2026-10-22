@@ -30,7 +30,7 @@ Source plan: `STARFRONT_DISTRIBUTED_STACKING_PLAN.md` (section numbers below ref
 | 4 | T401–T418 | the Starfront server (SF, plus three RSC tasks) |
 | 5 | T501–T508 | the Starfront desktop (SF) |
 | 6 | T601–T607 | the N.I.N.A. plugin (SF) |
-| 7 | T701–T705 | local mode, docs, CI, the full night |
+| 7 | T701–T706 | local mode, docs, CI, the full night |
 
 Check progress with `python3 tools/task_progress.py`: per-phase counts, the next task, which decisions are blocking, manual checks left behind, and recent branches in both repositories. `--pending` lists what is left, `--phase N` one phase, `--verify T104` re-runs a task's Verify command, and `--verify-done` re-runs every ticked task's (exits 1 if any no longer passes).
 
@@ -412,6 +412,12 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Manual:** run `nina/MANUAL_CHECKLIST.md` "Hub projects" on the Windows PC against the home-network topology.
 
 ## Phase 7 — local mode, docs, CI, the full night (§Phase 7)
+
+- [ ] T706 — The stacking project flows down from the Starfront collaboration, always
+      **Files:** SF `server/app.py`, `server/hubs.py`, `astrocontrol/web/` (Collab form), `astrocontrol/main.py`, `tools/check_server.py`, `README.md`; RSC `worker/crates/hub/src/routes/admin.rs`, `docs/api/hub-profile.json`, `docs/runbooks/starfront-hub.md`
+      **Do:** the author's direction (2026-10-22): once a Starfront collaboration exists, everything the stacking engine needs flows down from it; nobody creates a second project anywhere. Analyse the merged system end to end once Phases 1–4 land and close every gap: (1) stacking is on by default for a new collaboration whose owner has a hub (or a default hub setting), with no separate step, and the form only offers a way to turn it off or pick another hub; (2) every edit to the collaboration (name, notes, region, filters, requirements, visibility, members, deletion) reaches the stacking project and the hub, and nothing on the stacking side can be edited except through the collaboration; (3) the cloud (AWS) backend no longer needs a project made on the Collab website and a pasted join code: either the Starfront server creates and keeps the Collab project in step through the Collab API, or the cloud path is reduced to existing links only — decide with the author, since it touches decision D6; (4) no hub creates projects on its own (standalone project creation was dropped from T303); (5) docs, the desktop form and the plugin's wording say so.
+      **Done when:** creating or editing a collaboration is the only action a coordinator takes for stacking, and a check proves each field flows down to the hub's project record.
+      **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
 
 - [ ] T701 — `tools/local_night.py`
       **Files:** SF `tools/local_night.py`
