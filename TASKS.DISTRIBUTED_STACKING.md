@@ -320,7 +320,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.8: register, bind, upload, pull, fetch, ack, push and page render in one isolated run.
       **Verify:** `python3 tools/check_stack_relay.py`
 
-- [ ] T415 — The hub's Starfront sync task (RSC)
+- [x] T415 — The hub's Starfront sync task (RSC)
       **Files:** RSC `worker/crates/hub/src/{starfront,publish}.rs`, `worker/crates/hub/src/tasks/`, `worker/crates/hub/src/auth.rs`, tests
       **Do:** §0.4: register credentials, heartbeat, the change-feed pull into `SqliteStore`, frame fetch with `Range` and ack, push on publish, grant verification, `identities`; a fake Starfront server in the tests.
       **Verify:** `cd worker && cargo test -p collab-hub`
