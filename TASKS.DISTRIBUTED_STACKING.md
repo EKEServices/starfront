@@ -219,7 +219,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.5: ports of `sweep`, `gold-scheduler`, `retention-sweeper` (with `project-purge.js`), `prepare-dlq`, `gold-dlq`; the `reg/` cache pruned below `free_gb_floor`.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T306 — The catalogue service and the worker's `HubCatalogs`
+- [x] T306 — The catalogue service and the worker's `HubCatalogs`
       **Files:** RSC `worker/crates/hub/src/catalogue.rs`, `worker/crates/worker/src/daemon/catalog.rs`, tests
       **Do:** §3.6: one cone search per project and `grid.spec()` on the hub; 202 `building`; rebuild on `grid_rev`; the worker fetches, falls back to its own XPSD on 404 and `PUT`s the result back.
       **Verify:** `cd worker && cargo test -p collab-hub && cargo test -p collab-worker`
