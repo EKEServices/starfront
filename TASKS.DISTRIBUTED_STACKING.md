@@ -357,7 +357,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** a multi-hundred-MB master pushed this way appears in the members-only masters list.
       **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
 
-- [ ] T422 — The hub pushes master data files (RSC)
+- [x] T422 — The hub pushes master data files (RSC)
       **Files:** RSC `worker/crates/hub/src/starfront/`, `worker/crates/hub/tests/starfront_sync.rs`
       **Do:** after T421: push each new master's `.xisf`/`.fits` through the streamed route (resumable by re-sending; skip ones already pushed), never for a private project's public tree.
       **Done when:** a gold run's masters reach Starfront and show in the masters list.
