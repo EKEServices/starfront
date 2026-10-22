@@ -71,6 +71,8 @@ PEOPLE = {
                  "member": True, "roles": []},
     "code-mallory": {"id": "1003", "username": "mallory", "global_name": "Mallory",
                      "member": False, "roles": []},
+    "code-carol": {"id": "1004", "username": "carol", "global_name": "Carol",
+                   "member": True, "roles": []},
 }
 
 
@@ -2373,6 +2375,251 @@ status, _ = call("POST", f"/api/v1/hubs/{HUB}/heartbeat", {}, token=HTOK)
 case("...and its token stops working", status == 401)
 _, listed = call("GET", "/api/v1/hubs", token=BOB3)
 case("...and it is gone from the list", [h["name"] for h in listed["hubs"]] == ["Hub B"])
+
+# ------------------------------------------- live stacking: the project binding
+# A collaboration is stacked on the cloud (a join code) or on a hub. Binding
+# one to a hub mints the stacking project the hub will serve, tells the hub,
+# and puts a `stacking` block (with a grant, held to the join code's secrecy
+# rule) in the listing. The old fields have to keep working for 1.0.0.33.
+print("\n-- live stacking: the project binding --")
+import re as _re                                                  # noqa: E402
+from server.stack import defaults as stack_defaults               # noqa: E402
+
+REGION = {"ra": 84.0, "dec": 0.0, "width": 16.0, "height": 8.0}
+_, _, _, polled = sign_in("code-bob")
+BOBH = polled["token"]
+_, _, _, polled = sign_in("code-carol")
+CAROL = polled["token"]
+_, _, _, polled = sign_in("code-alice")
+ALICE = polled["token"]
+status, reg_h = call("POST", "/api/v1/hubs", {"name": "Bind hub", "lanUrl": "http://10.0.0.7:8790"},
+                     token=BOBH)
+BH, BHSEC, BHTOK = reg_h["hubId"], reg_h["grantSecret"], reg_h["hubToken"]
+call("PUT", f"/api/v1/hubs/{BH}/coordinators", {"coordinators": ["1004"]}, token=BOBH)
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since=0&wait=0", token=BHTOK)
+SINCE = pulled["seq"]
+case("a new hub's feed is empty", pulled["changes"] == [])
+
+
+def project_in_listing(token, project_id):
+    _, browse = call("GET", "/api/v1/agent/projects", token=token)
+    return next(p for p in browse["projects"] if p["id"] == project_id)
+
+
+# Cloud, in the new form: the code is stored both ways.
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Cloud stacked", "region": REGION, "requirements": {"filters": {"Ha": 3.0}},
+    "stacking": {"backend": "cloud", "joinCode": " h4rt 92bk-wnpc "}}, token=BOBH)
+CLOUD = made["project"]["id"]
+payload = made["project"]["payload"]
+case("stacking.backend=cloud stores the join code in the block and as stackingJoinCode",
+     status == 200 and payload["stackingJoinCode"] == "H4RT-92BK-WNPC"
+     and payload["stacking"]["backend"] == "cloud"
+     and payload["stacking"]["joinCode"] == "H4RT-92BK-WNPC", str(payload)[:240])
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "no code", "region": REGION, "stacking": {"backend": "cloud"}}, token=BOBH)
+case("...a cloud binding without a join code is refused", status == 400, str(answer)[:120])
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "bad code", "region": REGION,
+    "stacking": {"backend": "cloud", "joinCode": "H4RT-92BK-WNP1"}}, token=BOBH)
+case("...and so is one that cannot be real", status == 400)
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "bad backend", "region": REGION, "stacking": {"backend": "ftp"}}, token=BOBH)
+case("...and an unknown backend", status == 422)
+case("a cloud collaboration has no stacking project row", server_app.store.stack_project_of(CLOUD) is None)
+
+# An old payload, with only stackingJoinCode, reads as cloud.
+case("_stacking_of reads a payload with only stackingJoinCode as cloud",
+     server_app._stacking_of({"stackingJoinCode": "H4RT-92BK-WNPC"})
+     == {"backend": "cloud", "joinCode": "H4RT-92BK-WNPC", "apiBase": "", "hubId": "", "visibility": ""})
+case("...and one with nothing as unbound", server_app._stacking_of({})["backend"] == ""
+     and server_app._stacking_of({"stackingJoinCode": ""})["backend"] == "")
+listing = project_in_listing(bobs_token := call("POST", "/api/v1/agents", {"name": "Bob bind rig"}, token=BOBH)[1]["token"], CLOUD)
+case("the listing keeps stackingLinked and stackingJoinCode and says cloud in the block",
+     listing["stackingLinked"] is True and listing["stackingJoinCode"] == "H4RT-92BK-WNPC"
+     and listing["stacking"]["backend"] == "cloud" and listing["stacking"]["grant"] == ""
+     and listing["stacking"]["collabProjectId"] == "", str(listing["stacking"]))
+
+# Bind to a hub: as its owner, then as a listed coordinator, then as someone else.
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Orion Hub Wide!", "region": REGION, "notes": "hub stacked",
+    "requirements": {"filters": {"Ha": 3.0, "OIII": 3.0}},
+    "stacking": {"backend": "hub", "hubId": BH}}, token=BOBH)
+HUBP = made["project"]["id"]
+row = server_app.store.stack_project_of(HUBP) or {}
+doc = row.get("doc") or {}
+case("the hub's owner binds a collaboration to it", status == 200 and row, str(made)[:200])
+case("...the stacking project id is prj_ + 20 lower-case Crockford characters",
+     _re.fullmatch(r"prj_[0-9a-hjkmnp-tv-z]{20}", row.get("project_id", "")) is not None,
+     row.get("project_id", ""))
+case("...the slug is made from the name and fits the contract",
+     row.get("slug") == "orion-hub-wide" and _re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", row["slug"]),
+     row.get("slug", ""))
+case("...the join code is twelve characters as XXXX-XXXX-XXXX and a real one",
+     _re.fullmatch(r"[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}", row.get("join_code", "")) is not None
+     and server_app._stacking_join_code(row["join_code"]) == row["join_code"], row.get("join_code", ""))
+case("...unlisted by default, open, approval open, bound to the hub",
+     doc.get("visibility") == "unlisted" and doc.get("status") == "open"
+     and doc.get("approval") == "open" and row.get("hub") == BH, str(doc)[:200])
+case("...the document is a Project record: ids, filters, palette, grid, policy, licence",
+     doc.get("project_id") == row["project_id"] and doc.get("slug") == row["slug"]
+     and doc.get("name") == "Orion Hub Wide!" and doc.get("filters") == ["HA", "OIII"]
+     and doc.get("palette") == "HOO" and doc.get("licence") == "members_only"
+     and doc.get("rotation_from_first_light") is True
+     and doc.get("policy") == stack_defaults.POLICY, str(doc)[:300])
+grid = doc.get("grid") or {}
+case("...the grid is the region's centre and size in the contract's limits",
+     grid.get("center_ra_deg") == 84.0 and grid.get("center_dec_deg") == 0.0
+     and 64 <= grid.get("width_px", 0) <= 12000 and 64 <= grid.get("height_px", 0) <= 12000
+     and 0.1 <= grid.get("scale_arcsec_px", 0) <= 20
+     and abs(grid["width_px"] * grid["scale_arcsec_px"] / 3600.0 - 16.0) < 0.05
+     and abs(grid["height_px"] * grid["scale_arcsec_px"] / 3600.0 - 8.0) < 0.05, str(grid))
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since={SINCE}&wait=0", token=BHTOK)
+case("...and a project change for it is in the hub's feed",
+     [(c["kind"], c["key"]) for c in pulled["changes"]] == [("project", row["project_id"])],
+     str(pulled["changes"]))
+SINCE = pulled["seq"]
+status, second = call("POST", "/api/v1/projects", {
+    "name": "Orion Hub Wide!", "region": REGION,
+    "stacking": {"backend": "hub", "hubId": BH, "visibility": "public"}}, token=BOBH)
+other_row = server_app.store.stack_project_of(second["project"]["id"]) or {}
+case("a second collaboration of the same name gets its own unique slug and join code",
+     status == 200 and other_row.get("slug") == "orion-hub-wide-2"
+     and other_row["join_code"] != row["join_code"]
+     and other_row["doc"]["visibility"] == "public")
+
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Coordinator's", "region": REGION, "requirements": {"filters": {"Ha": 3.0}},
+    "stacking": {"backend": "hub", "hubId": BH}}, token=CAROL)
+COORD = made["project"]["id"]
+case("a coordinator the owner listed may bind to the hub too",
+     status == 200 and (server_app.store.stack_project_of(COORD) or {}).get("hub") == BH, str(made)[:160])
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "Not allowed", "region": REGION, "stacking": {"backend": "hub", "hubId": BH}},
+    token=ALICE)
+case("anybody else is refused, as 403, and nothing is made",
+     status == 403 and server_app.store._one("SELECT 1 AS x FROM projects WHERE name = ?", "Not allowed") is None,
+     f"{status} {answer}")
+status, answer = call("POST", "/api/v1/projects", {
+    "name": "No such hub", "region": REGION, "stacking": {"backend": "hub", "hubId": "hub_nope"}},
+    token=BOBH)
+case("...and so is a hub that does not exist", status == 403)
+status, _ = call("POST", "/api/v1/projects", {
+    "name": "No hub id", "region": REGION, "stacking": {"backend": "hub"}}, token=BOBH)
+case("...or a hub binding that names none", status == 403)
+call("PUT", f"/api/v1/hubs/{BH}/coordinators", {"coordinators": []}, token=BOBH)
+status, _ = call("PUT", f"/api/v1/projects/{CLOUD}", {"stacking": {"backend": "hub", "hubId": BH}},
+                 token=BOBH)
+case("an edit may move a collaboration onto a hub its owner owns", status == 200
+     and (server_app.store.stack_project_of(CLOUD) or {}).get("hub") == BH)
+call("PUT", f"/api/v1/hubs/{BH}/coordinators", {"coordinators": ["1004"]}, token=BOBH)
+payload = server_app.store.project(CLOUD)["payload"]
+case("...which clears the cloud join code, both ways",
+     payload["stackingJoinCode"] == "" and payload["stacking"]["backend"] == "hub")
+
+# The listing: who is handed the grant.
+OWNER_RIG = call("POST", "/api/v1/agents", {"name": "Bob's hub rig"}, token=BOBH)[1]["token"]
+JOINED_RIG, JOINED_ID = enrol("hub joiner", 389.0, 9576, 6388, 6.0)
+status, _ = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=JOINED_RIG)
+case("a telescope joins the hub-backed collaboration", status == 200)
+wanted_id = row["project_id"]
+mine_l = project_in_listing(OWNER_RIG, HUBP)["stacking"]
+joined_l = project_in_listing(JOINED_RIG, HUBP)["stacking"]
+third_l = project_in_listing(AGENT_TOKEN, HUBP)["stacking"]
+case("the listing's block names the hub and where its front door is",
+     mine_l["backend"] == "hub" and mine_l["hubId"] == BH and mine_l["hubName"] == "Bind hub"
+     and mine_l["hubLanUrl"] == "http://10.0.0.7:8790" and mine_l["collabProjectId"] == wanted_id
+     and mine_l["apiBase"] == BASE + "/stack/api/", str(mine_l))
+case("...the owner's own telescope is handed a grant without joining", mine_l["grant"].startswith("sfg_"))
+case("...a joined telescope is handed one", joined_l["grant"].startswith("sfg_"))
+case("...a third telescope, only browsing, gets the block and an empty grant",
+     third_l["backend"] == "hub" and third_l["collabProjectId"] == wanted_id and third_l["grant"] == "",
+     str(third_l))
+claims = hubs_module.verify_grant(mine_l["grant"], BHSEC)
+case("the owner's grant verifies with the hub's secret and names the project and the person",
+     claims and claims["hub"] == BH and claims["project"] == wanted_id
+     and claims["sub"] == "1002" and claims["name"] == "Bob", str(claims))
+claims = hubs_module.verify_grant(joined_l["grant"], BHSEC)
+case("...a joined one names its telescope and the project",
+     claims and claims["agent"] == JOINED_ID and claims["project"] == wanted_id
+     and claims["sub"] == JOINED_ID, str(claims))
+case("...and neither verifies under another hub's secret",
+     hubs_module.verify_grant(mine_l["grant"], reg_b["grantSecret"]) is None
+     and hubs_module.verify_grant(joined_l["grant"], reg_b["grantSecret"]) is None)
+old_view = project_in_listing(OWNER_RIG, HUBP)
+case("the old fields are as today: a hub project carries no join code for old plugins",
+     old_view["stackingLinked"] is False and old_view["stackingJoinCode"] == "")
+
+# Editing keeps the document in step; an old-form edit leaves a hub binding alone.
+status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"stackingJoinCode": ""}, token=BOBH)
+case("a blank stackingJoinCode from an old plugin does not unbind a hub project",
+     status == 200 and server_app._stacking_of(server_app.store.project(HUBP)["payload"])["backend"] == "hub")
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since={SINCE}&wait=0", token=BHTOK)
+SINCE = pulled["seq"]
+status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"name": "Orion Renamed"}, token=BOBH)
+doc = server_app.store.stack_project_of(HUBP)["doc"]
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since={SINCE}&wait=0", token=BHTOK)
+case("renaming a collaboration renames the stacking project and tells the hub",
+     doc["name"] == "Orion Renamed" and doc["slug"] == "orion-hub-wide"
+     and any(c["key"] == wanted_id for c in pulled["changes"]), str(pulled["changes"]))
+SINCE = pulled["seq"]
+
+# The backend cannot change once a frame exists.
+server_app.store._run("INSERT INTO stack_frames (frame_id, project_id) VALUES ('frm_t403', ?)", wanted_id)
+status, answer = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": ""}}, token=BOBH)
+case("with a frame stacked, unbinding is refused as a conflict", status == 409, f"{status} {answer}")
+status, answer = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {
+    "backend": "cloud", "joinCode": "H4RT-92BK-WNPC"}}, token=BOBH)
+case("...and so is moving it to the cloud", status == 409)
+status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": "hub", "hubId": BH},
+                                                     "notes": "still here"}, token=BOBH)
+case("...while an edit that keeps the binding goes through", status == 200)
+server_app.store._run("DELETE FROM stack_frames WHERE frame_id = 'frm_t403'")
+
+# Unbinding closes, never deletes.
+status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": ""}}, token=BOBH)
+row = server_app.store.stack_project_of(HUBP) or {}
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since={SINCE}&wait=0", token=BHTOK)
+case("unbinding marks the stacking project closed, keeps the row, and tells the hub",
+     status == 200 and row.get("doc", {}).get("status") == "closed"
+     and any(c["key"] == wanted_id for c in pulled["changes"]), str(row.get("doc", {}).get("status")))
+listing = project_in_listing(OWNER_RIG, HUBP)
+case("...and the listing no longer stacks it or hands out a grant",
+     listing["stacking"]["backend"] == "" and listing["stacking"]["grant"] == ""
+     and listing["stackingLinked"] is False)
+status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": "hub", "hubId": BH}}, token=BOBH)
+again = server_app.store.stack_project_of(HUBP)
+case("binding it again reopens the same stacking project",
+     status == 200 and again["project_id"] == wanted_id and again["join_code"] == row["join_code"]
+     and again["doc"]["status"] == "open")
+
+# The policy defaults are the contract's own, when the contract is at hand.
+spec = None
+for candidate in (ROOT.parent / "Rust" / "rapid-stacker-collab", ROOT.parent.parent / "Rust" / "rapid-stacker-collab",
+                  ROOT.parent / "rapid-stacker-collab", ROOT / "nina" / "docs" / "api" / ".."):
+    found = candidate / "docs" / "api" / "openapi.yaml" if candidate.name != ".." else candidate / "openapi.yaml"
+    if found.is_file():
+        spec = found
+        break
+try:
+    import yaml as _yaml
+except ImportError:
+    _yaml = None
+if spec is None or _yaml is None:
+    print("SKIP  policy defaults against openapi.yaml: "
+          + ("PyYAML is not installed" if spec else "no openapi.yaml beside this repository"))
+else:
+    schemas = _yaml.safe_load(spec.read_text(encoding="utf-8"))["components"]["schemas"]
+    contract = {key: value["default"] for key, value in schemas["Policy"]["properties"].items()
+                if "default" in value}
+    case("server/stack/defaults.py POLICY equals the contract's Policy defaults",
+         contract == stack_defaults.POLICY,
+         str({k: (contract.get(k), stack_defaults.POLICY.get(k))
+              for k in set(contract) | set(stack_defaults.POLICY)
+              if contract.get(k) != stack_defaults.POLICY.get(k)}))
+    filters_enum = tuple(schemas["CanonicalFilter"]["enum"])
+    case("...and CANONICAL_FILTERS equals the contract's CanonicalFilter",
+         filters_enum == stack_defaults.CANONICAL_FILTERS, str(filters_enum))
 
 # ------------------------------------------- live stacking: the schema
 print("\n-- live stacking: hub and stacking tables --")

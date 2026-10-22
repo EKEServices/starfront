@@ -1983,6 +1983,35 @@ per-filter stacks. The decisions behind it:
   owner's program fills its Edit form from that listing, and an owner who
   could not see the code would save it away blank). Everyone else is told
   only that the lights are stacked.
+- **Where it is stacked is a `stacking` block, and the join code is its
+  `cloud` case.** `POST`/`PUT /api/v1/projects` take `stacking: {backend:
+  "cloud"|"hub"|"", joinCode, apiBase, hubId, visibility?}`. `cloud` needs a
+  join code (checked as above) and is also written to `stackingJoinCode`, so
+  1.0.0.33 plugins, which know only that field, keep working; an old payload
+  with only the code reads as `cloud`. `hub` needs a hub the caller owns or is
+  listed on (`allowedCoordinators`), else 403, the answer for any action that is
+  not theirs, the same for a hub that does not exist. Binding mints the
+  stacking project the hub will serve (`prj_` and 20 lower-case Crockford
+  characters, a unique slug from the name, its own `XXXX-XXXX-XXXX` join code,
+  and a Collab `Project` record: a placeholder grid from the region with
+  `rotation_from_first_light`, the filters the collaboration asks for, the
+  contract's policy defaults from `server/stack/defaults.py`, `approval:
+  open`, and visibility `unlisted` unless the request says otherwise) and puts
+  a `project` row in the hub's pull feed; editing the collaboration keeps that
+  record in step. Setting the backend to blank closes the stacking project and
+  tells the hub; it is never deleted by this. Once a frame exists for the
+  project its backend and hub can no longer change (409), because the frames
+  would stay behind. A blank `stackingJoinCode` from an old plugin's Edit form
+  does not unbind a hub project: the listing never showed that plugin a code to
+  send back.
+- **The listing says where, and hands out the grant by the same rule.** Each
+  project in `GET /api/v1/agent/projects` gains `stacking: {backend, hubId,
+  hubName, hubLanUrl, apiBase, collabProjectId, grant}`. For a hub project
+  `apiBase` is this server's `STARFRONT_PUBLIC_URL` + `/stack/api/` and `grant`
+  is a fresh `sfg_` for that telescope's owner, but only for a telescope on the
+  collaboration or the owner's own; a browsing telescope gets the rest of the
+  block and an empty grant. `stackingLinked` and `stackingJoinCode` stay as they
+  were (the code of a `cloud` project, nothing for a hub one).
 - **The uploader is a second listener on N.I.N.A.'s image pipeline**, and finds
   a light's collaboration exactly the way the ledger does, by the target name
   N.I.N.A. stamped. The ledger and the reporting are untouched, and with the

@@ -386,6 +386,46 @@ class Store:
             "INSERT INTO stack_changes (hub, kind, key, at) VALUES (?, ?, ?, ?)",
             hub, kind, key, time.time()).lastrowid)
 
+    # -- live stacking: the projects bound to a hub ------------------------
+    def stack_project(self, project_id: str) -> dict[str, Any] | None:
+        return self._stack_row(self._one(
+            "SELECT * FROM stack_projects WHERE project_id = ?", project_id))
+
+    def stack_project_of(self, sf_project: str) -> dict[str, Any] | None:
+        """The stacking project a Starfront collaboration is bound to, if any."""
+        return self._stack_row(self._one(
+            "SELECT * FROM stack_projects WHERE sf_project = ?", sf_project))
+
+    @staticmethod
+    def _stack_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        if row is not None:
+            row["doc"] = json.loads(row["doc"] or "{}")
+        return row
+
+    def stack_slug_taken(self, slug: str) -> bool:
+        return self._one("SELECT 1 AS x FROM stack_projects WHERE slug = ?", slug) is not None
+
+    def add_stack_project(self, project_id: str, sf_project: str, hub: str, slug: str,
+                          join_code: str, doc: dict[str, Any]) -> bool:
+        """Insert; False when the id, slug or join code is already taken."""
+        try:
+            self._run(
+                "INSERT INTO stack_projects (project_id, sf_project, hub, slug, join_code,"
+                " doc) VALUES (?, ?, ?, ?, ?, ?)",
+                project_id, sf_project, hub, slug, join_code, json.dumps(doc))
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
+    def set_stack_project(self, project_id: str, hub: str, doc: dict[str, Any]) -> None:
+        """Replace the document (and the hub it is bound to), bumping `rev`."""
+        self._run("UPDATE stack_projects SET hub = ?, doc = ?, rev = rev + 1"
+                  " WHERE project_id = ?", hub, json.dumps(doc), project_id)
+
+    def stack_frame_count(self, project_id: str) -> int:
+        return int(self._one("SELECT COUNT(*) AS n FROM stack_frames WHERE project_id = ?",
+                             project_id)["n"])
+
     # -- agents ------------------------------------------------------------
     def add_agent(self, agent_id: str, token: str, name: str,
                   owner: str = "", owner_id: str = "") -> dict[str, Any]:
