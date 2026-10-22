@@ -30,7 +30,7 @@ from fastapi import APIRouter, Request
 
 from .auth import Auth, Caller, json_body, now_iso
 from .envelope import ApiError, ok, validation_failed
-from .frames import (FRAME_ID, UPLOAD_SECONDS, URL_SECONDS, WITHDRAW_SECONDS, AbortUpload, Uploads,
+from .frames import (FRAME_ID, origin_of, UPLOAD_SECONDS, URL_SECONDS, WITHDRAW_SECONDS, AbortUpload, Uploads,
                      extension_of, frame_type_of, iso_plus, new_frame_id, validate_request)
 from .rigs import Rigs
 
@@ -114,7 +114,7 @@ class Library:
         return who, rig
 
     # -- init ----------------------------------------------------------------
-    def do_init(self, who: Caller, rig: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    def do_init(self, who: Caller, rig: dict[str, Any], body: dict[str, Any], origin: str) -> dict[str, Any]:
         body = validate_request(body, library=True)
         if "stripped" not in body:
             raise validation_failed(("stripped", "is required"))
@@ -156,7 +156,7 @@ class Library:
                 mine["doc"]["url_expires"] = time.time() + URL_SECONDS
                 mine["doc"]["expires"] = time.time() + UPLOAD_SECONDS
                 self.save(mine)
-                return self.init_response(mine, True)
+                return self.init_response(mine, True, origin)
             self.quota(who, body["size"])
             frame_id = new_frame_id()
             rel = f"lib/{who.user_id}/{rig['rig_id']}/{frame_id}{extension_of(body['filename'])}"
@@ -167,7 +167,7 @@ class Library:
             self.store._run("INSERT INTO stack_library (frame_id, user_id, rig_id, status, path, doc)"
                             " VALUES (?, ?, ?, 'uploading', ?, ?)",
                             frame_id, who.user_id, rig["rig_id"], rel, json.dumps(doc))
-            return self.init_response(self.row(frame_id), False)
+            return self.init_response(self.row(frame_id), False, origin)
 
     def quota(self, who: Caller, size: int) -> None:
         used = self.usage(who.user_id)
@@ -181,11 +181,11 @@ class Library:
             raise ApiError("quota_exceeded", "The server has no room left for frames; tell the coordinator.",
                            quota="library_bytes", retry_after_s=3600)
 
-    def init_response(self, row: dict[str, Any], resumed: bool) -> dict[str, Any]:
+    def init_response(self, row: dict[str, Any], resumed: bool, origin: str) -> dict[str, Any]:
         d = row["doc"]
         return ok(message="Upload resumed." if resumed else "Upload started.", frame_id=row["frame_id"],
                   status="uploading", resumed=resumed, frame_type=d["frame_type"], rig_id=row["rig_id"],
-                  upload=self.up.instructions(d["upload_id"], d["size"]))
+                  upload=self.up.instructions(d["upload_id"], d["size"], origin))
 
     # -- complete and withdraw -----------------------------------------------
     def owned(self, who: Caller, rig: dict[str, Any], frame_id: str) -> dict[str, Any]:
@@ -307,7 +307,7 @@ class Library:
         @router.post("/rigs/{rig_id}/library/frames/init")
         async def init(rig_id: str, request: Request) -> dict[str, Any]:
             who, rig = self.access(request, rig_id, write=True)
-            return self.do_init(who, rig, await json_body(request))
+            return self.do_init(who, rig, await json_body(request), origin_of(request))
 
         @router.post("/rigs/{rig_id}/library/frames/{frame_id}/complete")
         async def complete(rig_id: str, frame_id: str, request: Request) -> dict[str, Any]:

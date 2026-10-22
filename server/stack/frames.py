@@ -41,6 +41,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from .. import files as files_mod
+from ..auth import setting as server_setting
 from . import defaults
 from .auth import Auth, Caller, json_body, now_iso
 from .envelope import ApiError, ok, validation_failed
@@ -156,6 +157,13 @@ def validate_request(body: dict[str, Any], *, library: bool) -> dict[str, Any]:
     return body
 
 
+def origin_of(request: Request) -> str:
+    """Where part URLs point: STARFRONT_PUBLIC_URL when set, else the request's own
+    scheme and host. Absolute, because the plugin's HttpClient has no base address."""
+    public = (server_setting("PUBLIC_URL") or "").strip().rstrip("/")
+    return public or str(request.base_url).rstrip("/")
+
+
 def xml_error(status: int, code: str, message: str) -> Response:
     """S3's error body, which is what a part-PUT client expects."""
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>' + code + "</Code><Message>"
@@ -198,7 +206,7 @@ class Uploads:
         return {r["part_number"]: r for r in self.store._all(
             "SELECT * FROM stack_parts WHERE upload_id = ?", upload_id)}
 
-    def instructions(self, upload_id: str, size: int) -> dict[str, Any]:
+    def instructions(self, upload_id: str, size: int, origin: str) -> dict[str, Any]:
         """The contract's `UploadInstructions`: what is stored, and URLs for the rest."""
         count = part_count(size)
         have = self.parts(upload_id)
@@ -208,7 +216,7 @@ class Uploads:
             if row is not None and row["size"] == part_size_of(size, n):
                 completed.append({"part_number": n, "etag": f'"{row["etag"]}"'})
             else:
-                urls.append({"part_number": n, "url": f"/stack/s3/{upload_id}/{n}",
+                urls.append({"part_number": n, "url": f"{origin}/stack/s3/{upload_id}/{n}",
                              "size": part_size_of(size, n)})
         return {"type": "multipart", "upload_id": upload_id, "part_size": PART_SIZE,
                 "part_count": count, "part_urls": urls, "completed_parts": completed,
@@ -558,7 +566,7 @@ class Frames:
                   rig_id=d.get("rig_id"), upload=upload)
 
     def do_init(self, who: Caller, project: dict[str, Any], member: dict[str, Any],
-                body: dict[str, Any]) -> dict[str, Any]:
+                body: dict[str, Any], origin: str) -> dict[str, Any]:
         d = project["doc"]
         if d.get("status") == "deleted":
             raise ApiError("project_deleted", "This project is scheduled for deletion.")
@@ -600,7 +608,7 @@ class Frames:
                 mine["doc"]["url_expires"] = time.time() + URL_SECONDS
                 mine["doc"]["expires"] = time.time() + UPLOAD_SECONDS
                 self.save(mine)
-                return self.init_response(mine, True, self.up.instructions(mine["upload_id"], mine["size"]))
+                return self.init_response(mine, True, self.up.instructions(mine["upload_id"], mine["size"], origin))
             if frames:
                 other = next((f for f in frames if f["user_id"] == who.user_id), frames[0])
                 extra: dict[str, Any] = {"status": other["status"]}
@@ -627,7 +635,7 @@ class Frames:
                 " upload_id, doc) VALUES (?, ?, ?, 'uploading', ?, ?, ?, ?, ?)",
                 frame_id, project["project_id"], who.user_id, sha, body["size"], rel, upload_id, json.dumps(doc))
             row = self.row(frame_id)
-            return self.init_response(row, False, self.up.instructions(upload_id, body["size"]))
+            return self.init_response(row, False, self.up.instructions(upload_id, body["size"], origin))
 
     # -- complete ------------------------------------------------------------
     def do_complete(self, who: Caller, project: dict[str, Any], member: dict[str, Any],
@@ -721,7 +729,7 @@ class Frames:
         @router.post("/projects/{project}/frames/init")
         async def init(project: str, request: Request) -> dict[str, Any]:
             who, row, member = self.access(request, project, write=True)
-            return self.do_init(who, row, member, await json_body(request))
+            return self.do_init(who, row, member, await json_body(request), origin_of(request))
 
         @router.post("/projects/{project}/frames/{frame_id}/complete")
         async def complete(project: str, frame_id: str, request: Request) -> dict[str, Any]:

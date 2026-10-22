@@ -2991,7 +2991,7 @@ def fits_bytes(size, seed):
 
 def put_part(url, data):
     """A part PUT as the plugin sends it: the body only, a Content-Length, no Authorization."""
-    request = urllib.request.Request(url if url.startswith("http") else BASE + url, data=data, method="PUT")
+    request = urllib.request.Request(url, data=data, method="PUT")
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.status, response.headers, response.read()
@@ -3036,10 +3036,10 @@ FEED1 = feed_since(0)["seq"]
 DATA_A = fits_bytes(2 * PART + 1000, 1)
 status, init_a = init_for(DATA_A, "M33_Ha_0001.fits")
 up_a = init_a.get("upload") or {}
-case("init answers a multipart upload of 16 MiB parts, three of them, with relative part URLs",
+case("init answers a multipart upload of 16 MiB parts, three of them, with absolute part URLs on the public origin",
      status == 200 and init_a.get("status") == "uploading" and init_a.get("resumed") is False
      and up_a.get("type") == "multipart" and up_a.get("part_size") == PART and up_a.get("part_count") == 3
-     and [p["url"] for p in up_a["part_urls"]] == [f"/stack/s3/{up_a['upload_id']}/{n}" for n in (1, 2, 3)]
+     and [p["url"] for p in up_a["part_urls"]] == [f"{BASE}/stack/s3/{up_a['upload_id']}/{n}" for n in (1, 2, 3)]
      and [p["size"] for p in up_a["part_urls"]] == [PART, PART, 1000] and up_a["completed_parts"] == []
      and conforms("FrameInitResponse", init_a), f"{status} {why('FrameInitResponse', init_a)} {str(init_a)[:200]}")
 case("...the upload id is 32 random bytes in hex and the frame is a lower-case ULID",
@@ -3077,12 +3077,12 @@ case("the same hash with another size is not a resume: 400 validation_failed",
 bad_wrong_size = put_part(urls_a[2], DATA_A[PART:PART + 1000])
 case("a part of the wrong size is refused (400)", bad_wrong_size[0] == 400, str(bad_wrong_size[0]))
 case("a part number outside the upload is refused (400)",
-     put_part(f"/stack/s3/{up_a['upload_id']}/9", b"x")[0] == 400 and put_part(f"/stack/s3/{up_a['upload_id']}/0", b"x")[0] == 400)
+     put_part(f"{BASE}/stack/s3/{up_a['upload_id']}/9", b"x")[0] == 400 and put_part(f"{BASE}/stack/s3/{up_a['upload_id']}/0", b"x")[0] == 400)
 before = sorted(str(p) for p in RELAY.rglob("*"))
-stray = put_part(f"/stack/s3/{'ab' * 32}/1", b"x" * 10)
+stray = put_part(f"{BASE}/stack/s3/{'ab' * 32}/1", b"x" * 10)
 case("a stray PUT to an unknown upload id is refused (403) and writes nothing",
      stray[0] == 403 and sorted(str(p) for p in RELAY.rglob("*")) == before, str(stray[0]))
-case("...and so is one whose id is not even an upload id", put_part("/stack/s3/nonsense/1", b"x")[0] == 403)
+case("...and so is one whose id is not even an upload id", put_part(f"{BASE}/stack/s3/nonsense/1", b"x")[0] == 403)
 status, headers, _ = put_part(urls_a[2], DATA_A[PART:2 * PART])
 sent_a[2] = headers.get("ETag", "")
 case("the missing part arrives", status == 200)
@@ -3131,7 +3131,7 @@ todo = sorted(up_b["part_urls"], key=lambda p: p["part_number"])
 
 def plugin_part(p):
     offset = (p["part_number"] - 1) * up_b["part_size"]       # UploadEngine: (PartNumber - 1) * PartSize
-    status_, headers_, _ = put_part(_up.urljoin(BASE + "/", p["url"]), DATA_B[offset:offset + p["size"]])
+    status_, headers_, _ = put_part(p["url"], DATA_B[offset:offset + p["size"]])
     return p["part_number"], status_, headers_.get("ETag")
 
 
@@ -3363,6 +3363,8 @@ case("library init: a multipart upload, status uploading, the rig and a dark, va
      and lib_up.get("part_count") == 1 and conforms("LibraryFrameInitResponse", got), f"{status} {why('LibraryFrameInitResponse', got)} {str(got)[:200]}")
 LF = got["frame_id"]
 status, headers, _ = put_part(lib_up["part_urls"][0]["url"], DATA_L)
+case("library part URLs are absolute on the public origin too",
+     all(p["url"].startswith(BASE + "/stack/s3/") for p in lib_up["part_urls"]))
 case("a library part PUT is the same route", status == 200 and headers.get("ETag") == '"' + _hl.md5(DATA_L).hexdigest() + '"')
 status, got = lib_init(DATA_L)
 case("library init again resumes", status == 200 and got.get("resumed") is True and got["frame_id"] == LF
