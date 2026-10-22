@@ -199,7 +199,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.1: T1 (sentinel, quota), resume, duplicate; parts written at offset; ETags; `bad_etags`, `upload_incomplete`, `size_mismatch`; magic check; T2/T2b and the prepare send; expired uploads aborted; `library/frames/*` under `lib/`.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T302 — Contributor routes
+- [x] T302 — Contributor routes
       **Files:** RSC `worker/crates/hub/src/routes/projects.rs`, tests
       **Do:** §3.2: resolve-join-code, project, join, membership, rigs (fingerprint per `contract-examples.json`), `filters/normalize`, frames list/get/withdraw, status, masters, events, `aliases.json`; signed URLs for private projects.
       **Verify:** `cd worker && cargo test -p collab-hub`
