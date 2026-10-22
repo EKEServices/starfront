@@ -371,7 +371,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 6 — the N.I.N.A. plugin (SF, §Phase 6)
 
-- [ ] T601 — Models, settings and link fields for a per-project backend
+- [x] T601 — Models, settings and link fields for a per-project backend
       **Files:** SF `nina/src/Starfront.Collab/Server/Models.cs`, `Settings/StarfrontSettings.cs`, `Services/Stacking/StackingLinks.cs`
       **Do:** §6.1: `StackingBinding` on the listing; `StackingHubTrustLan`, `StackingDefaultBackend`; link `Backend`, `ApiBase`, `LanApiBase`, `Grant`, `GrantExpiresUtc`, `HubId`.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release`

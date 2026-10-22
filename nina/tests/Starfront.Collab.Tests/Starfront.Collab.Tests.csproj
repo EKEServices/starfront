@@ -18,6 +18,9 @@
     <!-- The plugin itself is a WPF library that only runs inside N.I.N.A.; the
          files below use neither, so they are compiled in here by link. Add a
          file to this list only if it has no N.I.N.A. or WPF reference. -->
+    <Compile Include="../../src/Starfront.Collab/Server/Models.cs" Link="Linked/Models.cs" />
+    <Compile Include="../../src/Starfront.Collab/Sky/Filters.cs" Link="Linked/Filters.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingLink.cs" Link="Linked/StackingLink.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/BrowserUrls.cs" Link="Linked/BrowserUrls.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/JoinCodes.cs" Link="Linked/JoinCodes.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingMapping.cs" Link="Linked/StackingMapping.cs" />
