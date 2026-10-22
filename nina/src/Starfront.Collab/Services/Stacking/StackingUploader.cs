@@ -120,14 +120,14 @@ namespace Starfront.Collab.Services.Stacking {
             get {
                 lock (clientsGate) {
                     if (disposed) throw new ObjectDisposedException(nameof(StackingUploader));
-                    clients ??= new StackingClients(settings);
-                    return clients.Api;
+                    clients ??= new StackingClients(settings, Links);
+                    return clients.Router;
                 }
             }
         }
 
         private StackingClients EnsureClients() {
-            lock (clientsGate) return clients ??= new StackingClients(settings);
+            lock (clientsGate) return clients ??= new StackingClients(settings, Links);
         }
 
         private void DropClients() {
@@ -156,7 +156,7 @@ namespace Starfront.Collab.Services.Stacking {
                     if (recovered > 0) Logger.Info($"Starfront stacking: {recovered} upload(s) interrupted last time will resume");
                     var connections = EnsureClients();
                     limiter = new BandwidthLimiter(SystemClock.Instance, settings.StackingBandwidthKBps);
-                    var engine = new UploadEngine(connections.Api, connections.S3Http, SystemClock.Instance, limiter);
+                    var engine = new UploadEngine(connections.Router, connections.S3Http, SystemClock.Instance, limiter);
                     runner = new UploadRunner(queue, engine, new UploadPolicy(SystemClock.Instance), settings.StackingPolicy, CurrentImagingState,
                                               SystemClock.Instance, new UploadRunnerOptions {
                                                   TempDirectory = TempDirectory,
