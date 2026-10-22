@@ -294,13 +294,24 @@ straight to Rapid Stacker Collab, and the ledger and reports are as before.
 
 ## Driving it
 
-There is no web interface here, and there is not going to be one. The
-coordinator's screen is the **Collab** tab in Starfront, which holds both
-credentials and makes these calls on the operator's behalf — so a token that can
-rewrite every project on the server is never in a page, in devtools, or in any
-extension that asks for it.
+The server serves **read-only progress pages** under `/stack/`: a collaboration's
+project page (`/stack/p/<slug>`), each filter (`/stack/p/<slug>/filter/<F>`) and
+the combined colour preview (`/stack/p/<slug>/combined`). They are static files
+in `server/web/stack/` (ported from Rapid Stacker Collab, MPL-2.0, see its
+`NOTICE.txt`), read what a hub has pushed to `STARFRONT_DATA/stack/public/<project
+id>/` through `GET /stack/public/...`, and run under a strict Content-Security-Policy
+(`script-src 'self'`, no inline script or handler; `tools/check_csp.py` checks it).
+A cookie dashboard ("My projects") joins them next. The rest of the server
+(`/download`, `/files`, `/sky`) is unchanged and outside that policy.
+
+What is still **not** here is any page that can write or administer. The
+**admin token never reaches a browser**, and the coordinator's and owner's tools
+stay in the **Collab** tab in Starfront, which holds both credentials and makes
+these calls on the operator's behalf - so a token that can rewrite every project
+on the server is never in a page, in devtools, or in any extension that asks for
+it.
 
 `python tools/check_server.py` exercises the whole protocol over real HTTP
 against a real server on a real port. `python tools/check_coordinator.py`
 covers the tiling arithmetic and tries each credential against the other's
-endpoints.
+endpoints. `python tools/check_csp.py` checks the pages for inline script.
