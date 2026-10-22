@@ -453,6 +453,19 @@ class CollabAgentRequest(BaseModel):
     owner: str = Field(default="", max_length=80)
 
 
+class CollabStackingRequest(BaseModel):
+    """Where a collaboration's lights are stacked; the server checks it.
+
+    Blank `backend` is none; `cloud` needs `joinCode`; `hub` needs `hubId`
+    (one the signed-in person owns, or coordinates).
+    """
+
+    backend: str = Field(default="", pattern="^(cloud|hub|)$")
+    joinCode: str = Field(default="", max_length=40)
+    hubId: str = Field(default="", max_length=80)
+    visibility: str | None = Field(default=None, pattern="^(public|unlisted|private)$")
+
+
 class CollabProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     # A rectangle of sky: ra/dec/width/height/rotation, degrees throughout.
@@ -474,6 +487,9 @@ class CollabProjectRequest(BaseModel):
     # The Rapid Stacker Collab join code that stacks the lights as they land;
     # blank for none. The server checks and normalises it.
     stackingJoinCode: str = Field(default="", max_length=40)
+    # The fuller form (cloud join code, or one of your hubs). Wins over the
+    # join code above when both are sent.
+    stacking: CollabStackingRequest | None = None
 
 
 class CollabDelegateRequest(BaseModel):
@@ -3037,6 +3053,16 @@ def collab_activity() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/collab/hubs")
+def collab_hubs() -> dict[str, Any]:
+    """The hubs the signed-in person has registered, for the stacking picker.
+
+    Fetched as the person (never as a telescope), because the server lists
+    only the hubs its caller owns.
+    """
+    return {"hubs": _admin(collab_admin.hubs)}
+
+
 @app.post("/api/collab/projects")
 def collab_add_project(body: CollabProjectRequest) -> dict[str, Any]:
     source = body.region
@@ -3062,7 +3088,8 @@ def collab_add_project(body: CollabProjectRequest) -> dict[str, Any]:
     made = _admin(collab_admin.add_project, body.name.strip(), region,
                   body.requirements, body.goals,
                   str(config.get("collab", "coordinator", "") or ""),
-                  body.notes, kind, body.collectFiles, body.stackingJoinCode)
+                  body.notes, kind, body.collectFiles, body.stackingJoinCode,
+                  body.stacking.model_dump(exclude_none=True) if body.stacking else None)
     # So it appears in the list straight away. A collaboration you started that
     # you cannot see is one you cannot join, and the list is fetched as an
     # *agent* while this was created as a coordinator — two different calls, and
@@ -3115,6 +3142,7 @@ class CollabProjectUpdateRequest(BaseModel):
     collectFiles: bool | None = None
     # Sent only when the coordinator changed it; blank clears it.
     stackingJoinCode: str | None = Field(default=None, max_length=40)
+    stacking: CollabStackingRequest | None = None
     status: str | None = Field(default=None, pattern="^(open|closed)$")
 
 
