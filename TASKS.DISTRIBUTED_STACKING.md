@@ -376,7 +376,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §6.1: `StackingBinding` on the listing; `StackingHubTrustLan`, `StackingDefaultBackend`; link `Backend`, `ApiBase`, `LanApiBase`, `Grant`, `GrantExpiresUtc`, `HubId`.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release`
 
-- [ ] T602 — `StackingClients` cache, `GrantTokenStore` and `RoutingApiClient`
+- [x] T602 — `StackingClients` cache, `GrantTokenStore` and `RoutingApiClient`
       **Files:** SF `nina/src/Starfront.Collab/Services/Stacking/{StackingClients,GrantTokenStore,RoutingApiClient,StackingUploader}.cs`, `nina/tests/Starfront.Collab.Tests/`
       **Do:** §6.2: a client per (base, token source); project-scoped calls routed by project, rig and library calls by the default backend (D001), device calls to the cloud; Core untouched.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release && dotnet test tests/Starfront.Collab.Tests`
