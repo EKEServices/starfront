@@ -154,7 +154,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 2 — worker changes (RSC, §Phase 2)
 
-- [ ] T201 — Worker config names for a hub
+- [x] T201 — Worker config names for a hub
       **Files:** RSC `worker/crates/worker/src/daemon/config.rs`, `docs/runbooks/worker-config.md`, `backend/terraform/worker-config.tf` (the name list only)
       **Do:** §2.2: `COLLAB_HUB_URL`, `COLLAB_HUB_CERT_SHA256`, `COLLAB_IDLE_POLICY`, `COLLAB_BUSY_FILE`, `COLLAB_WORK_WINDOW`, `COLLAB_WORKER_TOKEN_FILE`; AWS names not required with a hub; a mixed configuration refused by `config check`.
       **Verify:** `cd worker && cargo test -p collab-worker && cd ../backend/terraform && terraform init -backend=false -input=false >/dev/null && env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN terraform test`
