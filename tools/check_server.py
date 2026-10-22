@@ -4352,6 +4352,90 @@ del os.environ["STARFRONT_STACK_HUB_BUDGET_GB"]
 status, got = push({}, [(f"{FD_ID}/big/a.png", b"\0" * 5000)])
 case("...and the default budget lets it in", status == 200 and (PUBDIR / FD_ID / "big" / "a.png").is_file(), f"{status} {got}")
 
+# ------------------------------------------- live stacking: a streamed master (T421)
+print("\n-- live stacking: a streamed master --")
+import hashlib as _hashlib                                         # noqa: E402
+import http.client as _hc                                          # noqa: E402
+from urllib.parse import urlsplit as _urlsplit                     # noqa: E402
+
+
+def put_master(project, name, chunks, sha=None, length=True, token=None, hub=None):
+    """PUT a master in pieces; `chunks` is a list of bytes (a generator would do)."""
+    total = sum(len(c) for c in chunks)
+    parts = _urlsplit(BASE)
+    conn = _hc.HTTPConnection(parts.hostname, parts.port, timeout=120)
+    headers = {"Authorization": f"Bearer {token or BHTOK}", "Content-Type": "application/octet-stream"}
+    if sha is not None:
+        headers["X-Content-SHA256"] = sha
+    if length:
+        headers["Content-Length"] = str(total)
+    try:
+        conn.request("PUT", f"/api/v1/hubs/{hub or BH}/push/{project}/masters/{name}", body=iter(chunks),
+                     headers=headers, encode_chunked=not length)
+        response = conn.getresponse()
+        raw = response.read()
+        return response.status, (json.loads(raw) if raw[:1] == b"{" else raw)
+    finally:
+        conn.close()
+
+
+BIG_PIECE = os.urandom(1 << 20)
+BIG = [BIG_PIECE] * 40                                              # 40 MiB, made here, never committed
+BIG_SHA = _hashlib.sha256(BIG_PIECE * 40).hexdigest()
+BIG_REC = {**MASTER_REC, "gold_seq": 4, "format": "xisf", "file": "HA_g000004_xisf.xisf"}
+MASTERS = PUBDIR / FD_ID / "masters"
+
+status, got = push({}, [(f"{FD_ID}/masters/HA_g000004_xisf.json", json.dumps(BIG_REC).encode())])
+case("the record of a big master goes by the multipart push", status == 200, f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/masters", token=OWNER_GRANT)
+case("...and with no data file beside it the list holds only the earlier master",
+     status == 200 and [m["gold_seq"] for m in got["masters"]] == [3], str(got))
+
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", BIG, sha=BIG_SHA, length=False)
+case("a master without Content-Length is 411", status == 411, f"{status} {got}")
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", [b"x" * 100])
+case("a master without X-Content-SHA256 is 400", status == 400, f"{status} {got}")
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", [b"x" * 100], sha="0" * 64, token="sfh_" + "0" * 64)
+case("a master with an unknown hub token is 401", status == 401, f"{status} {got}")
+status, got = put_master("prj_otherhub", "HA_g000004_xisf.xisf", [b"x" * 100], sha="0" * 64)
+case("a master for another hub's project is 409", status == 409, f"{status} {got}")
+for bad in ("..%2Fx.fits", "a%2Fb.fits", ".hidden.fits", "run.sh", "x.json", "x.png"):
+    status, got = put_master(FD_ID, bad, [b"x" * 100], sha="0" * 64)
+    case(f"the master name {bad!r} is refused", status in (400, 404, 422) and status != 200, f"{status}")
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", [b"x" * 100], sha="0" * 64)
+case("a wrong digest is 422 and nothing is kept (no file, no temp file)",
+     status == 422 and not (MASTERS / "HA_g000004_xisf.xisf").exists()
+     and not [q for q in MASTERS.iterdir() if q.name.endswith(".tmp")], f"{status} {got}")
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", BIG, sha="f" * 64)
+case("...also for a 40 MiB body", status == 422 and not (MASTERS / "HA_g000004_xisf.xisf").exists()
+     and not [q for q in MASTERS.iterdir() if q.name.endswith(".tmp")], f"{status} {got}")
+
+os.environ["STARFRONT_STACK_HUB_BUDGET_GB"] = "0.01"             # about 10 MB: less than the master
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", BIG, sha=BIG_SHA)
+case("a master that would pass the hub's byte budget is 429, nothing kept",
+     status == 429 and not (MASTERS / "HA_g000004_xisf.xisf").exists(), f"{status} {got}")
+del os.environ["STARFRONT_STACK_HUB_BUDGET_GB"]
+
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", BIG, sha=BIG_SHA)
+case("a 40 MiB master streams in", status == 200 and got["ok"] and got["written"] is True
+     and (MASTERS / "HA_g000004_xisf.xisf").stat().st_size == 40 << 20, f"{status} {got}")
+case("...with no temp file left", not [q for q in MASTERS.iterdir() if q.name.endswith(".tmp")])
+status, got = front("GET", f"/projects/{FD_ID}/masters", token=OWNER_GRANT)
+big = [m for m in (got.get("masters") or []) if m.get("gold_seq") == 4]
+case("...and a member's masters list now holds it",
+     status == 200 and conforms("MasterListResponse", got) and len(big) == 1
+     and big[0]["size_bytes"] == 40 << 20 and big[0]["format"] == "xisf"
+     and big[0]["url"].endswith(f"/masters/HA_g000004_xisf.xisf"), f"{status} {why('MasterListResponse', got)}")
+status, got = front("GET", f"/projects/{FD_ID}/masters", token=SECOND_GRANT)
+case("...and a non-member does not get the list", status in (401, 400) and not got.get("masters"), f"{status} {got}")
+status, _, _ = raw_get(f"/stack/public/{FD_ID}/masters/HA_g000004_xisf.xisf")
+case("...nor the file from the open route", status == 404, str(status))
+before = (MASTERS / "HA_g000004_xisf.xisf").stat().st_mtime_ns
+status, got = put_master(FD_ID, "HA_g000004_xisf.xisf", BIG, sha=BIG_SHA)
+case("the same master again is a 200 that rewrites nothing",
+     status == 200 and got["written"] is False and (MASTERS / "HA_g000004_xisf.xisf").stat().st_mtime_ns == before,
+     f"{status} {got}")
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
