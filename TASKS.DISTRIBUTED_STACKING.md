@@ -345,7 +345,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** a hub can turn every feed row into a full record, and removals reach it.
       **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
 
-- [ ] T420 — The hub reads members and rigs from Starfront; no placeholder names (RSC)
+- [x] T420 — The hub reads members and rigs from Starfront; no placeholder names (RSC)
       **Files:** RSC `worker/crates/hub/src/starfront/`, `worker/crates/hub/tests/starfront_sync.rs`
       **Do:** after T419: the sync fetches full member and rig records for feed rows (batched), upserts them (members: the display-name uniqueness rule — check inside the transaction, T302 danger note), applies removals, and never writes a placeholder display name; `collab-hub check` reports whether the Starfront credentials are present and readable.
       **Done when:** members carry their real display names on the hub and on every pushed status document.
