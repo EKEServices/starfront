@@ -242,7 +242,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 - [ ] T310 — Real data through a standalone hub
       **Manual:** the Elephant's Trunk subset through `collab-uploader` to the Mac hub, the Windows worker preparing against the Mac's SMB share; previews rendered by `website/scripts/browser-smoke.mjs --sim <hub>/objects/public`.
 
-- [ ] T311 — Filter remapping and the library's reprepare fan-out on the hub (RSC)
+- [x] T311 — Filter remapping and the library's reprepare fan-out on the hub (RSC)
       **Files:** RSC `worker/crates/hub/src/routes/{projects,frames}.rs`, `worker/crates/hub/src/store/`, `worker/crates/hub/tests/`
       **Do:** found in T302/T301: (1) T12 — when a member's filter mapping changes (`PUT membership` or `filters-remap`), requeue that member's quarantined `unknown_filter` frames exactly as RSC `backend/lambdas/filters-remap` and `shared/frames.js` do; (2) open point 102 — a library frame completing fans out the debounced `reprepare` job to the owner's open projects, as `shared/library.js` does; (3) rate limits on `resolve-join-code`, `join`, `frames/init` and `frames/complete` matching the Lambdas' `rate-limit` table rules.
       **Done when:** a remap requeues the right frames, a library arrival files the reprepare job, and the limits answer 429 `rate_limited`.
