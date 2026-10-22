@@ -2242,6 +2242,138 @@ status, _, _ = raw("POST", "/files/signout", b"", {"Cookie": jar})
 status, info, _ = raw("GET", "/api/v1/files/projects", None, {"Cookie": jar})
 case("signing out on the page forgets the cookie's token", not info["signedIn"])
 
+# ------------------------------------------- live stacking: hubs
+print("\n-- live stacking: hubs --")
+from server import hubs as hubs_module                           # noqa: E402
+
+status, _ = call("POST", "/api/v1/hubs", {"name": "x"})
+case("registering a hub needs somebody signed in", status == 401)
+status, _ = call("POST", "/api/v1/hubs", {"name": "x"}, token=AGENT_TOKEN)
+case("...and a telescope's token is not a person", status == 401)
+status, reg = call("POST", "/api/v1/hubs",
+                   {"name": "Eddie's hub", "lanUrl": "http://10.0.0.5:8790"}, token=BOB3)
+HUB, HTOK, HSEC = reg.get("hubId"), reg.get("hubToken", ""), reg.get("grantSecret", "")
+case("a person registers a hub and gets an id, a token and a secret once",
+     status == 200 and HUB and HTOK.startswith("sfh_") and len(HTOK) == 68
+     and len(HSEC) == 43, str(reg)[:120])
+status, bad = call("POST", "/api/v1/hubs", {"name": "", "lanUrl": "x"}, token=BOB3)
+case("a nameless hub is refused", status == 400)
+status, bad = call("POST", "/api/v1/hubs", {"name": "h", "lanUrl": "ftp://x"}, token=BOB3)
+case("...and so is a lanUrl that is not http(s)", status == 400)
+status, listed = call("GET", "/api/v1/hubs", token=BOB3)
+case("the owner lists their hub",
+     status == 200 and [h["id"] for h in listed["hubs"]] == [HUB]
+     and listed["hubs"][0]["lanUrl"] == "http://10.0.0.5:8790")
+case("...and the list never carries the token or the secret",
+     HTOK not in json.dumps(listed) and HSEC not in json.dumps(listed)
+     and not any(k in listed["hubs"][0] for k in ("token", "grant_secret", "grantSecret", "hubToken")))
+case("only a hash of the token is stored",
+     server_app.store.hub(HUB)["token"] == hubs_module.hash_token(HTOK) != HTOK
+     and server_app.store.hub(HUB)["grant_secret"] == HSEC)
+status, other = call("GET", "/api/v1/hubs", token=ALICE)
+case("another person does not see it", status == 200 and other["hubs"] == [])
+status, _ = call("DELETE", f"/api/v1/hubs/{HUB}", token=ALICE)
+case("...and cannot revoke it", status == 404)
+status, _ = call("PUT", f"/api/v1/hubs/{HUB}/coordinators", {"coordinators": ["1001"]}, token=ALICE)
+case("...or change its coordinators", status == 404)
+
+status, _ = call("POST", f"/api/v1/hubs/{HUB}/heartbeat", {"workers": 2}, token=HTOK)
+case("a heartbeat on the hub's token is taken", status == 200)
+status, _ = call("POST", f"/api/v1/hubs/{HUB}/heartbeat", {"workers": 2}, token="sfh_" + "0" * 64)
+case("...a wrong token is refused", status == 401)
+status, _ = call("POST", f"/api/v1/hubs/{HUB}/heartbeat", {"workers": 2}, token=BOB3)
+case("...and so is a person's token", status == 401)
+status, listed = call("GET", "/api/v1/hubs", token=BOB3)
+case("the heartbeat's status and time are kept",
+     listed["hubs"][0]["status"] == {"workers": 2} and listed["hubs"][0]["seen"] > 0)
+
+status, got = call("PUT", f"/api/v1/hubs/{HUB}/coordinators",
+                   {"coordinators": ["1001", "1001", "1002"]}, token=BOB3)
+case("the owner sets the coordinators list (deduplicated, owner implied)",
+     status == 200 and got["allowedCoordinators"] == ["1001"], str(got))
+status, _ = call("PUT", f"/api/v1/hubs/{HUB}/coordinators", {"coordinators": "1001"}, token=BOB3)
+case("...a list that is not a list is refused", status == 400)
+_, listed = call("GET", "/api/v1/hubs", token=BOB3)
+case("...and the hub reports it", listed["hubs"][0]["allowedCoordinators"] == ["1001"])
+
+# The change feed: pull answers what came after `since`, and waits when
+# there is nothing.
+s1 = server_app.store.append_change(HUB, "project", "prj_a")
+s2 = server_app.store.append_change(HUB, "member", "prj_a/u1")
+server_app.store.append_change("hub_elsewhere", "project", "prj_z")
+status, got = call("GET", f"/api/v1/hubs/{HUB}/pull?since=0", token=HTOK)
+case("pull returns this hub's changes, in order, and the new seq",
+     status == 200 and [c["seq"] for c in got["changes"]] == [s1, s2] and got["seq"] == s2
+     and got["changes"][0]["kind"] == "project" and got["changes"][0]["key"] == "prj_a", str(got)[:200])
+status, got = call("GET", f"/api/v1/hubs/{HUB}/pull?since={s1}", token=HTOK)
+case("...only those after `since`", [c["seq"] for c in got["changes"]] == [s2])
+began = time.time()
+status, got = call("GET", f"/api/v1/hubs/{HUB}/pull?since={s2}&wait=1", token=HTOK)
+case("with nothing new it waits, then answers empty at the same seq",
+     status == 200 and got == {"changes": [], "seq": s2} and 0.8 < time.time() - began < 3,
+     f"{time.time() - began:.1f}s")
+late = []
+threading.Timer(0.6, lambda: late.append(server_app.store.append_change(HUB, "rig", "u1/r1"))).start()
+began = time.time()
+status, got = call("GET", f"/api/v1/hubs/{HUB}/pull?since={s2}", token=HTOK)
+case("...and a change arriving meanwhile ends the wait early",
+     status == 200 and late and got["seq"] == late[0] and time.time() - began < 5,
+     f"{time.time() - began:.1f}s")
+began = time.time()
+status, _ = call("GET", "/api/v1/hubs/other/pull?since=0", token=HTOK)
+case("a hub cannot pull another hub's id", status == 401)
+status, _ = call("GET", f"/api/v1/hubs/{HUB}/pull?since=0", token=BOB3)
+case("...nor a person pull on the hub's behalf", status == 401)
+case("pull recorded the hub's cursor", server_app.store.hub(HUB)["cursor"] >= s2)
+
+# Grants.
+NOW = 1_800_000_000
+hub_row = server_app.store.hub(HUB)
+grant = hubs_module.mint_grant(hub_row, "1001", "Alice", "agent_1", "prj_a", NOW)
+claims = hubs_module.verify_grant(grant, HSEC, NOW + 10)
+case("a grant starts sfg_ and round-trips",
+     grant.startswith("sfg_") and claims and claims["hub"] == HUB and claims["sub"] == "1001"
+     and claims["name"] == "Alice" and claims["agent"] == "agent_1"
+     and claims["project"] == "prj_a" and claims["v"] == 1
+     and claims["exp"] == claims["iat"] + 86400 == NOW + 86400, str(claims))
+payload, signature = grant[4:].split(".")
+import base64                                                    # noqa: E402
+
+
+def b64d(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def b64e(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+forged = dict(json.loads(b64d(payload)), sub="1002")
+tampered = "sfg_" + b64e(json.dumps(forged, separators=(",", ":")).encode()) + "." + signature
+case("a tampered payload is refused", hubs_module.verify_grant(tampered, HSEC, NOW + 10) is None)
+flipped = signature[:-2] + ("AA" if signature[-2:] != "AA" else "BB")
+case("a tampered signature is refused",
+     hubs_module.verify_grant(f"sfg_{payload}.{flipped}", HSEC, NOW + 10) is None)
+case("an expired grant is refused (past the leeway)",
+     hubs_module.verify_grant(grant, HSEC, NOW + 86400 + 301) is None)
+case("...but a few minutes of clock difference is forgiven",
+     hubs_module.verify_grant(grant, HSEC, NOW + 86400 + 200) is not None
+     and hubs_module.verify_grant(grant, HSEC, NOW - 200) is not None
+     and hubs_module.verify_grant(grant, HSEC, NOW - 301) is None)
+status, reg_b = call("POST", "/api/v1/hubs", {"name": "Hub B"}, token=BOB3)
+case("hub A's grant fails under hub B's secret",
+     hubs_module.verify_grant(grant, reg_b["grantSecret"], NOW + 10) is None)
+case("garbage is refused without raising",
+     all(hubs_module.verify_grant(junk, HSEC, NOW) is None
+         for junk in ("", "sfg_", "sfg_.", "sfg_abc.def", "rscu_x", "sfg_" + payload, "sfg_!!.!!")))
+
+status, _ = call("DELETE", f"/api/v1/hubs/{HUB}", token=BOB3)
+case("the owner revokes the hub", status == 200)
+status, _ = call("POST", f"/api/v1/hubs/{HUB}/heartbeat", {}, token=HTOK)
+case("...and its token stops working", status == 401)
+_, listed = call("GET", "/api/v1/hubs", token=BOB3)
+case("...and it is gone from the list", [h["name"] for h in listed["hubs"]] == ["Hub B"])
+
 # ------------------------------------------- live stacking: the schema
 print("\n-- live stacking: hub and stacking tables --")
 import sqlite3                                                   # noqa: E402

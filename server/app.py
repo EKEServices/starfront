@@ -43,6 +43,7 @@ from astrocontrol import catalog, collab, filters                # noqa: E402
 from astrocontrol.config import data_root                        # noqa: E402
 from server import auth                                          # noqa: E402
 from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
+from server.hubs import Hubs                                         # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -2185,6 +2186,13 @@ def sky_file(name: str):
 FILES_DIR = Path(auth.setting("FILES") or DATA / "files")
 files = Files(app, store, FILES_DIR, _person, owns_project, DISCORD.owners,
               DISCORD.public_url, auth.new_login_code)
+
+
+# ---------------------------------------------------------------------------
+# Live stacking: the hubs on people's own networks. See server/hubs.py.
+# ---------------------------------------------------------------------------
+
+hubs = Hubs(app, store, _person, may_start)
 
 
 # ---------------------------------------------------------------------------

@@ -2235,6 +2235,37 @@ GET  /api/images/{id}/download
 Driver failures come back as HTTP 400 with the driver's own message, which the UI
 shows as a toast.
 
+### The server: hubs (live stacking)
+
+A hub is a `collab-hub` on somebody's own network. It cannot be reached from the
+server, so it makes every call. People call with their normal sign-in token; the
+hub calls with its own `sfh_` token.
+
+```
+POST   /api/v1/hubs                      {name, lanUrl?} -> {hubId, hubToken, grantSecret}
+                                         anyone who may start a collaboration; token and secret shown once
+GET    /api/v1/hubs                      my hubs (never the token or the secret)
+DELETE /api/v1/hubs/{id}                 revoke: the owner only; the hub's token stops working
+PUT    /api/v1/hubs/{id}/coordinators    {coordinators: [userId, ...]} - who besides the owner
+                                         may bind collaborations to this hub (owner only)
+POST   /api/v1/hubs/{id}/heartbeat       hub token; the hub's status JSON, every ~60 s
+GET    /api/v1/hubs/{id}/pull            hub token; ?since=N&wait=S (S up to 20): long-polls for
+                                         changes after seq N -> {changes: [{seq, kind, key, at}], seq}
+```
+
+Only a SHA-256 of the hub token is stored. A hub's `pull` is answered as soon as
+there is a change after `since`, or empty after `wait` seconds (default 20) with
+`seq` unchanged; the hub asks again from the `seq` it was given. Any other hub id,
+a person's token or a telescope's token is a 401.
+
+The grant secret is 32 random bytes, base64url. It lets the server sign, and the
+hub verify offline, a *grant*: `sfg_` + base64url(JSON `{v:1, hub, sub, name,
+agent, project, iat, exp}`, with `exp = iat + 86400`) + `.` +
+base64url(HMAC-SHA256 over that first base64url text, keyed with the 32 decoded
+bytes). A grant is accepted within five minutes either side of its lifetime, for
+clocks that disagree. Grants are handed out in the project listing, not by a
+route of their own.
+
 ---
 
 ## Next steps
