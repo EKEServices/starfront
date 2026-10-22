@@ -249,7 +249,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.1: `hubs`, `stack_*` tables and migrations; delete the orphaned router and the check cases that drove it.
       **Verify:** `python3 tools/check_server.py && python3 tools/check_livestack.py`
 
-- [ ] T402 — Hub registration, heartbeat, grants and the change feed
+- [x] T402 — Hub registration, heartbeat, grants and the change feed
       **Files:** SF `server/hubs.py`, `server/app.py` (mount), `tools/check_server.py`
       **Do:** §0.3, §4.2: register (shown-once `sfh_` token and grant secret), list, revoke, heartbeat; HMAC grant mint and verify; `pull?since=` long poll over `stack_changes`.
       **Verify:** `python3 tools/check_server.py`

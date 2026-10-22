@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS hubs (
     created      REAL NOT NULL,
     seen         REAL NOT NULL DEFAULT 0,
     status       TEXT NOT NULL DEFAULT '{}',
-    cursor       INTEGER NOT NULL DEFAULT 0
+    cursor       INTEGER NOT NULL DEFAULT 0,
+    coordinators TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS stack_projects (
@@ -301,6 +302,12 @@ class Store:
             self._db.execute("DROP INDEX IF EXISTS files_once")
             self._db.execute("CREATE UNIQUE INDEX IF NOT EXISTS files_once_per_kind"
                              " ON files (project, user, kind, name)")
+            # Who besides the owner may bind collaborations to a hub (a list
+            # of user ids). Added after the table first shipped.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(hubs)")}
+            if "coordinators" not in columns:
+                self._db.execute("ALTER TABLE hubs ADD COLUMN coordinators "
+                                 "TEXT NOT NULL DEFAULT '[]'")
             self._db.executescript(MIGRATE)
             self._db.commit()
 
@@ -336,7 +343,42 @@ class Store:
         row = self._one("SELECT * FROM hubs WHERE id = ?", hub_id)
         if row is not None:
             row["status"] = json.loads(row["status"] or "{}")
+            row["coordinators"] = json.loads(row.get("coordinators") or "[]")
         return row
+
+    def hub_by_token(self, token_hash: str) -> dict[str, Any] | None:
+        """The hub whose stored token (a hash, see server/hubs.py) this is."""
+        row = self._one("SELECT id FROM hubs WHERE token = ?", token_hash)
+        return self.hub(row["id"]) if row else None
+
+    def hubs_of(self, owner: str) -> list[dict[str, Any]]:
+        return [self.hub(row["id"]) for row in self._all(
+            "SELECT id FROM hubs WHERE owner = ? ORDER BY created", owner)]
+
+    def set_hub_coordinators(self, hub_id: str, coordinators: list[str]) -> None:
+        self._run("UPDATE hubs SET coordinators = ? WHERE id = ?",
+                  json.dumps(coordinators), hub_id)
+
+    def hub_heard(self, hub_id: str, status: dict[str, Any] | None = None,
+                  cursor: int | None = None) -> None:
+        """Note that a hub spoke: when, and optionally its status and cursor."""
+        if status is not None:
+            self._run("UPDATE hubs SET seen = ?, status = ? WHERE id = ?",
+                      time.time(), json.dumps(status), hub_id)
+        else:
+            self._run("UPDATE hubs SET seen = ? WHERE id = ?", time.time(), hub_id)
+        if cursor is not None:
+            self._run("UPDATE hubs SET cursor = MAX(cursor, ?) WHERE id = ?",
+                      int(cursor), hub_id)
+
+    def delete_hub(self, hub_id: str) -> None:
+        self._run("DELETE FROM stack_changes WHERE hub = ?", hub_id)
+        self._run("DELETE FROM hubs WHERE id = ?", hub_id)
+
+    def changes_since(self, hub: str, since: int, limit: int = 500) -> list[dict[str, Any]]:
+        return self._all(
+            "SELECT seq, kind, key, at FROM stack_changes WHERE hub = ? AND seq > ?"
+            " ORDER BY seq LIMIT ?", hub, int(since), int(limit))
 
     def append_change(self, hub: str, kind: str, key: str = "") -> int:
         """Append to a hub's pull feed; the returned `seq` only ever grows."""
