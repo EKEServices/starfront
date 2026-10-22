@@ -28,6 +28,13 @@ hub is 409, a name or tar member that is absolute, has `..`, or is a link is
 and rename, and a file already identical is left alone, so the same push twice
 changes nothing.
 
+A master data file is too big for a multipart part (32 MiB cap), so the hub
+sends each one alone: `PUT /api/v1/hubs/{id}/push/{project_id}/masters/{name}`
+(hub token, `Content-Length` and `X-Content-SHA256` required, body streamed to
+a temp file beside the destination, hashed on the way, renamed only when the
+digest matches). Same name rules, project binding and byte budget as above;
+the same name with the same digest is a 200 that rewrites nothing.
+
 Masters are members-only whatever the licence (the contract), so they are NOT
 served by the open `/stack/public` route: the masters list points at
 `/stack/api/projects/{p}/masters/{file}`, which wants a grant or the cookie of
@@ -70,6 +77,8 @@ _EVENT_TYPES = {"project_created", "project_status_changed", "member_joined", "f
 _SEGMENT = re.compile(r"^[A-Za-z0-9_@+=-][A-Za-z0-9_@+=.-]{0,127}$")
 _SUFFIXES = {".json", ".png", ".jpg", ".jpeg", ".dzi", ".xml", ".xisf", ".fits"}
 _MASTER_SUFFIXES = {".json", ".xisf", ".fits"}
+_MASTER_DATA = {".xisf", ".fits", ".fz"}
+_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _MASTER_NAME = re.compile(r"^[A-Za-z0-9_@+=-][A-Za-z0-9_@+=.-]{0,127}$")
 _LATE = ("status.json", "panels.json")      # written last, so a page never sees a half set
 
@@ -172,6 +181,83 @@ class Pushed:
                 return await run_in_threadpool(self.ingest, hub, form)
             finally:
                 await form.close()
+
+        @app.put("/api/v1/hubs/{hub_id}/push/{project_id}/masters/{name}")
+        async def push_master(request: Request, hub_id: str, project_id: str, name: str):
+            hub = hubs.hub_as_itself(request, hub_id)
+            self.store.hub_heard(hub["id"])
+            row = self.store.stack_project(project_id) if _PROJECT.match(project_id) else None
+            if row is None or row["hub"] != hub["id"]:
+                raise HTTPException(status_code=409, detail=f"{project_id} is not a project of this hub")
+            if not _MASTER_NAME.match(name) or Path(name).suffix.lower() not in _MASTER_DATA:
+                raise _bad("a master is a flat .xisf, .fits or .fz file with a plain name")
+            length = request.headers.get("content-length")
+            if length is None or not length.isdigit():
+                raise HTTPException(status_code=411, detail="Content-Length is required")
+            size = int(length)
+            digest = (request.headers.get("x-content-sha256") or "").strip().lower()
+            if not _SHA256.match(digest):
+                raise _bad("X-Content-SHA256 (64 hex digits) is required")
+            dest = _destination(self.public / project_id, ["masters", name])
+            if await run_in_threadpool(self._already, dest, size, digest):
+                async for _ in request.stream():     # read it out, so the sender's write does not break
+                    pass
+                return {"ok": True, "written": False, "bytes": size}
+            with self.lock:
+                self._check_budget(hub, size, dest)
+            await self._receive(request, dest, size, digest)
+            return {"ok": True, "written": True, "bytes": size}
+
+    def _check_budget(self, hub: dict[str, Any], added: int, dest: Path) -> None:
+        replaced = dest.stat().st_size if dest.is_file() else 0
+        used = sum(tree_bytes(self.public / pid) for pid in self._hub_projects(hub["id"]))
+        if used - replaced + added > budget_bytes():
+            raise HTTPException(status_code=429, detail="this hub has used its storage budget")
+
+    @staticmethod
+    def _already(dest: Path, size: int, digest: str) -> bool:
+        try:
+            if not dest.is_file() or dest.stat().st_size != size:
+                return False
+            h = hashlib.sha256()
+            with dest.open("rb") as f:
+                while chunk := f.read(1 << 20):
+                    h.update(chunk)
+            return h.hexdigest() == digest
+        except OSError:
+            return False
+
+    async def _receive(self, request: Request, dest: Path, size: int, digest: str) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f".{dest.name}.{secrets.token_hex(4)}.tmp")
+        h = hashlib.sha256()
+        got = 0
+        try:
+            with tmp.open("wb") as out:
+                async for chunk in request.stream():
+                    got += len(chunk)
+                    if got > size:
+                        raise _bad("the body is longer than Content-Length")
+                    h.update(chunk)
+                    await run_in_threadpool(out.write, chunk)
+            if got != size:
+                raise _bad("the body is shorter than Content-Length")
+            if h.hexdigest() != digest:
+                raise HTTPException(status_code=422, detail="the body does not match X-Content-SHA256")
+            with self.lock:
+                self._check_budget_after(tmp, dest)
+                os.replace(tmp, dest)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _check_budget_after(self, tmp: Path, dest: Path) -> None:
+        """Concurrent receives may each have passed the first check: the temp
+        file is already in the tree, so the tree total is the truth."""
+        replaced = dest.stat().st_size if dest.is_file() else 0
+        hub = self.store.stack_project(dest.parent.parent.name)["hub"]
+        used = sum(tree_bytes(self.public / pid) for pid in self._hub_projects(hub))
+        if used - replaced > budget_bytes():
+            raise HTTPException(status_code=429, detail="this hub has used its storage budget")
 
     def ingest(self, hub: dict[str, Any], form: Any) -> dict[str, Any]:
         records = self._records(form)
@@ -575,7 +661,7 @@ class Pushed:
             row = member_only(request, project)
             suffix = Path(name).suffix.lower()
             path = self.public / row["project_id"] / "masters" / name
-            if not _MASTER_NAME.match(name) or suffix not in (".xisf", ".fits") \
+            if not _MASTER_NAME.match(name) or suffix not in _MASTER_DATA \
                     or path.is_symlink() or not path.is_file():
                 raise ApiError("not_found", "No such master.")
             return FileResponse(path, media_type="application/octet-stream", filename=name,

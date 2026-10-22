@@ -351,7 +351,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** members carry their real display names on the hub and on every pushed status document.
       **Verify:** `cd worker && cargo test -p collab-hub --test starfront_sync`
 
-- [ ] T421 — Large master files: a streamed upload route for hub pushes
+- [x] T421 — Large master files: a streamed upload route for hub pushes
       **Files:** SF `server/stack/push.py`, `tools/check_server.py`, `tools/check_stack_relay.py`
       **Do:** found in T415: push parts are capped at 32 MiB and masters are larger, so the masters list stays empty. Add `PUT /api/v1/hubs/{id}/push/{project_id}/masters/{name}` (hub token; streamed to a temp file and renamed; the same path rules, per-hub byte budget and project-binding check as the multipart push; `Content-Length` required; sha256 in a header verified), so a hub can send each master data file alone; the masters list (T407) then finds the data file beside its record.
       **Done when:** a multi-hundred-MB master pushed this way appears in the members-only masters list.
