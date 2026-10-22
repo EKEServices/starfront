@@ -169,7 +169,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** the daemon through the hub produces `simulate`'s output bit for bit, also with crashes and with two workers.
       **Verify:** `cd worker && cargo test -p collab-worker --test daemon_e2e`
 
-- [ ] T204 — Enrolment: hub enrol codes and `collab-worker enrol`
+- [x] T204 — Enrolment: hub enrol codes and `collab-worker enrol`
       **Files:** RSC `worker/crates/worker/src/enrol.rs`, `worker/crates/worker/src/main.rs`, `worker/crates/hub/src/routes/admin.rs`, `worker/crates/hub/src/auth.rs`, tests in both crates
       **Do:** §2.3, §3.3: `POST /api/hub/v1/enrol-codes` (admin token) and `POST /api/hub/v1/enrol` (code-gated, rate-limited, one use, expiry); `enrol` writes `collab-worker.toml` and a 0600 `worker-token`, runs `config check`, is idempotent and revokes the old token.
       **Verify:** `cd worker && cargo test -p collab-worker --test hub_ports --test cli && cargo test -p collab-hub`
