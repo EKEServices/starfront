@@ -131,7 +131,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** T5–T8, T8r, T14, T15, T17 plus `prepare-results.js`'s rotation-from-first-light, `retireIfEmptied`, the gold threshold trigger, the debounced calibration `reprepare` job, the `accumulate` send.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T108 — Objects and record fixtures
+- [x] T108 — Objects and record fixtures
       **Files:** RSC `worker/crates/hub/src/objects.rs`, `worker/crates/hub/tests/record_fixtures.rs`
       **Do:** §1.5: `DirObjects` over `<data_root>/objects`; every `docs/api/examples/records/engine/*.json` loaded into `SqliteStore` and read back byte-identical.
       **Verify:** `cd worker && cargo test -p collab-hub --test record_fixtures`
