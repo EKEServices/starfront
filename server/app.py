@@ -49,6 +49,8 @@ from server.hubs import Hubs, mint_grant                          # noqa: E402
 from server.stack import defaults as stack_defaults             # noqa: E402
 from server.stack import front as stack_front                   # noqa: E402
 from server.stack import relay as stack_relay                   # noqa: E402
+from server.stack import records as stack_records               # noqa: E402
+from server.stack import projects as stack_projects             # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -1848,6 +1850,14 @@ def set_task_state(task_id: str, body: TaskStateRequest,
     task["state"] = body.state
     task["version"] = int(task.get("version", 1)) + 1
     store.set_task(task)
+    if body.state == "declined":
+        # Declining the last share a telescope holds in a project is leaving
+        # it: a hub-bound collaboration marks the stacking member removed.
+        still = [t for t in store.tasks_in(task["project"]) if t["agent"] == agent["id"]
+                 and t["id"] != task["id"] and t.get("state") in ("offered", "accepted", "complete")]
+        if not still:
+            stack_projects.member_left(store, task["project"],
+                                       agent.get("owner_id") or agent["id"], by="telescope")
     return {"task": task}
 
 
@@ -2541,6 +2551,8 @@ app.mount("/stack/api", STACK_FRONT)
 stack_front.install(app, STACK_FRONT)
 # The frame relay for the hub: list, ranged bytes, ack, retention (server/stack/relay.py).
 STACK_RELAY = stack_relay.install(app, store, hubs, STACK_FRONT, files)
+# Full member and rig records for the hub, by the keys of its change feed.
+stack_records.install(app, store, hubs)
 STACK_FRONT.state.frames.after_upload = STACK_RELAY.collect
 # What a hub pushes back: POST /api/v1/hubs/{id}/push (server/stack/push.py).
 STACK_FRONT.state.pushed.install(app, hubs)

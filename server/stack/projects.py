@@ -67,6 +67,37 @@ def mapping_of(value: Any) -> list[dict[str, str]]:
     return out
 
 
+def member_left(store: Any, sf_project: str, sf_user_id: str, by: str = "") -> bool:
+    """A person (or a telescope that has no owner) is no longer in a hub-bound
+    collaboration: mark their `stack_members` row `removed` and tell the hub with
+    a `member` feed row, so it re-reads the record and sees `status: removed`.
+    `sf_user_id` is the Starfront id (the owner's person id, else the agent id);
+    the collab id comes from `stack_identities`. True when a row changed. A
+    removed member cannot rejoin by code (`membership_removed`), as the contract
+    says."""
+    row = store.stack_project_of(sf_project)
+    if row is None:
+        return False
+    ident = store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?", sf_user_id)
+    if ident is None:
+        return False
+    user_id = ident["collab_user_id"]
+    member = store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?",
+                        row["project_id"], user_id)
+    if member is None:
+        return False
+    doc = json.loads(member["doc"] or "{}")
+    if doc.get("status") == "removed":
+        return False
+    doc.update(status="removed", removed_at=now_iso(), removed_by=by or user_id,
+               frames_disposition="keep")
+    store._run("UPDATE stack_members SET doc = ?, rev = rev + 1 WHERE project_id = ? AND user_id = ?",
+               json.dumps(doc), row["project_id"], user_id)
+    if row["hub"]:
+        store.append_change(row["hub"], "member", f"{row['project_id']}/{user_id}")
+    return True
+
+
 class Projects:
     def __init__(self, store: Any, auth: Auth, router: APIRouter) -> None:
         self.store = store

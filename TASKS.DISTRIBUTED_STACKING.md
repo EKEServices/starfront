@@ -339,7 +339,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** a bad signature, a bad hash and a downgrade are refused, and a good update swaps and restarts on all three OSes (Windows by test double for the task scheduler).
       **Verify:** `cd worker && cargo test -p collab-worker --test self_update && cargo clippy -p collab-worker --all-targets -- -D warnings`
 
-- [ ] T419 — Hub-token reads of member and rig records, and member removals in the feed
+- [x] T419 — Hub-token reads of member and rig records, and member removals in the feed
       **Files:** SF `server/stack/records.py` (new), `server/hubs.py` (mount), `server/stack/projects.py`, `tools/check_server.py`, `tools/check_stack_relay.py`
       **Do:** found in T415: the change feed carries only keys and the server has a hub-readable route for projects only, so a hub sees members as placeholders and never sees rigs or removals. Add hub-token routes (beside the relay; plain `{"detail"}` errors like it) returning the full records a hub needs in RSC `docs/api/records.md` shapes: `GET /api/v1/hubs/{id}/records/member/{project_id}/{user_id}` (display name, role, status, filter mapping, terms; collab user ids only, never a Discord id), `GET /api/v1/hubs/{id}/records/rig/{user_id}/{rig_id}`, and a batch form taking several keys. Only records of projects bound to this hub (a rig is visible when its owner is a member of such a project). A member leaving or being removed appends a `member` feed row whose record answers `status: removed`.
       **Done when:** a hub can turn every feed row into a full record, and removals reach it.
