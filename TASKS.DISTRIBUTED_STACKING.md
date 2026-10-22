@@ -309,7 +309,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.9: bind `0.0.0.0` only with `--lan`, refused on a real data folder or one with `discord.env`, a loud warning and the LAN URL.
       **Verify:** `python3 tools/check_local_server.py`
 
-- [ ] T414 — `tools/check_stack_relay.py`: a fake hub against the server
+- [x] T414 — `tools/check_stack_relay.py`: a fake hub against the server
       **Files:** SF `tools/check_stack_relay.py`
       **Do:** §4.8: register, bind, upload, pull, fetch, ack, push and page render in one isolated run.
       **Verify:** `python3 tools/check_stack_relay.py`
