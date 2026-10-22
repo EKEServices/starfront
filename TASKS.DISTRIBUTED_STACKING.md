@@ -449,7 +449,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** creating or editing a collaboration is the only action a coordinator takes for stacking, and a check proves each field flows down to the hub's project record.
       **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
 
-- [ ] T701 — `tools/local_night.py`
+- [x] T701 — `tools/local_night.py`
       **Files:** SF `tools/local_night.py`
       **Do:** §7.2: start the local server, hub and a worker on the Mac; register the hub; bind a throw-away collaboration; print the URLs and an enrol code for the Windows PC; tail the logs; `--synthetic` feeds `collab-uploader` frames; `--exit-when-stacked` exits 0 once a live preview is published (the gate).
       **Verify:** `python3 tools/local_night.py --synthetic --exit-when-stacked`
