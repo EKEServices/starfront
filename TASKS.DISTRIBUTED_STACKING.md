@@ -234,7 +234,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.7: hub, one or two daemons, `collab-uploader` through the real multipart path, compare with `simulate` bit for bit, browser smoke when Chrome exists; output under `~/Library/Caches/collab-hub-e2e/`; a `hub-e2e` CI job (ubuntu, macos).
       **Verify:** `bash scripts/hub-e2e.sh --only all`
 
-- [ ] T309 — Backup and the hub runbook
+- [x] T309 — Backup and the hub runbook
       **Files:** RSC `worker/crates/hub/src/backup.rs`, `docs/runbooks/starfront-hub.md`, `CLAUDE.md`, `AGENTS.md`
       **Do:** §9.1: `collab-hub backup DIR` (`VACUUM INTO` plus masters and public); a first runbook (install, config, SMB share, firewall, backup); the repo guidance gains the hub crate and its commands.
       **Verify:** `cd worker && cargo test -p collab-hub`
