@@ -299,7 +299,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.6: per-OS archives of `collab-worker` and `collab-hub`; a manifest in rapid-stacker's shape plus `contract`; an Ed25519 signature by an offline key (key generation is the author's; the workflow never runs on its own).
       **Verify:** `bash worker/scripts/build-manifest.sh --dry-run`
 
-- [ ] T412 — Discord notifications
+- [x] T412 — Discord notifications
       **Files:** SF `server/notify.py`, `server/hubs.py`, `server/app.py`, `tools/check_server.py`
       **Do:** §4.7: the owner-only `discordWebhookUrl`; `gold_published` and `member_joined`; de-duplicated through `stack_notified`; a fake webhook in the check.
       **Verify:** `python3 tools/check_server.py`

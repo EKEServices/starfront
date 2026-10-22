@@ -3234,6 +3234,177 @@ case("/sky has none either", "Content-Security-Policy" not in headers)
 status, headers, _ = raw_get("/api/v1/health")
 case("...nor does the API", "Content-Security-Policy" not in headers)
 
+# ------------------------------------------- live stacking: Discord notifications
+print("\n-- live stacking: Discord notifications --")
+import http.server                                                 # noqa: E402
+from server import notify as notify_module                         # noqa: E402
+from server.stack.projects import terms_version                   # noqa: E402
+
+REAL_POST = notify_module._post
+POSTS = []                 # (url, content) the fake poster was given
+MODE = {"fail": ""}        # "" | "raise" | "hang"
+
+
+def fake_post(url, content):
+    if MODE["fail"] == "raise":
+        raise OSError("connection refused")
+    if MODE["fail"] == "hang":
+        time.sleep(3)
+    POSTS.append((url, content))
+
+
+notify_module._post = fake_post     # nothing below may reach discord.com
+HOOK = "https://discord.com/api/webhooks/1234567890/tok_en-ABC"
+SFP = server_app.store.stack_project(FD_ID)["sf_project"]
+COLLAB = lambda: server_app.store.project(SFP)                     # noqa: E731
+
+for url, want in [(HOOK, True), ("", True), ("https://discordapp.com/api/webhooks/1/x", True),
+                  ("http://discord.com/api/webhooks/1/x", False),
+                  ("https://discord.com.evil.example/api/webhooks/1/x", False),
+                  ("https://evil.example/api/webhooks/1/x", False),
+                  ("https://discord.com/api/webhooks/abc/x", False),
+                  ("https://discord.com/api/webhooks/1/x?wait=true", False)]:
+    case(f"the webhook check: {url or 'blank'!r} is {'accepted' if want else 'refused'}",
+         notify_module.webhook_ok(url) is want)
+
+status, got = call("PUT", f"/api/v1/projects/{HUBP}", {"discordWebhookUrl": HOOK}, token=CAROL)
+case("a coordinator who does not own the collaboration cannot set the webhook",
+     status == 403 and COLLAB()["payload"].get("discordWebhookUrl") != HOOK, f"{status} {got}")
+status, got = call("PUT", f"/api/v1/projects/{HUBP}", {"discordWebhookUrl": "http://discord.com/api/webhooks/1/x"}, token=BOBH)
+case("the owner's webhook that is not Discord's: 400", status == 400, f"{status} {got}")
+status, got = call("PUT", f"/api/v1/projects/{HUBP}", {"discordWebhookUrl": HOOK}, token=BOBH)
+case("the owner saves a Discord webhook", status == 200 and COLLAB()["payload"].get("discordWebhookUrl") == HOOK,
+     f"{status} {str(got)[:120]}")
+status, got = call("PUT", f"/api/v1/projects/{HUBP}", {"notes": "Hub notes"}, token=BOBH)
+case("...and a later edit that leaves it out keeps it",
+     status == 200 and COLLAB()["payload"].get("discordWebhookUrl") == HOOK)
+status, got = call("POST", "/api/v1/projects", {"name": "Notify Create", "region": REGION,
+                   "discordWebhookUrl": "https://evil.example/x"}, token=BOBH)
+case("a bad webhook on a new collaboration: 400, nothing made", status == 400, f"{status} {got}")
+status, got = call("POST", "/api/v1/projects", {"name": "Notify Create", "region": REGION,
+                   "discordWebhookUrl": HOOK}, token=BOBH)
+CREATED = (got.get("project") or {}).get("id", "")
+case("a webhook given on a new collaboration is saved",
+     status == 200 and server_app.store.project(CREATED)["payload"].get("discordWebhookUrl") == HOOK)
+
+# Hidden from everybody but the owner: listings, reads, agents, the front door.
+status, listed = call("GET", "/api/v1/projects")
+case("the public project list has no webhook", status == 200 and HOOK not in json.dumps(listed)
+     and "discordWebhookUrl" not in json.dumps(listed))
+status, read = call("GET", f"/api/v1/projects/{HUBP}")
+case("a public read of the project has no webhook", status == 200 and "discordWebhookUrl" not in json.dumps(read))
+status, agent_list = call("GET", "/api/v1/agent/projects", token=OWNER_RIG)
+case("an agent listing (the owner's telescope too) has no webhook",
+     status == 200 and HOOK not in json.dumps(agent_list) and "discordWebhookUrl" not in json.dumps(agent_list))
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("the front door has no webhook, for the owner's grant either",
+     status == 200 and "discordWebhookUrl" not in json.dumps(got) and HOOK not in json.dumps(got))
+case("nor does the stacking project row",
+     HOOK not in json.dumps(server_app.store.stack_project(FD_ID)))
+
+# Joins: a new active membership posts once; a re-join and a retry post nothing.
+def joiner(sub, name):
+    return hubs_module.mint_grant({"id": BH, "grant_secret": BHSEC}, sub, name, "agent-x", FD_ID)
+
+
+JOIN_BODY = {"accepted_terms_version": terms_version()}
+POSTS.clear()
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(JOIN_BODY, display_name="Notify One"),
+                    token=joiner("n-1", "Notify One"))
+notify_module.drain()
+MEMBER_ONE = (got.get("membership") or {}).get("user_id", "")
+case("a new member joins (200, active)", status == 200 and got["membership"]["status"] == "active", f"{status} {got}")
+case("the join posts once, to the webhook, with the display name",
+     POSTS == [(HOOK, f"Notify One joined {COLLAB()['name']} live stacking.")], str(POSTS))
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(JOIN_BODY, display_name="Notify One"),
+                    token=joiner("n-1", "Notify One"))
+notify_module.drain()
+case("a second join of the same member is refused and posts nothing",
+     status == 409 and len(POSTS) == 1, f"{status} {got} {len(POSTS)}")
+notify_module.notify_member_joined(server_app.store, COLLAB(), "Notify One", member_id=MEMBER_ONE)
+notify_module.drain()
+case("a retried notification for that member posts nothing", len(POSTS) == 1)
+claims = server_app.store._one("SELECT COUNT(*) AS n FROM stack_notified WHERE project_id = ? AND event = 'member_joined'", SFP)
+case("the join is recorded once in stack_notified", claims and claims["n"] == 1, str(claims))
+
+# A webhook that hangs, or errors, never holds up or breaks the join.
+MODE["fail"] = "hang"
+started = time.time()
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(JOIN_BODY, display_name="Notify Two"),
+                     token=joiner("n-2", "Notify Two"))
+took = time.time() - started
+case("a webhook that hangs does not hold up the join", status == 200 and took < 2.0, f"{status} {took:.2f}s")
+notify_module.drain()
+MODE["fail"] = ""
+case("...and the hung post still lands once it returns", POSTS[-1][1].startswith("Notify Two joined"), str(POSTS[-1:]))
+MODE["fail"] = "raise"
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(JOIN_BODY, display_name="Notify Three"),
+                     token=joiner("n-3", "Notify Three"))
+notify_module.drain()
+MODE["fail"] = ""
+case("a webhook that errors does not break the join", status == 200 and got.get("ok") is True, f"{status} {got}")
+case("...and a failed post is not sent again", not any("Notify Three" in c for _, c in POSTS))
+
+# The real poster, against a local HTTP server: the body, the timeout and the errors.
+LOCAL_HITS = []
+
+
+class Local(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        size = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(size)
+        if self.path == "/hang":
+            time.sleep(8)
+            return
+        LOCAL_HITS.append((self.path, self.headers.get("Content-Type"), body))
+        self.send_response(500 if self.path == "/err" else 204)
+        self.end_headers()
+
+
+local_port = free_port()
+local = http.server.ThreadingHTTPServer(("127.0.0.1", local_port), Local)
+threading.Thread(target=local.serve_forever, daemon=True).start()
+LOCAL = f"http://127.0.0.1:{local_port}"
+notify_module._post = REAL_POST
+try:
+    REAL_POST(f"{LOCAL}/ok", "hello")
+    case("the poster sends {\"content\": ...} as JSON",
+         LOCAL_HITS and LOCAL_HITS[-1][1] == "application/json"
+         and json.loads(LOCAL_HITS[-1][2])["content"] == "hello", str(LOCAL_HITS[-1:]))
+    try:
+        REAL_POST(f"{LOCAL}/err", "x")
+        raised = False
+    except Exception:
+        raised = True
+    case("the poster raises on a 500 (and the caller swallows it)", raised)
+    started = time.time()
+    notify_module._deliver(f"{LOCAL}/hang", "x")
+    case("a hung webhook is given up after the 5 s timeout, without raising",
+         4.5 <= time.time() - started < 7.5, f"{time.time() - started:.2f}s")
+finally:
+    notify_module._post = fake_post
+    local.shutdown()
+
+# Gold integrations: once per (project, stream, gold_seq).
+POSTS.clear()
+notify_module.notify_gold_published(server_app.store, COLLAB(), "Ha", 3, 12.4, 4)
+notify_module.notify_gold_published(server_app.store, COLLAB(), "Ha", 3, 12.4, 4)
+notify_module.drain()
+case("a gold integration posts its message once",
+     POSTS == [(HOOK, "Gold integration 3 published for Ha: 12.4 h from 4 contributors.")], str(POSTS))
+notify_module.notify_gold_published(server_app.store, COLLAB(), "Ha", 4, 12.4, 4)
+notify_module.notify_gold_published(server_app.store, COLLAB(), "OIII", 3, 2.0, 1)
+notify_module.drain()
+case("a new gold_seq or stream is a new post", len(POSTS) == 3 and POSTS[-1][1].endswith("from 1 contributor."), str(POSTS))
+notify_module.notify_gold_published(server_app.store, {"id": "prj_nohook", "name": "Quiet", "payload": {}},
+                                    "Ha", 1, 1.0, 1)
+notify_module.drain()
+quiet = server_app.store._one("SELECT COUNT(*) AS n FROM stack_notified WHERE project_id = 'prj_nohook'")
+case("a collaboration with no webhook posts nothing and claims nothing", len(POSTS) == 3 and quiet["n"] == 0)
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
