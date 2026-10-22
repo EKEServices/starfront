@@ -36,6 +36,8 @@ namespace Starfront.Collab.Services.Stacking {
         public string Grant { get; set; } = "";
         public DateTime? GrantExpiresUtc { get; set; }
         public string HubId { get; set; } = "";
+        /// <summary>The hub's name as the Starfront server calls it (hub links), for the options page.</summary>
+        public string HubName { get; set; } = "";
         public string Status { get; set; } = LinkStatus.Failed;
         public string Message { get; set; } = "";
         public string TermsVersion { get; set; } = "";

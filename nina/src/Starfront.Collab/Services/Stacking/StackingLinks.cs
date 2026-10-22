@@ -11,7 +11,7 @@ namespace Starfront.Collab.Services.Stacking {
     /// temporary file and moved into place, and a file that cannot be read
     /// is kept aside rather than overwritten.
     /// </summary>
-    public sealed class StackingLinks {
+    public sealed class StackingLinks : IHubLinkStore {
         private readonly object gate = new();
         private readonly string path;
         private Dictionary<string, StackingLink> links = new(StringComparer.Ordinal);

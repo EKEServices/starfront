@@ -386,7 +386,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §6.2: probe `{HubLanUrl}/api/hub/v1/health` with the hub id check; the effective base per link; a frame finishes on the base it started on.
       **Verify:** `cd nina && dotnet test tests/Starfront.Collab.Tests`
 
-- [ ] T604 — Joining hub projects without a Collab sign-in
+- [x] T604 — Joining hub projects without a Collab sign-in
       **Files:** SF `nina/src/Starfront.Collab/Services/Stacking/StackingJoiner.cs`, `Ui/StackingOptionsVM.cs`, `Ui/OptionsTemplates.xaml`, `nina/tests/Starfront.Collab.Tests/`
       **Do:** §6.3: the hub path of `ReconcileAsync`; sign-in required only for cloud links; the options text.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release && dotnet test tests/Starfront.Collab.Tests`

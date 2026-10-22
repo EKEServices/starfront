@@ -28,12 +28,36 @@ namespace Starfront.Collab.Services.Stacking {
         private readonly Func<IApiClient> api;
         private readonly SemaphoreSlim gate = new(1, 1);
         private FilterNormalizer normalizer;
+        private readonly HubJoiner hub;
 
-        public StackingJoiner(HostServices host, StarfrontSettings settings, StackingLinks links, Func<IApiClient> api) {
+        /// <param name="forLink">The client a hub link talks through (its own base and grant); the router when omitted.</param>
+        public StackingJoiner(HostServices host, StarfrontSettings settings, StackingLinks links, Func<IApiClient> api, Func<StackingLink, IApiClient> forLink = null) {
             this.host = host;
             this.settings = settings;
             this.links = links;
             this.api = api;
+            hub = new HubJoiner(new HubContext(this), links, forLink ?? (_ => api()), line => Logger.Info(line));
+        }
+
+        /// <summary>This PC's facts for a hub join; the same rig and filter rules as the cloud join.</summary>
+        private sealed class HubContext : IHubJoinContext {
+            private readonly StackingJoiner owner;
+            public HubContext(StackingJoiner owner) => this.owner = owner;
+            public string RigId { get => owner.settings.StackingRigId; set => owner.settings.StackingRigId = value; }
+            public string WhatIsMissingForRig() => RigProfile.WhatIsMissing(owner.host, owner.settings);
+            public RigUpsertRequest DescribeRig() => owner.DescribeRig();
+            public IReadOnlyList<string> WheelFilterNames => RigProfile.FilterNames(owner.settings);
+            public bool Colour => owner.settings.Colour;
+            public IReadOnlyDictionary<string, string> FilterMap => owner.settings.FilterMap;
+            public string DisplayName {
+                get {
+                    var name = owner.settings.UserName;
+                    if (name.Length == 0) name = owner.settings.TelescopeName;
+                    return HubJoiner.Clamp(name);
+                }
+            }
+            public string TelescopeName => owner.settings.TelescopeName;
+            public FilterNormalizer Normalizer => owner.normalizer ??= FilterNormalizer.LoadBundled();
         }
 
         /// <summary>The service rejected the sign-in; nothing more is tried until somebody signs in again.</summary>
@@ -41,11 +65,27 @@ namespace Starfront.Collab.Services.Stacking {
 
         /// <summary>Bring the links in line with what the check-in listed. One at a time; a second call waits.</summary>
         public async Task ReconcileAsync(IReadOnlyList<ProjectListing> listings, CancellationToken ct) {
-            if (!settings.StackingEnabled || !settings.StackingSignedIn) return;
+            if (!settings.StackingEnabled) return;
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try {
+                var cloudRefused = false;
                 foreach (var listing in listings ?? Array.Empty<ProjectListing>()) {
                     ct.ThrowIfCancellationRequested();
+                    var route = JoinRoutes.Of(listing, settings.StackingSignedIn);
+                    if (route == JoinRoute.Skip) continue;
+                    if (route == JoinRoute.Hub) {
+                        // A hub project needs the grant the check-in carried and no Rapid Stacker Collab sign-in.
+                        try {
+                            await hub.SyncAsync(listing, listing.EffectiveStacking(), ct).ConfigureAwait(false);
+                        } catch (OperationCanceledException) {
+                            throw;
+                        } catch (Exception ex) {
+                            Logger.Error($"Starfront stacking: joining the hub project of {listing.Name} failed", ex);
+                        }
+                        continue;
+                    }
+                    // Cloud links need the person signed in to Rapid Stacker Collab.
+                    if (cloudRefused || route == JoinRoute.CloudNeedsSignIn) continue;
                     if (string.IsNullOrWhiteSpace(listing.StackingJoinCode)) continue;
                     if (!JoinCodes.TryNormalize(listing.StackingJoinCode, out var code) || code.Length == 0) {
                         Logger.Warning($"Starfront stacking: {listing.Name} carries a join code that cannot be one ({listing.StackingJoinCode}); ignored");
@@ -55,7 +95,7 @@ namespace Starfront.Collab.Services.Stacking {
                     if (link != null && link.JoinCode == code && link.Active) continue;
                     if (link != null && link.JoinCode == code && link.NextAttemptUtc is DateTime next && next > DateTime.UtcNow) continue;
                     if (link != null && link.JoinCode == code && link.Status is LinkStatus.TermsOutdated or LinkStatus.Pending) continue;
-                    if (await JoinOneAsync(listing, code, ct).ConfigureAwait(false) == Outcome.AuthRequired) return;
+                    if (await JoinOneAsync(listing, code, ct).ConfigureAwait(false) == Outcome.AuthRequired) cloudRefused = true;
                 }
             } finally {
                 gate.Release();
@@ -68,6 +108,7 @@ namespace Starfront.Collab.Services.Stacking {
             if (link == null) return;
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try {
+                if (link.IsHub) { await hub.JoinAsync(link, ct).ConfigureAwait(false); return; }
                 await JoinOneAsync(new ProjectListing { Id = link.StarfrontProjectId, Name = link.StarfrontName, StackingJoinCode = link.JoinCode }, link.JoinCode, ct, acceptTerms: true).ConfigureAwait(false);
             } finally {
                 gate.Release();
@@ -80,6 +121,7 @@ namespace Starfront.Collab.Services.Stacking {
             if (link == null || link.Active) return;
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try {
+                if (link.IsHub) { await hub.JoinAsync(link, ct).ConfigureAwait(false); return; }
                 await JoinOneAsync(new ProjectListing { Id = link.StarfrontProjectId, Name = link.StarfrontName, StackingJoinCode = link.JoinCode }, link.JoinCode, ct, acceptTerms: link.Status == LinkStatus.TermsOutdated).ConfigureAwait(false);
             } finally {
                 gate.Release();
@@ -94,10 +136,11 @@ namespace Starfront.Collab.Services.Stacking {
         /// it is now.
         /// </summary>
         public async Task RefreshMembershipsAsync(CancellationToken ct) {
-            if (!settings.StackingEnabled || !settings.StackingSignedIn) return;
+            if (!settings.StackingEnabled) return;
             foreach (var link in links.All()) {
                 ct.ThrowIfCancellationRequested();
                 if (link.CollabProjectId.Length == 0 || link.Status is not (LinkStatus.Pending or LinkStatus.Active)) continue;
+                if (!link.IsHub && !settings.StackingSignedIn) continue;
                 try {
                     var framed = await RefreshProjectAsync(link, ct).ConfigureAwait(false);
                     var membership = await api().GetMembershipAsync(link.CollabProjectId, ct).ConfigureAwait(false);
@@ -114,6 +157,11 @@ namespace Starfront.Collab.Services.Stacking {
                     links.Upsert(link);
                     Logger.Info($"Starfront stacking: {link.StarfrontName} is now {link.Describe()}");
                 } catch (ApiException ex) when (ex.IsAuthenticationFailure) {
+                    if (link.IsHub) {
+                        // Only this hub link's grant goes; the next check-in brings a new one. The cloud sign-in is untouched.
+                        new GrantTokenStore(link.StarfrontProjectId, links.Lookup, links.Upsert).Clear();
+                        continue;
+                    }
                     Raise(AuthRequired);
                     return;
                 } catch (Exception ex) when (ex is ApiException or HttpRequestException) {
@@ -152,6 +200,10 @@ namespace Starfront.Collab.Services.Stacking {
             var link = links.Lookup(listing.Id) ?? new StackingLink { StarfrontProjectId = listing.Id };
             link.StarfrontName = string.IsNullOrEmpty(listing.Name) ? link.StarfrontName : listing.Name;
             link.JoinCode = code;
+            if (link.IsHub) {
+                // The collaboration moved from a hub back to the cloud.
+                link.Backend = "cloud"; link.ApiBase = ""; link.LanApiBase = ""; link.Grant = ""; link.GrantExpiresUtc = null; link.HubId = ""; link.HubName = "";
+            }
             var client = api();
             try {
                 var resolved = await client.ResolveJoinCodeAsync(code, ct).ConfigureAwait(false);
