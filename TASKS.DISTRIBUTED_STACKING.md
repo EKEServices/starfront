@@ -351,7 +351,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** a bad signature is refused and no unverified binary is ever run.
       **Verify:** `python3 tools/check_volunteer.py`
 
-- [ ] T504 — The sequencer's busy file
+- [x] T504 — The sequencer's busy file
       **Files:** SF `astrocontrol/sequencer.py`, `tools/check_night.py`
       **Do:** §5.3: touch `<data_root>/collab-worker/busy` at sequence start, remove at the end and on recovery exit.
       **Verify:** `python3 tools/check_night.py && python3 tools/check_recovery.py`
