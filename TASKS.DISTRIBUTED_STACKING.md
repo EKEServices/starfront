@@ -361,7 +361,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §5.5: backend choice on the collaboration form; the hub section (folders, check, start/stop, register, enrol code, fleet, log); the volunteer section (hub, code, install/update/status, idle switches).
       **Verify:** `python3 tools/check_controls.py`
 
-- [ ] T506 — README: "Live stacking at home"
+- [x] T506 — README: "Live stacking at home"
       **Files:** SF `README.md` (CRLF)
       **Do:** §5.6: the design decisions (pull from the server, per-hub grants, the Windows logon task, the user's own catalogue copy, what a volunteer's machine sees) and the Layout entries for the new modules.
       **Verify:** `python3 -c "import sys; d=open('README.md','rb').read(); sys.exit(0 if b'Live stacking at home' in d and d.count(b'\n')==d.count(b'\r\n') else 1)"`
