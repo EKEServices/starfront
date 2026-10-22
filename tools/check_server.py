@@ -2594,6 +2594,10 @@ case("...a joined telescope is handed one", joined_l["grant"].startswith("sfg_")
 case("...a third telescope, only browsing, gets the block and an empty grant",
      third_l["backend"] == "hub" and third_l["collabProjectId"] == wanted_id and third_l["grant"] == "",
      str(third_l))
+case("the owner's telescope is told the stacking project's visibility, for the Edit form",
+     mine_l["visibility"] == "unlisted", str(mine_l))
+case("...as is a joined telescope, as it is handed the grant", joined_l["visibility"] == "unlisted", str(joined_l))
+case("...a browsing telescope is not (no grant, no visibility)", third_l["visibility"] == "", str(third_l))
 claims = hubs_module.verify_grant(mine_l["grant"], BHSEC)
 case("the owner's grant verifies with the hub's secret and names the project and the person",
      claims and claims["hub"] == BH and claims["project"] == wanted_id
@@ -2945,6 +2949,44 @@ case("...but a write on the cookie alone is refused in the envelope", status == 
 status, got, _ = raw("GET", API + "/rigs", headers={"Cookie": "starfront_web=unknown"})
 case("...and an unknown session is 401 session_expired", status == 401 and got.get("code") == "session_expired", f"{status} {got}")
 
+# -- the dashboard's two reads: who am I, and my projects with the hub's heartbeat
+def with_cookie(path, cookie):
+    return raw("GET", API + path, headers={"Cookie": f"starfront_web={cookie}"})
+
+
+status, got, _ = raw("GET", API + "/auth/me")
+case("auth/me without a cookie is 401 not_authenticated in the envelope",
+     status == 401 and got.get("ok") is False and got.get("code") == "not_authenticated", f"{status} {got}")
+status, me_body, _ = with_cookie("/auth/me", "web-front-door")
+case("auth/me with a signed-in cookie names the collab user id and the display name",
+     status == 200 and me_body.get("ok") is True and me_body["user"] == {"user_id": OWNER_UID, "display_name": "Bob"},
+     f"{status} {me_body}")
+case("...and no Discord id is anywhere in the body", "1002" not in json.dumps(me_body), json.dumps(me_body))
+status, got, _ = with_cookie("/auth/me", "unknown")
+case("auth/me with an unknown cookie is 401 session_expired", status == 401 and got.get("code") == "session_expired", f"{status} {got}")
+status, got = front("GET", "/auth/me", token=OWNER_GRANT)
+case("auth/me also answers a grant, with the same collab id", status == 200 and got["user"]["user_id"] == OWNER_UID, f"{status} {got}")
+
+call("POST", f"/api/v1/hubs/{BH}/heartbeat", {"workers": 3}, token=BHTOK)
+status, mine_p, _ = with_cookie("/projects?scope=mine", "web-front-door")
+mine_ids = [p["project_id"] for p in mine_p.get("projects", [])]
+case("projects?scope=mine lists the signed-in user's project with their membership",
+     status == 200 and mine_ids == [FD_ID] and mine_p["projects"][0]["my_membership"]["display_name"] == "Robert"
+     and mine_p["projects"][0]["slug"] == FD_SLUG, f"{status} {mine_ids}")
+hub_state = mine_p["projects"][0].get("stacked_by") or {}
+case("...with the hub that stacks it, its workers and when it was last heard",
+     hub_state.get("hub_name") == "Bind hub" and hub_state.get("workers") == 3 and hub_state.get("online") is True
+     and str(hub_state.get("last_seen", "")).endswith("Z"), str(hub_state))
+case("...and neither the join code nor a Discord id", "join_code" not in mine_p["projects"][0]
+     and '"1002"' not in json.dumps(mine_p), "")
+server_app.store.add_web_token("web-front-door-nobody", "1001")
+status, none_p, _ = with_cookie("/projects?scope=mine", "web-front-door-nobody")
+case("another signed-in user, in no project, gets an empty list", status == 200 and none_p["projects"] == [], f"{status} {none_p}")
+status, got, _ = raw("GET", API + "/projects?scope=mine")
+case("projects?scope=mine without a cookie is 401", status == 401 and got.get("code") == "not_authenticated", f"{status} {got}")
+status, got, _ = raw("GET", API + "/projects?scope=bogus")
+case("...and an unknown scope is 400 validation_failed", status == 400 and got.get("code") == "validation_failed", f"{status} {got}")
+
 # -- rigs
 RIG = {"camera": "ASI2600MM Pro ", "telescope": "RedCat 51", "focal_length_mm": 250.4,
        "pixel_size_um": 3.76, "binning": 1, "name": "Wide rig"}
@@ -3106,13 +3148,22 @@ for label, page, marker in (
         ("the project page", "/stack/p/horsehead-sho", b"project-body"),
         ("a filter page", "/stack/p/horsehead-sho/filter/HA@osc", b"filter-body"),
         ("a filter page with an escaped stream key", "/stack/p/horsehead-sho/filter/HA%40osc", b"filter-body"),
-        ("the combined page", "/stack/p/horsehead-sho/combined", b"combined-body")):
+        ("the combined page", "/stack/p/horsehead-sho/combined", b"combined-body"),
+        ("the dashboard", "/stack/dashboard", b"dashboard-body")):
     status, headers, body = raw_get(page)
     case(f"{label} is HTML with the CSP",
          status == 200 and headers.get("Content-Type", "").startswith("text/html")
          and marker in body and headers.get("Content-Security-Policy") == CSP_WANTED
          and headers.get("X-Content-Type-Options") == "nosniff",
          f"{status} {headers.get('Content-Type')}")
+status, headers, _ = raw_get("/files/signin?next=/stack/dashboard")
+login_code = (headers.get("Location") or "").rpartition("code=")[2]
+case("/files/signin?next= returns to the dashboard after sign-in",
+     status == 303 and (server_app.store.login(login_code) or {}).get("back") == "/stack/dashboard", str(headers.get("Location")))
+for bad_next in ("//evil.example/x", "https://evil.example/", "/download", "/stack/../etc", "/stack\\x"):
+    status, headers, _ = raw_get("/files/signin?next=" + urllib.parse.quote(bad_next, safe=""))
+    code_ = (headers.get("Location") or "").rpartition("code=")[2]
+    case(f"...a next of {bad_next!r} falls back to /files", (server_app.store.login(code_) or {}).get("back") == "/files")
 status, headers, _ = raw_get("/stack/p/x")
 case("a slug that cannot exist is a 404 (still under the CSP)",
      status == 404 and headers.get("Content-Security-Policy") == CSP_WANTED)

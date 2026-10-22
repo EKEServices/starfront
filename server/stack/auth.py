@@ -25,11 +25,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from fastapi import Request
+from fastapi import APIRouter, Request
 
 from ..hubs import _unb64, verify_grant
 from ..files import COOKIE
-from .envelope import ApiError, validation_failed  # noqa: F401  (re-exported for routes)
+from .envelope import ApiError, ok, validation_failed  # noqa: F401  (re-exported for routes)
 
 
 @dataclass
@@ -90,12 +90,23 @@ class Auth:
                 if write:
                     raise ApiError("not_authenticated",
                                    "Changes need a project grant; a browser session can only read.")
-                return Caller(self.identity(str(user["id"]), str(user.get("name") or "")), "cookie")
+                return Caller(self.identity(str(user["id"]), str(user.get("name") or "")), "cookie",
+                              name=str(user.get("name") or ""))
             if required:
                 raise ApiError("session_expired", "That session is unknown or has expired.")
         if required:
             raise ApiError("not_authenticated", "Send a project grant as a Bearer token.")
         return None
+
+    # -- who am I ----------------------------------------------------------
+    def mount(self, router: APIRouter) -> None:
+        @router.get("/auth/me")
+        async def me(request: Request) -> dict[str, Any]:
+            """The caller as the hub-side world knows them: the collab user id
+            and the name they signed in with, never the Discord id. A browser
+            without a session is 401 `not_authenticated`."""
+            who = self.caller(request)
+            return ok(user={"user_id": who.user_id, "display_name": who.name}, auth="session" if who.kind == "cookie" else "token")
 
     # -- the hub-side identity ---------------------------------------------
     def identity(self, sf_id: str, name: str = "") -> str:

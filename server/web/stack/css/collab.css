@@ -177,3 +177,17 @@ dl.kv dd { margin: 0; }
 .dz__help { font-size: 13px; margin: 8px 0 0; }
 .dz__info { margin: 0 0 10px; font-size: 14px; }
 @media (max-width: 560px) { .dz__stage { height: min(60vh, 460px); min-height: 260px; } }
+
+/* Dashboard (My projects, My frames) */
+.dash-nav { margin: 12px 0 28px; }
+.dash-stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 0 0 14px; }
+.dash-stat { font-size: 22px; }
+.dash-stat small { color: var(--text-muted); font-size: 14px; }
+.dash-title { margin: 0; }
+.dash-sub { margin: 6px 0 12px; }
+.dash-hub { margin: 0; font-size: 14px; color: var(--text-muted); }
+.dash-select { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-input); border-radius: 10px; padding: 8px 12px; font: inherit; }
+.dash-file { min-width: 16ch; max-width: 260px; overflow-wrap: anywhere; }
+.dash-why { min-width: 24ch; }
+.dash-small { font-size: 13px; }
+.dash-tiny { font-size: 12px; }

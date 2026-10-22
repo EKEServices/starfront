@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -24,6 +25,8 @@ from .envelope import ApiError, ok, validation_failed
 TERMS_VERSION = os.environ.get("STARFRONT_STACK_TERMS_VERSION") or "2026-10-13-draft"
 _TERMS = re.compile(r"^\d{4}-\d{2}-\d{2}(-[a-z0-9]+)?$")
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
+#: A hub heartbeats about every 30 s; this long without one and it is called offline.
+HUB_ONLINE_S = 180
 _CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 
@@ -145,6 +148,22 @@ class Projects:
                 out["join_code"] = row["join_code"]
         return out
 
+    def stacked_by(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Which hub stacks a project and how it last reported: the name, the
+        workers it said it had, and when it was last heard. None when unbound."""
+        hub = self.store.hub(row["hub"]) if row["hub"] else None
+        if hub is None:
+            return None
+        said = hub.get("status") or {}
+        workers = said.get("workers") if isinstance(said, dict) else None
+        if isinstance(workers, (list, dict)):
+            workers = len(workers)
+        seen = float(hub.get("seen") or 0)
+        return {"hub_name": hub["name"],
+                "workers": int(workers) if isinstance(workers, (int, float)) and not isinstance(workers, bool) else None,
+                "last_seen": (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seen)) if seen else None),
+                "online": bool(seen) and time.time() - seen < HUB_ONLINE_S}
+
     def changed(self, row: dict[str, Any], user_id: str) -> None:
         if row["hub"]:
             self.store.append_change(row["hub"], "member", f"{row['project_id']}/{user_id}")
@@ -179,6 +198,28 @@ class Projects:
                       terms_version=terms_version(), terms_url=f"{base}/stack/terms",
                       requires_approval=d.get("approval", "open") != "open",
                       already_member=bool(mine and mine["doc"].get("status") != "removed"))
+
+        @router.get("/projects")
+        async def list_projects(request: Request, scope: str = "public") -> dict[str, Any]:
+            if scope not in ("public", "mine"):
+                raise validation_failed(("scope", "must be public or mine"))
+            if scope == "public":
+                # The public directory is not built here: a project is found by its link.
+                return ok(projects=[], directory_enabled=False, next_cursor=None)
+            who = auth.caller(request)
+            out = []
+            for member in self.store._all("SELECT * FROM stack_members WHERE user_id = ?",
+                                          who.user_id):
+                member["doc"] = json.loads(member["doc"] or "{}")
+                row = self.store.stack_project(member["project_id"])
+                if row is None or member["doc"].get("status") == "removed":
+                    continue
+                item = self.project(row, member)
+                item.pop("join_code", None)
+                item["stacked_by"] = self.stacked_by(row)
+                out.append(item)
+            out.sort(key=lambda p: p.get("created_at") or "", reverse=True)
+            return ok(projects=out, directory_enabled=False, next_cursor=None)
 
         @router.get("/projects/{project}")
         async def get_project(project: str, request: Request) -> dict[str, Any]:

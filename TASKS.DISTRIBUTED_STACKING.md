@@ -284,7 +284,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.5: project, filter, combined pages and their JS/CSS from RSC `website/`, re-accented; the five page routes; generated `site-config.js`; the CSP middleware on `/stack/*`; licence notice per D007; the README's "no web interface" sentence replaced by the decision.
       **Verify:** `python3 tools/check_csp.py && python3 tools/check_server.py`
 
-- [ ] T409 — "My projects": the cookie dashboard
+- [x] T409 — "My projects": the cookie dashboard
       **Files:** SF `server/web/stack/dashboard.html`, `server/web/stack/js/pages/dashboard.js`, `server/stack/auth.py`, `tools/check_server.py`
       **Do:** §4.5: `/files/signin` cookie; `auth/me`; the user's projects with the hub's heartbeat status; "My frames" with verdicts and CSV; 401 without the cookie.
       **Verify:** `python3 tools/check_server.py && python3 tools/check_csp.py`
