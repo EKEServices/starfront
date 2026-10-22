@@ -105,7 +105,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** `collab-hub check` reports every missing or invalid setting, and the hub serves `/api/hub/v1/health`.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T103 — The SQLite layer and schema
+- [x] T103 — The SQLite layer and schema
       **Files:** RSC `worker/crates/hub/src/db/`, `worker/crates/hub/tests/`
       **Do:** §0.2, §1.3: one writer behind a mutex plus readers, WAL, `busy_timeout`, `with_tx` (`BEGIN IMMEDIATE`), `include_str!` migrations recorded in `_migrations`, the schema of §1.3; the README note on `rusqlite` over `sqlx`.
       **Verify:** `cd worker && cargo test -p collab-hub db`
