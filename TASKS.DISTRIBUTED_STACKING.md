@@ -86,7 +86,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** the hub can depend on one definition of every wire shape.
       **Verify:** `cd worker && cargo test -p collab-worker`
 
-- [ ] T004 — `check-contract.mjs`: the hub component (static, warning mode)
+- [x] T004 — `check-contract.mjs`: the hub component (static, warning mode)
       **Files:** RSC `scripts/check-contract.mjs`, `scripts/lib/hub.mjs`
       **Do:** §0.C: read `.route("…")` strings and error codes from `worker/crates/hub/src/routes/*.rs`, compare with `hub-profile.json` and the contract; missing profile routes are a warning until T307 makes them an error; a route or code the profile does not name is an error now.
       **Verify:** `node scripts/check-contract.mjs`
