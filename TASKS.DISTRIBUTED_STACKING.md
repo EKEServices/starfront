@@ -136,7 +136,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §1.5: `DirObjects` over `<data_root>/objects`; every `docs/api/examples/records/engine/*.json` loaded into `SqliteStore` and read back byte-identical.
       **Verify:** `cd worker && cargo test -p collab-hub --test record_fixtures`
 
-- [ ] T109 — The worker-route rules made generic over `&dyn Store`
+- [x] T109 — The worker-route rules made generic over `&dyn Store`
       **Files:** RSC `worker/crates/worker/src/daemon/fake/api.rs`, `worker/crates/worker/src/daemon/fake/`
       **Do:** §1.7: the five route functions take `&dyn Store` and a `RouteCtx` (clock, queue sender, gold trigger); the fake keeps calling them over `DirStore`.
       **Done when:** the daemon tests pass unchanged.
