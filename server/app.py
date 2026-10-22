@@ -963,12 +963,14 @@ def _stacking_listing(project: dict[str, Any], binding: dict[str, str],
                       agent: dict[str, Any], entitled: bool) -> dict[str, Any]:
     """The `stacking` object of the project listing.
 
-    `grant` is the hub's bearer for this telescope, so it is held to the rule
-    the join code is: only telescopes on the collaboration, and the owner's
-    own, get one. Everyone else is told where it is stacked and nothing more.
+    `grant` (and `visibility`, the stack project's, for the Edit form) is the
+    hub's bearer for this telescope, so it is held to the rule the join code
+    is: only telescopes on the collaboration, and the owner's own, get one.
+    Everyone else is told where it is stacked and nothing more.
     """
     out = {"backend": binding["backend"], "hubId": "", "hubName": "", "hubLanUrl": "",
-           "apiBase": binding["apiBase"], "collabProjectId": "", "grant": ""}
+           "apiBase": binding["apiBase"], "collabProjectId": "", "grant": "",
+           "visibility": ""}
     if binding["backend"] != "hub":
         return out
     hub = store.hub(binding["hubId"])
@@ -983,6 +985,8 @@ def _stacking_listing(project: dict[str, Any], binding: dict[str, str],
         "collabProjectId": row["project_id"],
     })
     if entitled:
+        # With the grant, because the Edit form of the owner's program shows it.
+        out["visibility"] = str(row["doc"].get("visibility") or "unlisted")
         out["grant"] = mint_grant(hub, person_id or str(agent["id"]),
                                   (person or {}).get("name") or agent.get("owner") or agent["name"],
                                   agent["id"], row["project_id"])

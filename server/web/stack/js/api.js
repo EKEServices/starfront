@@ -2,8 +2,8 @@
 // If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 // Ported from Rapid Stacker Collab (EKE Services LLC).
 
-// The pages' one client for the Collab API (docs/api/openapi.yaml), reduced to the read-only calls the project, filter
-// and combined pages make. The dashboard's calls (projects?scope=mine, frames?mine=1, rigs) arrive with the dashboard.
+// The pages' one client for the Collab API (docs/api/openapi.yaml), reduced to the read-only calls the project, filter,
+// combined and dashboard pages make (the dashboard adds projects?scope=mine and frames?mine=1).
 //
 // Rules this file enforces so pages cannot get them wrong:
 //
@@ -86,8 +86,16 @@ export function createClient(options = {}) {
     get,
     /** The signed-in user (cookie), or null. Never throws and never redirects: the header asks on every page. */
     async currentUser() {
-      try { return (await get("/auth/me")).user ?? null; } catch { return null; }
+      try {
+        const u = (await get("/auth/me")).user;
+        return u ? { ...u, name: u.display_name ?? "" } : null;
+      } catch { return null; }
     },
+    /** The projects the signed-in user is a member of, each with `my_membership` and `stacked_by` (the hub's last heartbeat). */
+    listMyProjects: ({ limit, cursor } = {}) => get("/projects", { query: { scope: "mine", limit, cursor } }),
+    /** The caller's own frames in a project (`mine=1`; contributors only ever see their own). Until the frames route exists this is `not_found`. */
+    listFrames: (ref, { mine, status, filter, limit, cursor } = {}) =>
+      get(proj(ref) + "/frames", { query: { mine, status, filter, limit, cursor } }),
     getProject: (ref) => get(proj(ref)).then((r) => r.project),
     /** GET /projects/{project}/status. The API wraps the document; the static file does not. Unwrapped here. */
     getStatusDoc: (ref, opts) => get(proj(ref) + "/status", opts).then((r) => r.status_doc),
@@ -97,6 +105,21 @@ export function createClient(options = {}) {
     mosaicGet: (ref) => get(proj(ref) + "/mosaic").then((r) => r.mosaic),
   };
 }
+
+/** Follows `next_cursor` to the end (or `max` items). `fetchPage(cursor)` returns a page body, `pick(body)` its items. */
+export async function paginate(fetchPage, pick, { max = Infinity } = {}) {
+  const out = [];
+  let cursor;
+  do {
+    const body = await fetchPage(cursor);
+    out.push(...pick(body));
+    cursor = body.next_cursor || undefined;
+  } while (cursor && out.length < max);
+  return out.slice(0, max);
+}
+
+/** Where to send somebody to sign in (Discord, via the files page's sign-in) and come back to `next`. */
+export const signInUrl = (next) => "/files/signin?next=" + encodeURIComponent(next);
 
 // ---- What to tell a person ------------------------------------------------------------------------------------
 // Keyed by `code`, never parsed from `message`. Unknown codes fall back to the server's own human text.

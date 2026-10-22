@@ -25,6 +25,7 @@ def build(store: Any) -> FastAPI:
     router = APIRouter()
     auth = Auth(store)
     sub.state.auth = auth
+    auth.mount(router)
     sub.state.projects = Projects(store, auth, router)
     sub.state.rigs = Rigs(store, auth, router)
     sub.include_router(router)
