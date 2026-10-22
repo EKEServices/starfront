@@ -92,6 +92,8 @@ namespace Starfront.Collab.Settings {
             public int StackingLibrarySyncHours { get; set; } = 24;
             public int StackingTempRetentionHours { get; set; } = 24;
             public int StackingHistoryDays { get; set; } = 30;
+            public bool StackingHubTrustLan { get; set; } = true;
+            public string StackingDefaultBackend { get; set; } = "cloud";
             public bool StackingPaused { get; set; }
         }
 
@@ -219,6 +221,18 @@ namespace Starfront.Collab.Settings {
                 Save();
                 RaisePropertyChanged();
             }
+        }
+
+        /// <summary>Use a hub's address on this PC's own network when it answers, instead of going through the server.</summary>
+        public bool StackingHubTrustLan {
+            get => global.StackingHubTrustLan;
+            set { global.StackingHubTrustLan = value; Save(); RaisePropertyChanged(); }
+        }
+
+        /// <summary>The backend for rig- and library-scoped calls, which belong to no project: "cloud" or "hub".</summary>
+        public string StackingDefaultBackend {
+            get => string.Equals(global.StackingDefaultBackend, "hub", StringComparison.OrdinalIgnoreCase) ? "hub" : "cloud";
+            set { global.StackingDefaultBackend = string.Equals(value?.Trim(), "hub", StringComparison.OrdinalIgnoreCase) ? "hub" : "cloud"; Save(); RaisePropertyChanged(); }
         }
 
         /// <summary>The Rapid Stacker Collab token (<c>rscu_…</c>), protected like the other two credentials.</summary>
