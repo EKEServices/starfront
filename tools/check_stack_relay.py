@@ -407,6 +407,12 @@ class FakeHub:
         status, got, _ = self.api("POST", "/push", headers={"Content-Type": ctype}, raw=body)
         return status, got
 
+    def push_master(self, project_id, name, data):
+        """A master data file, alone, streamed route (T421)."""
+        return self.api("PUT", f"/push/{project_id}/masters/{name}", raw=data,
+                        headers={"X-Content-SHA256": hashlib.sha256(data).hexdigest(),
+                                 "Content-Type": "application/octet-stream"})[:2]
+
 
 # =========================================================== 1. who and what
 print("-- a person registers a hub and starts a collaboration on it --")
@@ -598,6 +604,22 @@ notify.drain()
 golds = [m for m in MESSAGES if "Gold integration" in m]
 case("exactly one gold message reached the webhook, for the first push only",
      len(MESSAGES) == 1 and len(golds) == 1 and "Gold integration 1 published for HA" in golds[0], str(MESSAGES))
+
+master = os.urandom(3 << 19)                                  # 1.5 MiB
+record = {"stream_key": "HA", "gold_seq": 1, "format": "xisf", "integration_s": 300.0, "frames": 1,
+          "sessions": 1, "contributors": 1, "licence": "members_only", "created_at": iso()}
+status, got = HUB.push({}, [(f"{PID}/masters/HA_g000001_xisf.json", json.dumps(record).encode())])
+case("the hub pushes a master's record by the multipart push", status == 200, str(got)[:200])
+status, got = HUB.push_master(PID, "HA_g000001_xisf.xisf", master)
+case("...and the data file alone by the streamed route", status == 200 and got.get("written") is True, f"{status} {got}")
+status, again = HUB.push_master(PID, "HA_g000001_xisf.xisf", master)
+case("...sending it again rewrites nothing", status == 200 and again.get("written") is False, f"{status} {again}")
+status, got = call("GET", f"{API}/projects/{PID}/masters", token=GRANT)
+listed = got.get("masters", [])
+case("a member's masters list shows the master", status == 200 and len(listed) == 1
+     and listed[0]["size_bytes"] == len(master) and listed[0]["stream_key"] == "HA", str(got)[:240])
+status, body, _ = http("GET", listed[0]["url"], token=GRANT)
+case("...and the member downloads exactly the bytes the hub sent", status == 200 and body == master, str(status))
 
 # ============================================================== 5. the pages
 print("\n-- the pages see it --")
