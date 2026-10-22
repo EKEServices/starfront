@@ -1895,6 +1895,65 @@ for wrong in ("secrets.txt", "..%2Fcollab.sqlite", "Starfront-Setup-9.9.9.exe", 
         break
 case("...and nothing but installers is served from the folder", status == 404, f"{wrong} -> {status}")
 
+# ============================ the worker and hub binaries (collab-worker, collab-hub)
+print("\n-- the worker and hub binaries --")
+
+
+def fetch(path):
+    """(status, headers, body) for any path, with no redirects and no exception."""
+    try:
+        with urllib.request.urlopen(f"{BASE}{path}", timeout=10) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
+MANIFEST_TEXT = b'{"version": "1.2.3", "contract": "1.27.0", "assets": {}}'
+for product in ("collab-worker", "collab-hub"):
+    folder = DOWNLOAD_DIR / product
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "latest.json").write_bytes(MANIFEST_TEXT)
+    (folder / "latest.json.sig").write_bytes(b"ed25519-signature-" + product.encode())
+    (folder / f"{product}-1.2.3-linux-x64.tar.gz").write_bytes(b"\x1f\x8b" + b"tar-" + product.encode())
+    (folder / f"{product}-1.2.3-windows-x64.zip").write_bytes(b"PK\x03\x04" + b"zip-" + product.encode())
+    (folder / f"{product}-1.2.3-macos-arm64.zip").write_bytes(b"PK\x03\x04" + b"mac-" + product.encode())
+    other = "collab-hub" if product == "collab-worker" else "collab-worker"
+    prefix = f"/download/{product}"
+
+    status, headers, body = fetch(f"{prefix}/latest.json")
+    case(f"{product}: latest.json is served as JSON and never cached",
+         status == 200 and body == MANIFEST_TEXT and headers.get("Content-Type", "").startswith("application/json")
+         and headers.get("Cache-Control") == "no-cache" and headers.get("Content-Length") == str(len(MANIFEST_TEXT)),
+         f"{status} {headers.get('Content-Type')} {headers.get('Cache-Control')}")
+    status, headers, body = fetch(f"{prefix}/latest.json.sig")
+    case(f"{product}: latest.json.sig is served as bytes and never cached",
+         status == 200 and body == b"ed25519-signature-" + product.encode()
+         and headers.get("Content-Type") == "application/octet-stream"
+         and headers.get("Cache-Control") == "no-cache" and headers.get("Content-Length") == str(len(body)),
+         f"{status} {headers.get('Content-Type')} {headers.get('Cache-Control')}")
+    for archive in (f"{product}-1.2.3-linux-x64.tar.gz", f"{product}-1.2.3-windows-x64.zip",
+                    f"{product}-1.2.3-macos-arm64.zip"):
+        status, headers, body = fetch(f"{prefix}/{archive}")
+        case(f"{product}: {archive} is served as bytes, immutable for a year, named as a file",
+             status == 200 and body.endswith(product.encode())
+             and headers.get("Content-Type") == "application/octet-stream"
+             and headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+             and headers.get("Content-Length") == str(len(body))
+             and archive in (headers.get("Content-Disposition") or ""),
+             f"{status} {headers.get('Content-Type')} {headers.get('Cache-Control')}")
+    for wrong in ("evil.sh", f"{product}-1.0-macos.zip", "../latest.json", "..%2Flatest.json", "%2e%2e%2flatest.json",
+                  "collab-hub-1.2.3-plan9.zip", f"{product}-1.2.3-plan9.zip", f"{product}-1.2.3-linux-x64.rar",
+                  f"{other}-1.2.3-linux-x64.tar.gz", "latest.json.bak", "latest.json%0A"):
+        status, _, _ = fetch(f"{prefix}/{wrong}")
+        if status != 404:
+            break
+    case(f"{product}: only the pattern is served; {wrong} is a 404", status == 404, f"{wrong} -> {status}")
+    # The manifest is the one thing a release may not have produced yet.
+    (folder / "latest.json").rename(folder / "latest.json.moved")
+    status, _, _ = fetch(f"{prefix}/latest.json")
+    (folder / "latest.json.moved").rename(folder / "latest.json")
+    case(f"{product}: a missing latest.json is a 404", status == 404, str(status))
+
 # ======================================== a colour camera with a dual-band filter
 print("\n-- a colour camera with a dual-band filter --")
 

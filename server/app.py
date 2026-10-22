@@ -2283,6 +2283,57 @@ def download_file(name: str):
     return FileResponse(path, media_type="application/octet-stream", filename=name)
 
 
+# ---------------------------------------------------------------------------
+# The worker and hub binaries: Rapid Stacker Collab's collab-worker and
+# collab-hub, for the volunteers who run them (plan 4.6)
+# ---------------------------------------------------------------------------
+#
+# server/downloads/collab-worker/ and server/downloads/collab-hub/ hold a
+# latest.json (the manifest), its latest.json.sig (an Ed25519 signature made
+# offline) and one archive per platform. None of those files is committed:
+# the release step puts them there. Only names matching the patterns below are
+# served, so a folder listing or a dot-dot path is a 404 by construction.
+
+_BINARY_PLATFORMS = "macos-arm64|windows-x64|linux-x64"
+_BINARY_ARCHIVE = {
+    product: re.compile(
+        rf"{product}-[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?"
+        rf"-(?:{_BINARY_PLATFORMS})\.(?:zip|tar\.gz)")
+    for product in ("collab-worker", "collab-hub")
+}
+
+
+def _binary_file(product: str, name: str) -> FileResponse:
+    """One file of a binary's folder. The manifest and its signature change on
+    every release, so they are never cached; an archive's name carries its
+    version, so it may be cached for a year."""
+    filename = None
+    if name in ("latest.json", "latest.json.sig"):
+        media = "application/json" if name == "latest.json" else "application/octet-stream"
+        cache = "no-cache"
+    elif _BINARY_ARCHIVE[product].fullmatch(name):
+        media, cache = "application/octet-stream", "public, max-age=31536000, immutable"
+        filename = name
+    else:
+        raise HTTPException(status_code=404, detail="no such file")
+    folder = DOWNLOAD_DIR / product
+    path = folder / name
+    if not path.is_file() or path.resolve().parent != folder.resolve():
+        raise HTTPException(status_code=404, detail="no such file")
+    return FileResponse(path, media_type=media, filename=filename,
+                        headers={"Cache-Control": cache})
+
+
+@app.get("/download/collab-worker/{name}")
+def download_collab_worker(name: str) -> FileResponse:
+    return _binary_file("collab-worker", name)
+
+
+@app.get("/download/collab-hub/{name}")
+def download_collab_hub(name: str) -> FileResponse:
+    return _binary_file("collab-hub", name)
+
+
 _DOWNLOAD_PAGE = """<!doctype html>
 <html lang="en">
 <head>

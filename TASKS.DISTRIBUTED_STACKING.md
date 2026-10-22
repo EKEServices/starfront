@@ -289,7 +289,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.5: `/files/signin` cookie; `auth/me`; the user's projects with the hub's heartbeat status; "My frames" with verdicts and CSV; 401 without the cookie.
       **Verify:** `python3 tools/check_server.py && python3 tools/check_csp.py`
 
-- [ ] T410 — Worker and hub binary downloads on the server
+- [x] T410 — Worker and hub binary downloads on the server
       **Files:** SF `server/app.py`, `server/downloads/collab-worker/.gitkeep`, `.gitignore`, `tools/check_server.py`
       **Do:** §4.6: `/download/collab-worker/{name}` and `/download/collab-hub/{name}` under strict regexes; `latest.json` and `latest.json.sig` served as files; archives git-ignored.
       **Verify:** `python3 tools/check_server.py`
