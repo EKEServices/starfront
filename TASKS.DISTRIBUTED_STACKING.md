@@ -68,7 +68,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 0 — contract and scaffolding (RSC, §Phase 0)
 
-- [ ] T001 — Contract 1.27.0: the hub profile and open points 109–114
+- [x] T001 — Contract 1.27.0: the hub profile and open points 109–114
       **Files:** RSC `docs/api/openapi.yaml`, `docs/api/README.md`, `docs/api/hub-profile.json`, `docs/api/queues.md`, `docs/api/s3-layout.md`, `docs/api/status.schema.json`, `backend/lambdas/shared/contract.json`
       **Do:** §0.A: the hub profile (operations a hub implements and does not); bearer kinds incl. `sfg_`; heartbeat `contract`/`catalogue`/`catalogue_path_ok`/`idle_policy`/`busy` and `min_contract`, 409 `contract_mismatch` (in `ErrorCode`, the plugin's `ApiCodes`); relative part URLs; the catalogue endpoint; "On the hub" in `queues.md` and `s3-layout.md`. D001 recorded as an open point (one library per backend). `info.version` 1.27.0, additive.
       **Done when:** a hub can be built against the contract alone.
