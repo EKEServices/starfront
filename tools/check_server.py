@@ -3067,6 +3067,461 @@ case("no Starfront or Discord id appears in a response, a member row, a rig row 
      not any(f'"{sid}"' in everything or f"/{sid}\"" in everything or f'{sid}/' in everything
              for sid in ("1002", JOINED_ID)), "")
 
+# ------------------------------------------- live stacking: frames
+# Frame upload on the front door: multipart onto this server's disk, the part
+# PUT at /stack/s3/{upload_id}/{n}, complete, the lists, withdraw, and the rig
+# library (decision D001: this server's library serves hub projects only).
+print("\n-- live stacking: frames --")
+import hashlib as _hl                                             # noqa: E402
+import random as _random                                          # noqa: E402
+import urllib.parse as _up                                        # noqa: E402
+from concurrent.futures import ThreadPoolExecutor as _Pool        # noqa: E402
+from server import files as _files_mod                            # noqa: E402
+from server.stack import frames as stack_frames                   # noqa: E402
+
+RELAY = DATA / "stack" / "relay"
+PART = stack_frames.PART_SIZE
+FRONT = server_app.STACK_FRONT.state
+
+
+def fits_bytes(size, seed):
+    rnd = _random.Random(seed)
+    head = b"SIMPLE  =                    T / conforms to FITS standard".ljust(80)
+    return (head + rnd.randbytes(max(0, size - 80)))[:size]
+
+
+def put_part(url, data):
+    """A part PUT as the plugin sends it: the body only, a Content-Length, no Authorization."""
+    request = urllib.request.Request(url, data=data, method="PUT")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+    except (urllib.error.URLError, ConnectionError):      # the server answered early and closed
+        return 0, {}, b""
+
+
+def header_for(**more):
+    return {"IMAGETYP": "Light", "FILTER": "Ha", "EXPTIME": 300.0, "XBINNING": 1, "YBINNING": 1,
+            "INSTRUME": "ASI2600MM Pro", "TELESCOP": "RedCat 51", "FOCALLEN": 250.4, "XPIXSZ": 3.76,
+            "DATE-OBS": "2026-10-20T22:00:00.000", "OBJECT": "M33", "NAXIS1": 6248, "NAXIS2": 4176, **more}
+
+
+def init_for(data, name="frame.fits", token=None, header=None, project=None, **more):
+    return front("POST", f"/projects/{project or FD_ID}/frames/init", {
+        "sha256": _hl.sha256(data).hexdigest(), "size": len(data), "filename": name,
+        "header": header if header is not None else header_for(), "stripped": True, **more},
+        token=token or OWNER_GRANT)
+
+
+def etag_list(sent):
+    return [{"part_number": n, "etag": e} for n, e in sorted(sent.items())]
+
+
+def set_role(user_id, role):
+    row = server_app.store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?", FD_ID, user_id)
+    doc = json.loads(row["doc"])
+    doc["role"] = role
+    server_app.store._run("UPDATE stack_members SET doc = ? WHERE project_id = ? AND user_id = ?",
+                          json.dumps(doc), FD_ID, user_id)
+
+
+def feed_since(seq):
+    return call("GET", f"/api/v1/hubs/{BH}/pull?since={seq}&wait=0", token=BHTOK)[1]
+
+
+FEED1 = feed_since(0)["seq"]
+
+# -- A: three parts, out of order, with a resume in the middle
+DATA_A = fits_bytes(2 * PART + 1000, 1)
+status, init_a = init_for(DATA_A, "M33_Ha_0001.fits")
+up_a = init_a.get("upload") or {}
+case("init answers a multipart upload of 16 MiB parts, three of them, with absolute part URLs on the public origin",
+     status == 200 and init_a.get("status") == "uploading" and init_a.get("resumed") is False
+     and up_a.get("type") == "multipart" and up_a.get("part_size") == PART and up_a.get("part_count") == 3
+     and [p["url"] for p in up_a["part_urls"]] == [f"{BASE}/stack/s3/{up_a['upload_id']}/{n}" for n in (1, 2, 3)]
+     and [p["size"] for p in up_a["part_urls"]] == [PART, PART, 1000] and up_a["completed_parts"] == []
+     and conforms("FrameInitResponse", init_a), f"{status} {why('FrameInitResponse', init_a)} {str(init_a)[:200]}")
+case("...the upload id is 32 random bytes in hex and the frame is a lower-case ULID",
+     _re.fullmatch(r"[0-9a-f]{64}", up_a.get("upload_id", "")) is not None
+     and _re.fullmatch(r"frm_[0-9a-hjkmnp-tv-z]{26}", init_a.get("frame_id", "")) is not None)
+case("...a light is filed under its filter, resolved through the member's mapping or the alias table",
+     init_a.get("filter") == "HA" and init_a["resolution"]["canonical"] == "HA"
+     and init_a["resolution"]["source"] in ("contributor_mapping", "alias_table", "pattern") and init_a.get("frame_type") == "light")
+FA = init_a["frame_id"]
+urls_a = {p["part_number"]: p["url"] for p in up_a["part_urls"]}
+sent_a = {}
+status, headers, _ = put_part(urls_a[3], DATA_A[2 * PART:])
+sent_a[3] = headers.get("ETag", "")
+case("a part PUT answers 200 with the quoted MD5 of the part as its ETag",
+     status == 200 and sent_a[3] == '"' + _hl.md5(DATA_A[2 * PART:]).hexdigest() + '"', str(status))
+status, headers, _ = put_part(urls_a[1], DATA_A[:PART])
+sent_a[1] = headers.get("ETag", "")
+case("...parts may arrive in any order (3 before 1)", status == 200 and sent_a[1] == '"' + _hl.md5(DATA_A[:PART]).hexdigest() + '"')
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": etag_list(sent_a)}, token=OWNER_GRANT)
+case("complete with a part missing: 409 upload_incomplete listing it",
+     status == 409 and got.get("code") == "upload_incomplete" and got.get("outstanding_parts") == [2], f"{status} {got}")
+status, again_a = init_for(DATA_A, "M33_Ha_0001.fits")
+case("init again with the same hash resumes: the same frame, completed parts, URLs for the rest only",
+     status == 200 and again_a.get("resumed") is True and again_a["frame_id"] == FA
+     and [p["part_number"] for p in again_a["upload"]["completed_parts"]] == [1, 3]
+     and again_a["upload"]["completed_parts"][0]["etag"] == sent_a[1]
+     and [p["part_number"] for p in again_a["upload"]["part_urls"]] == [2]
+     and again_a["upload"]["upload_id"] == up_a["upload_id"] and conforms("FrameInitResponse", again_a),
+     f"{status} {why('FrameInitResponse', again_a)} {str(again_a)[:300]}")
+status2, got2 = front("POST", f"/projects/{FD_ID}/frames/init", {
+    "sha256": _hl.sha256(DATA_A).hexdigest(), "size": len(DATA_A) + 1, "filename": "M33_Ha_0001.fits",
+    "header": header_for(), "stripped": True}, token=OWNER_GRANT)
+case("the same hash with another size is not a resume: 400 validation_failed",
+     status2 == 400 and got2.get("code") == "validation_failed", f"{status2} {got2}")
+bad_wrong_size = put_part(urls_a[2], DATA_A[PART:PART + 1000])
+case("a part of the wrong size is refused (400)", bad_wrong_size[0] == 400, str(bad_wrong_size[0]))
+case("a part number outside the upload is refused (400)",
+     put_part(f"{BASE}/stack/s3/{up_a['upload_id']}/9", b"x")[0] == 400 and put_part(f"{BASE}/stack/s3/{up_a['upload_id']}/0", b"x")[0] == 400)
+before = sorted(str(p) for p in RELAY.rglob("*"))
+stray = put_part(f"{BASE}/stack/s3/{'ab' * 32}/1", b"x" * 10)
+case("a stray PUT to an unknown upload id is refused (403) and writes nothing",
+     stray[0] == 403 and sorted(str(p) for p in RELAY.rglob("*")) == before, str(stray[0]))
+case("...and so is one whose id is not even an upload id", put_part(f"{BASE}/stack/s3/nonsense/1", b"x")[0] == 403)
+status, headers, _ = put_part(urls_a[2], DATA_A[PART:2 * PART])
+sent_a[2] = headers.get("ETag", "")
+case("the missing part arrives", status == 200)
+wrong = etag_list(sent_a)
+wrong[0] = {"part_number": 1, "etag": '"' + "0" * 32 + '"'}
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": wrong}, token=OWNER_GRANT)
+case("complete with a wrong ETag: 400 bad_etags", status == 400 and got.get("code") == "bad_etags", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete",
+                    {"etags": etag_list(sent_a) + [{"part_number": 2, "etag": sent_a[2]}]}, token=OWNER_GRANT)
+case("...a part listed twice: 400 bad_etags", status == 400 and got.get("code") == "bad_etags", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": etag_list(sent_a) + [{"part_number": 4, "etag": "x"}]}, token=OWNER_GRANT)
+case("...a part beyond the count: 400 bad_etags", status == 400 and got.get("code") == "bad_etags", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": []}, token=OWNER_GRANT)
+case("...an empty list: 400 invalid_request", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": etag_list(sent_a)}, token=JOINED_GRANT)
+case("another member cannot complete it: 400 not_found", status == 400 and got.get("code") == "not_found", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": [{"part_number": n, "etag": e.strip('"')} for n, e in sorted(sent_a.items())]}, token=OWNER_GRANT)
+case("complete accepts ETags with or without their quotes, assembles the file: status uploaded",
+     status == 200 and got.get("status") == "uploaded" and got.get("already_complete") is False
+     and conforms("FrameCompleteResponse", got), f"{status} {why('FrameCompleteResponse', got)} {got}")
+stored_a = list(RELAY.glob(f"{FD_ID}/*/{FA}.fits"))
+case("...the bytes sit under relay/{project}/{collab user}/{frame_id}.fits, identical to what was sent",
+     len(stored_a) == 1 and stored_a[0].read_bytes() == DATA_A and stored_a[0].parent.name == OWNER_UID
+     and not list(RELAY.glob(f"{FD_ID}/*/{FA}.fits.part")), str(stored_a))
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/complete", {"etags": etag_list(sent_a)}, token=OWNER_GRANT)
+case("complete again is idempotent: already_complete", status == 200 and got.get("already_complete") is True and got.get("status") == "uploaded")
+rows = [c for c in feed_since(FEED1)["changes"] if c["kind"] == "frame"]
+case("the hub's feed carries a frame row, key project_id/frame_id, once",
+     [c["key"] for c in rows] == [f"{FD_ID}/{FA}"], str(rows))
+status, _, _ = put_part(urls_a[1], DATA_A[:100])
+case("a part PUT to a completed upload is refused (403)", status == 403, str(status))
+status, got = init_for(DATA_A, "M33_Ha_0001.fits")
+case("init with the hash of an uploaded frame: 409 duplicate, with the caller's existing_frame",
+     status == 409 and got.get("code") == "duplicate" and got.get("status") == "uploaded"
+     and got.get("existing_frame", {}).get("frame_id") == FA and conforms("ErrorResponse", got), f"{status} {got}")
+status, got = init_for(DATA_A, "M33_Ha_0001.fits", token=JOINED_GRANT)
+case("...another member sees 409 duplicate without existing_frame",
+     status == 409 and got.get("code") == "duplicate" and "existing_frame" not in got, f"{status} {got}")
+
+# -- B: the plugin's byte layout (UploadEngine): four parts in parallel, no Authorization, quoted ETags back
+DATA_B = fits_bytes(3 * PART + 12345, 2)
+status, init_b = init_for(DATA_B, "M33_Ha_0002.fits")
+up_b = init_b["upload"]
+todo = sorted(up_b["part_urls"], key=lambda p: p["part_number"])
+
+
+def plugin_part(p):
+    offset = (p["part_number"] - 1) * up_b["part_size"]       # UploadEngine: (PartNumber - 1) * PartSize
+    status_, headers_, _ = put_part(p["url"], DATA_B[offset:offset + p["size"]])
+    return p["part_number"], status_, headers_.get("ETag")
+
+
+with _Pool(4) as pool:
+    part_results = list(pool.map(plugin_part, todo))
+case("the plugin's layout: parts at (n-1)*part_size, 4 in parallel, each answered with a quoted ETag",
+     len(part_results) == 4 and all(s == 200 and e and e.startswith('"') and e.endswith('"') for _, s, e in part_results), str(part_results))
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_b['frame_id']}/complete",
+                    {"etags": etag_list({n: e for n, _, e in part_results})}, token=OWNER_GRANT)
+stored_b = list(RELAY.glob(f"{FD_ID}/*/{init_b['frame_id']}.fits"))
+case("...completes with the ETags exactly as the PUTs returned them; the file is byte-identical",
+     status == 200 and got.get("status") == "uploaded" and len(stored_b) == 1 and stored_b[0].read_bytes() == DATA_B,
+     f"{status} {got}")
+
+# -- C: refusals
+DATA_C = b"this is not a FITS file at all " * 40
+status, init_c = init_for(DATA_C, "notfits.fits")
+put_part(init_c["upload"]["part_urls"][0]["url"], DATA_C)
+sent_c = {1: '"' + _hl.md5(DATA_C).hexdigest() + '"'}
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_c['frame_id']}/complete", {"etags": etag_list(sent_c)}, token=OWNER_GRANT)
+case("bytes that do not start like a FITS file are refused at complete (400 validation_failed)",
+     status == 400 and got.get("code") == "validation_failed" and conforms("ErrorResponse", got), f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/frames/{init_c['frame_id']}", token=OWNER_GRANT)
+case("...and the frame is gone, its file with it",
+     got.get("code") == "not_found" and not list(RELAY.glob(f"{FD_ID}/*/{init_c['frame_id']}*")), f"{status} {got}")
+DATA_X = b"XISF0100" + b"\0" * 200
+status, init_x = init_for(DATA_X, "scan.xisf")
+put_part(init_x["upload"]["part_urls"][0]["url"], DATA_X)
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_x['frame_id']}/complete",
+                    {"etags": etag_list({1: '"' + _hl.md5(DATA_X).hexdigest() + '"'})}, token=OWNER_GRANT)
+case("an XISF file passes its magic check", status == 200 and got.get("status") == "uploaded", f"{status} {got}")
+DATA_T = fits_bytes(5000, 3)
+status, init_t = init_for(DATA_T, "short.fits")
+put_part(init_t["upload"]["part_urls"][0]["url"], DATA_T)
+for part_file in RELAY.glob(f"{FD_ID}/*/{init_t['frame_id']}.fits.part"):
+    part_file.write_bytes(part_file.read_bytes()[:4000])
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_t['frame_id']}/complete",
+                    {"etags": etag_list({1: '"' + _hl.md5(DATA_T).hexdigest() + '"'})}, token=OWNER_GRANT)
+case("a stored file that is not the declared size: 409 size_mismatch, and the frame is removed",
+     status == 409 and got.get("code") == "size_mismatch"
+     and front("GET", f"/projects/{FD_ID}/frames/{init_t['frame_id']}", token=OWNER_GRANT)[1].get("code") == "not_found", f"{status} {got}")
+status, got = init_for(fits_bytes(100, 4), header=dict(header_for(), SITELAT=51.5))
+case("a header with SITELAT is refused: 400 header_rejected, the card not echoed back",
+     status == 400 and got.get("code") == "header_rejected" and "51.5" not in json.dumps(got), f"{status} {got}")
+status, got = init_for(fits_bytes(100, 5), header=header_for(IMAGETYP="Snapshot"))
+case("an IMAGETYP that is no frame type: 400 unsupported_frame_type", status == 400 and got.get("code") == "unsupported_frame_type", f"{status} {got}")
+status, got = init_for(fits_bytes(100, 6), header=header_for(EXPTIME=1.0))
+case("a light under the project's minimum exposure: 409 policy_violation (below_min_exposure)",
+     status == 409 and got.get("code") == "policy_violation" and got.get("reason") == "below_min_exposure", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/init", {"sha256": "zz", "size": 0, "filename": "x.txt", "header": {}}, token=OWNER_GRANT)
+case("a bad init body: 400 validation_failed with errors", status == 400 and got.get("code") == "validation_failed" and got.get("errors"), f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/init", {"sha256": "0" * 64, "size": 600 * 1024 * 1024, "filename": "x.fits", "header": {}}, token=OWNER_GRANT)
+case("a frame over 512 MiB: 400 frame_too_large", status == 400 and got.get("code") == "frame_too_large", f"{status} {got}")
+status, got = init_for(fits_bytes(100, 7), token=SECOND_GRANT)
+case("a grant for another project is token_scope", status == 401 and got.get("code") == "token_scope", f"{status} {got}")
+status, got = call("POST", f"{API}/projects/{FD_ID}/frames/init", {}, token=None)
+case("no credential: 401 not_authenticated", status == 401 and got.get("code") == "not_authenticated")
+
+# -- D: the quotas
+DATA_D = fits_bytes(70000, 8)
+status, init_d = init_for(DATA_D, "d.fits")
+saved_floor = _files_mod.KEEP_FREE
+_files_mod.KEEP_FREE = 1 << 60
+try:
+    status, got = init_for(fits_bytes(5000, 9), "e.fits")
+    case("below the volume's KEEP_FREE floor: 429 quota_exceeded", status == 429 and got.get("code") == "quota_exceeded"
+         and got.get("quota") and conforms("ErrorResponse", got), f"{status} {got}")
+    status, got = init_for(DATA_D, "d.fits")
+    case("...but a resumed upload already holds its room: it still resumes", status == 200 and got.get("resumed") is True, f"{status} {got}")
+finally:
+    _files_mod.KEEP_FREE = saved_floor
+
+
+def set_quotas(**changes):
+    row = server_app.store.stack_project(FD_ID)
+    doc = row["doc"]
+    doc["quotas"] = {**doc["quotas"], **changes}
+    server_app.store.set_stack_project(FD_ID, row["hub"], doc)
+
+
+used = server_app.store._one("SELECT COUNT(*) AS n, SUM(size) AS b FROM stack_frames WHERE project_id = ? AND user_id = ?"
+                             " AND status NOT IN ('withdrawn', 'rejected')", FD_ID, OWNER_UID)
+set_quotas(contributor_max_frames=used["n"])
+status, got = init_for(fits_bytes(5000, 10), "f.fits")
+case("the per-contributor frame limit: 429 quota_exceeded, quota contributor_frames",
+     status == 429 and got.get("quota") == "contributor_frames", f"{status} {got}")
+set_quotas(contributor_max_frames=2000, contributor_max_bytes=used["b"] + 100)
+status, got = init_for(fits_bytes(5000, 11), "g.fits")
+case("the per-contributor byte limit: 429, quota contributor_bytes", status == 429 and got.get("quota") == "contributor_bytes", f"{status} {got}")
+set_quotas(contributor_max_bytes=60 * 1000 ** 3, project_max_bytes=used["b"] + 100)
+status, got = init_for(fits_bytes(5000, 12), "h.fits")
+case("the per-project byte limit: 429, quota project_bytes", status == 429 and got.get("quota") == "project_bytes", f"{status} {got}")
+set_quotas(project_max_bytes=2 * 1000 ** 4)
+status, got = init_for(fits_bytes(5000, 13), "i.fits")
+case("...and the limits lifted, the same init is taken", status == 200, f"{status} {got}")
+FI = got["frame_id"]
+status, got = front("GET", f"/projects/{FD_ID}/membership", token=OWNER_GRANT)
+case("membership usage counts frames still uploading", got["membership"]["usage"]["frames_used"] >= 4, str(got["membership"]["usage"]))
+
+# -- E: get, list
+status, got = front("GET", f"/projects/{FD_ID}/frames/{FA}", token=OWNER_GRANT)
+case("frames/{id} returns the frame (uploaded, no verdict yet), validating against FrameResponse",
+     status == 200 and got["frame"]["status"] == "uploaded" and got["frame"]["filter"] == "HA"
+     and got["frame"]["reject_reason"] is None and got["frame"]["sha256"] == _hl.sha256(DATA_A).hexdigest()
+     and conforms("FrameResponse", got), f"{status} {why('FrameResponse', got)}")
+status, got = front("GET", f"/projects/{FD_ID}/frames/{FA}", token=JOINED_GRANT)
+case("a contributor cannot read another's frame: 400 not_found", status == 400 and got.get("code") == "not_found")
+status, got = front("GET", f"/projects/{FD_ID}/frames/frm_nonsense", token=OWNER_GRANT)
+case("a malformed frame id: 400 not_found", status == 400 and got.get("code") == "not_found")
+status, got = front("GET", f"/projects/{FD_ID}/frames?mine=1", token=OWNER_GRANT)
+ids_mine = [f["frame_id"] for f in got.get("frames", [])]
+case("the list is the caller's own, newest first, validating against FrameListResponse",
+     status == 200 and ids_mine == sorted(ids_mine, reverse=True) and FA in ids_mine and conforms("FrameListResponse", got)
+     and all("contributor" not in f for f in got["frames"]), f"{status} {why('FrameListResponse', got)}")
+status, got = front("GET", f"/projects/{FD_ID}/frames", token=JOINED_GRANT)
+case("a contributor's list is forced to their own (none yet)", status == 200 and got["frames"] == [])
+status, got = front("GET", f"/projects/{FD_ID}/frames?status=uploaded&limit=1", token=OWNER_GRANT)
+case("status filter and paging: one frame and a cursor", len(got["frames"]) == 1 and got["next_cursor"]
+     and got["frames"][0]["status"] == "uploaded", str(got)[:200])
+status, page2 = front("GET", f"/projects/{FD_ID}/frames?status=uploaded&limit=1&cursor={got['next_cursor']}", token=OWNER_GRANT)
+case("...the cursor leads to the next, older one", page2["frames"] and page2["frames"][0]["frame_id"] < got["frames"][0]["frame_id"])
+status, got = front("GET", f"/projects/{FD_ID}/frames?contributor=Bobby", token=JOINED_GRANT)
+case("another member's frames by name need a maintainer: 401 not_maintainer", status == 401 and got.get("code") == "not_maintainer", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/frames?limit=0", token=OWNER_GRANT)
+case("limit 0: 400 validation_failed", status == 400 and got.get("code") == "validation_failed")
+status, got = front("GET", f"/projects/{FD_ID}/frames?filter=HA", token=OWNER_GRANT)
+case("the filter filter", got["frames"] and all(f["filter"] == "HA" for f in got["frames"]))
+OWNER_NAME = server_app.store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?", FD_ID, OWNER_UID)
+OWNER_NAME = json.loads(OWNER_NAME["doc"])["display_name"]
+set_role(JOINER_UID, "maintainer")
+try:
+    status, got = front("GET", f"/projects/{FD_ID}/frames", token=JOINED_GRANT)
+    case("a maintainer sees everyone's frames, naming the contributor by display name",
+         status == 200 and got["frames"] and all(f.get("contributor") == OWNER_NAME for f in got["frames"])
+         and conforms("FrameListResponse", got), f"{status} {str(got)[:300]}")
+    status, got = front("GET", f"/projects/{FD_ID}/frames?contributor={OWNER_NAME.upper()}", token=JOINED_GRANT)
+    case("...?contributor=<display name> pages through one member's frames (any case)",
+         status == 200 and len(got["frames"]) >= 2, f"{status} {got}")
+    status, got = front("GET", f"/projects/{FD_ID}/frames?contributor=nobody", token=JOINED_GRANT)
+    case("...an unknown name gives an empty list", status == 200 and got["frames"] == [])
+    status, got = front("GET", f"/projects/{FD_ID}/frames?mine=1", token=JOINED_GRANT)
+    case("...mine=1 still means their own", got["frames"] == [])
+    status, got = front("GET", f"/projects/{FD_ID}/frames/{FA}", token=JOINED_GRANT)
+    case("...and reads any frame", status == 200 and got["frame"]["frame_id"] == FA)
+finally:
+    set_role(JOINER_UID, "contributor")
+
+# -- F: withdraw
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FI}/withdraw", token=JOINED_GRANT)
+case("another contributor cannot withdraw it: 400 not_found", status == 400 and got.get("code") == "not_found")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FI}/withdraw", token=OWNER_GRANT)
+case("withdrawing an uploading frame aborts it: withdrawn, file and parts gone, validating against WithdrawResponse",
+     status == 200 and got.get("status") == "withdrawn" and conforms("WithdrawResponse", got)
+     and not list(RELAY.glob(f"{FD_ID}/*/{FI}*")), f"{status} {why('WithdrawResponse', got)}")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FI}/withdraw", token=OWNER_GRANT)
+case("...and it is idempotent", status == 200 and got.get("status") == "withdrawn")
+status, got = init_for(fits_bytes(5000, 13), "i.fits")
+case("...a withdrawn frame no longer blocks its hash", status == 200 and got["frame_id"] != FI and got["resumed"] is False)
+FEED2 = feed_since(0)["seq"]
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_b['frame_id']}/withdraw", token=OWNER_GRANT)
+case("withdrawing an uploaded frame: withdrawn, raw deleted after seven days",
+     status == 200 and got["status"] == "withdrawn" and got["raw_delete_after"] > time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + 6 * 86400))
+     and got["raw_delete_after"] < time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + 8 * 86400)), f"{status} {got}")
+case("...and the hub is told (a frame row)",
+     [c["key"] for c in feed_since(FEED2)["changes"] if c["kind"] == "frame"] == [f"{FD_ID}/{init_b['frame_id']}"])
+status, got = front("GET", f"/projects/{FD_ID}/frames/{init_b['frame_id']}", token=OWNER_GRANT)
+case("...the frame reads back withdrawn", got["frame"]["status"] == "withdrawn")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{init_b['frame_id']}/complete", {"etags": etag_list(sent_a)}, token=OWNER_GRANT)
+case("completing a withdrawn frame: 409 frame_state", status == 409 and got.get("code") == "frame_state" and got.get("status") == "withdrawn", f"{status} {got}")
+set_role(JOINER_UID, "maintainer")
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FA}/withdraw", token=JOINED_GRANT)
+set_role(JOINER_UID, "contributor")
+case("a maintainer may withdraw anyone's frame", status == 200 and got["status"] == "withdrawn", f"{status} {got}")
+
+# -- G: the sweep of expired uploads
+DATA_S = fits_bytes(9000, 14)
+status, init_s = init_for(DATA_S, "s.fits")
+put_part(init_s["upload"]["part_urls"][0]["url"], DATA_S)
+case("an upload in progress holds a partial file", len(list(RELAY.glob(f"{FD_ID}/*/{init_s['frame_id']}.fits.part"))) == 1)
+case("a sweep now leaves it alone", FRONT.frames.sweep() == 0)
+case("a sweep four days later aborts it: row, parts and file gone",
+     FRONT.frames.sweep(time.time() + 4 * 86400) >= 1
+     and front("GET", f"/projects/{FD_ID}/frames/{init_s['frame_id']}", token=OWNER_GRANT)[1].get("code") == "not_found"
+     and not list(RELAY.glob(f"{FD_ID}/*/{init_s['frame_id']}*"))
+     and not server_app.store._all("SELECT 1 FROM stack_parts WHERE upload_id = ?", init_s["upload"]["upload_id"]))
+case("the sweep thread is installed", any(t.name == "stack-sweep" for t in threading.enumerate()))
+
+# -- H: the rig library (D001: this server's library serves hub projects only)
+RID = rig["rig_id"]
+LIB = f"/rigs/{RID}/library"
+
+
+def lib_header(**more):
+    return {"IMAGETYP": "Dark", "EXPTIME": 300.0, "GAIN": 100, "OFFSET": 50, "XBINNING": 1, "SET-TEMP": -10.0,
+            "INSTRUME": "ASI2600MM Pro", "DATE-OBS": "2026-10-19T10:00:00.000", "NAXIS1": 6248, "NAXIS2": 4176, **more}
+
+
+def lib_init(data, name="dark.fits", token=OWNER_GRANT, rig_id=RID, **changes):
+    body = {"sha256": _hl.sha256(data).hexdigest(), "size": len(data), "filename": name,
+            "header": lib_header(), "stripped": True}
+    body.update(changes)
+    return front("POST", f"/rigs/{rig_id}/library/frames/init", body, token=token)
+
+
+status, got = front("GET", LIB, token=OWNER_GRANT)
+case("an empty library: usage, no frames, no masters, validating against LibraryResponse",
+     status == 200 and got["frames"] == [] and got["masters"] == [] and got["built_at"] is None
+     and got["usage"] == {"bytes_used": 0, "frames_used": 0, "max_bytes": 30 * 1024 ** 3, "max_frames": 1500}
+     and conforms("LibraryResponse", got), f"{status} {why('LibraryResponse', got)}")
+status, got = front("GET", LIB, token=JOINED_GRANT)
+case("a rig that is not yours: 400 not_found", status == 400 and got.get("code") == "not_found")
+DATA_L = fits_bytes(20000, 20)
+status, got = lib_init(DATA_L, stripped=False)
+case("a library frame must be stripped: 400 strip_required", status == 400 and got.get("code") == "strip_required", f"{status} {got}")
+status, got = lib_init(DATA_L, header=lib_header(SITELAT=1))
+case("...a location card: 400 header_rejected", status == 400 and got.get("code") == "header_rejected")
+status, got = lib_init(DATA_L, header=lib_header(IMAGETYP="Light"))
+case("...a light: 400 unsupported_frame_type", status == 400 and got.get("code") == "unsupported_frame_type", f"{status} {got}")
+status, got = lib_init(DATA_L, header=lib_header(IMAGETYP="Flat"))
+case("...a flat never comes from the library: 400 unsupported_frame_type", status == 400 and got.get("code") == "unsupported_frame_type")
+status, got = lib_init(DATA_L, header=lib_header(INSTRUME="Other camera"))
+case("...a header naming another camera: 400 validation_failed", status == 400 and got.get("code") == "validation_failed")
+status, got = lib_init(DATA_L, header=lib_header(XBINNING=2))
+case("...another binning: 400 validation_failed", status == 400 and got.get("code") == "validation_failed")
+status, got = lib_init(DATA_L)
+lib_up = got.get("upload") or {}
+case("library init: a multipart upload, status uploading, the rig and a dark, validating against LibraryFrameInitResponse",
+     status == 200 and got.get("status") == "uploading" and got.get("frame_type") == "dark" and got.get("rig_id") == RID
+     and lib_up.get("part_count") == 1 and conforms("LibraryFrameInitResponse", got), f"{status} {why('LibraryFrameInitResponse', got)} {str(got)[:200]}")
+LF = got["frame_id"]
+status, headers, _ = put_part(lib_up["part_urls"][0]["url"], DATA_L)
+case("library part URLs are absolute on the public origin too",
+     all(p["url"].startswith(BASE + "/stack/s3/") for p in lib_up["part_urls"]))
+case("a library part PUT is the same route", status == 200 and headers.get("ETag") == '"' + _hl.md5(DATA_L).hexdigest() + '"')
+status, got = lib_init(DATA_L)
+case("library init again resumes", status == 200 and got.get("resumed") is True and got["frame_id"] == LF
+     and [p["part_number"] for p in got["upload"]["completed_parts"]] == [1] and got["upload"]["part_urls"] == [])
+status, got = front("POST", f"{LIB}/frames/{LF}/complete", {"etags": [{"part_number": 1, "etag": "x"}]}, token=OWNER_GRANT)
+case("library complete with a wrong ETag: 400 bad_etags", status == 400 and got.get("code") == "bad_etags")
+status, got = front("POST", f"{LIB}/frames/{LF}/complete", {"etags": [{"part_number": 1, "etag": headers["ETag"]}]}, token=JOINED_GRANT)
+case("...another user cannot complete it (400 not_found)", status == 400 and got.get("code") == "not_found")
+status, got = front("POST", f"{LIB}/frames/{LF}/complete", {"etags": [{"part_number": 1, "etag": headers["ETag"]}]}, token=OWNER_GRANT)
+case("library complete: ready, validating against LibraryFrameCompleteResponse",
+     status == 200 and got.get("status") == "ready" and got.get("already_complete") is False
+     and conforms("LibraryFrameCompleteResponse", got), f"{status} {why('LibraryFrameCompleteResponse', got)}")
+lib_files = list(RELAY.glob(f"lib/{OWNER_UID}/{RID}/{LF}.fits"))
+case("...the file sits under relay/lib/{collab user}/{rig}/", len(lib_files) == 1 and lib_files[0].read_bytes() == DATA_L)
+status, got = front("POST", f"{LIB}/frames/{LF}/complete", {"etags": [{"part_number": 1, "etag": headers["ETag"]}]}, token=OWNER_GRANT)
+case("...and complete again is already_complete", got.get("already_complete") is True and got.get("status") == "ready")
+status, got = lib_init(DATA_L)
+case("the same hash again: 409 duplicate (no existing_frame)", status == 409 and got.get("code") == "duplicate" and "existing_frame" not in got)
+status, got = front("GET", LIB, token=OWNER_GRANT)
+lf = (got.get("frames") or [{}])[0]
+case("the library lists it with its settings, and the usage counts it",
+     status == 200 and lf.get("frame_id") == LF and lf.get("status") == "ready" and lf.get("exposure_s") == 300.0
+     and lf.get("gain") == 100 and lf.get("binning") == 1 and lf.get("set_temp_c") == -10.0
+     and got["usage"]["frames_used"] == 1 and got["usage"]["bytes_used"] == len(DATA_L) and conforms("LibraryResponse", got),
+     f"{status} {why('LibraryResponse', got)} {got}")
+case("the hub is told of the library frame (kind library, key user/rig/frame)",
+     f"{OWNER_UID}/{RID}/{LF}" in [c["key"] for c in feed_since(FEED2)["changes"] if c["kind"] == "library"])
+DATA_L2 = fits_bytes(300, 21)
+status, got = lib_init(DATA_L2, "bias.fits", header=lib_header(IMAGETYP="Bias", EXPTIME=0.0))
+LF2 = got["frame_id"]
+status, got = front("POST", f"{LIB}/frames/{LF2}/withdraw", token=OWNER_GRANT)
+case("withdrawing an uploading library frame aborts it", status == 200 and got["status"] == "withdrawn"
+     and conforms("WithdrawResponse", got) and not list(RELAY.glob(f"lib/*/*/{LF2}*")))
+status, got = front("POST", f"{LIB}/frames/{LF}/withdraw", token=OWNER_GRANT)
+case("withdrawing a ready one: withdrawn, and the usage is released",
+     status == 200 and got["status"] == "withdrawn" and front("GET", LIB, token=OWNER_GRANT)[1]["usage"]["frames_used"] == 0)
+status, got = front("POST", f"{LIB}/frames/{LF}/withdraw", token=OWNER_GRANT)
+case("...idempotent", status == 200 and got["status"] == "withdrawn")
+status, got = front("POST", f"{LIB}/frames/{LF}/withdraw", token=JOINED_GRANT)
+case("...another user cannot (400 not_found)", status == 400 and got.get("code") == "not_found")
+status, got = front("GET", LIB, token=OWNER_GRANT)
+case("the library no longer lists a withdrawn frame", all(f["frame_id"] != LF for f in got["frames"]))
+DATA_L3 = fits_bytes(400, 22)
+status, got = lib_init(DATA_L3, "old.fits")
+LF3 = got["frame_id"]
+case("a library frame upload also expires after three days (swept)",
+     FRONT.library.sweep() == 0 and FRONT.library.sweep(time.time() + 4 * 86400) == 1
+     and server_app.store._one("SELECT 1 AS x FROM stack_library WHERE frame_id = ?", LF3) is None)
+
+# -- the hub's view never carries a Starfront id
+disk = " ".join(str(p) for p in RELAY.rglob("*"))
+everything = json.dumps([server_app.store._all("SELECT * FROM stack_frames"), server_app.store._all("SELECT * FROM stack_library"),
+                         feed_since(FEED1)["changes"]]) + disk
+case("no Starfront or Discord id appears in a frame row, a library row, a relay path or the feed",
+     not any(f'"{sid}"' in everything or f"/{sid}/" in everything for sid in ("1002", JOINED_ID)), "")
+
 # ------------------------------------------- live stacking: the schema
 print("\n-- live stacking: hub and stacking tables --")
 import sqlite3                                                   # noqa: E402

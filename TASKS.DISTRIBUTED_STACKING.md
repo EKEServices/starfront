@@ -264,7 +264,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.4: the Collab envelope with no 403 or 404; `sfg_` and cookie auth; resolve-join-code, project, join, membership, rigs (the contract's fingerprint example), `InitHeader`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T405 — The front door: frames multipart and the library
+- [x] T405 — The front door: frames multipart and the library
       **Files:** SF `server/stack/{frames,library}.py`, `tools/check_server.py`
       **Do:** §4.4: init, resume, duplicate, part `PUT` at `/stack/s3/{upload_id}/{n}` written at offset, complete, list, get, withdraw; library frames per D001; 429 `quota_exceeded` below `KEEP_FREE`.
       **Verify:** `python3 tools/check_server.py`

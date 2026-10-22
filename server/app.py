@@ -2534,7 +2534,10 @@ hubs = Hubs(app, store, _person, may_start)
 
 # The front door for hub-backed projects, in the Collab contract's envelope.
 # Its own sub-application so its error handlers cover exactly `/stack/api`.
-app.mount("/stack/api", stack_front.build(store))
+STACK_FRONT = stack_front.build(store, DATA / "stack" / "relay")
+app.mount("/stack/api", STACK_FRONT)
+# The frame part PUTs (`/stack/s3/...`) and the sweep of abandoned uploads.
+stack_front.install(app, STACK_FRONT)
 
 
 # ---------------------------------------------------------------------------
