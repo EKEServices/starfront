@@ -142,7 +142,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** the daemon tests pass unchanged.
       **Verify:** `cd worker && cargo test -p collab-worker --test daemon_prepare --test daemon_work --test daemon_loop --test daemon_e2e`
 
-- [ ] T110 — Worker routes, the RPC and worker auth on the hub
+- [x] T110 — Worker routes, the RPC and worker auth on the hub
       **Files:** RSC `worker/crates/hub/src/routes/{worker,rpc}.rs`, `worker/crates/hub/src/auth.rs`, `worker/crates/hub/tests/worker_routes.rs`
       **Do:** §1.7: `/api/worker/*` over the T109 functions (heartbeat answers `min_contract`, `server_time`, 409 below); `/hub/v1/store/{op}` (the closed list only), `/hub/v1/objects/{key}` (Range, HEAD, streamed PUT, listing; `raw/` refused), `/hub/v1/queue/{op}`; `rscw_` tokens and `collab-hub token`.
       **Verify:** `cd worker && cargo test -p collab-hub --test worker_routes`
