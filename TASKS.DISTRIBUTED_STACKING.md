@@ -411,7 +411,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §7.2, §7.3: the final runbook and topology; coexistence with the AWS stack; the Starfront health route's `stackContract`. The loose `Astro/Running-the-servers-locally.md` gains a pointer to the runbook (it is unversioned).
       **Verify:** `node scripts/check-contract.mjs`
 
-- [ ] T703 — Starfront CI that actually runs
+- [x] T703 — Starfront CI that actually runs
       **Files:** SF `.github/workflows/` (moved from `nina/.github/workflows/`), `.github/workflows/python-checks.yml`
       **Do:** §7.4: move `ci.yml` and `release.yml` to the root with `working-directory: nina` and `paths: ['nina/**']`; run every `tools/check_*.py` on ubuntu and windows with Python 3.12. Can land at any time. (`CLAUDE.md` is git-ignored here; update the local copy's "Nothing runs CI" line.)
       **Verify:** `test -f .github/workflows/ci.yml && test -f .github/workflows/python-checks.yml && test ! -d nina/.github/workflows`
