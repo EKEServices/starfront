@@ -327,7 +327,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 - [ ] T417 — Server, hub and pages on the home network
       **Manual:** `run_local.py --lan` and `collab-hub run` on the Mac; register the hub; `collab-uploader` to `http://<mac>:8800/stack/api`; the hub pulls, stacks and pushes; `http://<mac>:8800/stack/p/<slug>` renders in a browser on the Windows PC.
 
-- [ ] T418 — `collab-worker self-update` on Windows, macOS and Linux (RSC)
+- [x] T418 — `collab-worker self-update` on Windows, macOS and Linux (RSC)
       **Files:** RSC `worker/crates/worker/src/self_update.rs`, `worker/crates/worker/src/main.rs`, `worker/crates/worker/src/service.rs`, `worker/crates/worker/Cargo.toml`, `worker/crates/worker/tests/`, `docs/runbooks/worker-daemon.md`
       **Do:** D005: fetch `latest.json` and `latest.json.sig` from the hub's mirror, then the Starfront server; verify the Ed25519 signature against the embedded public key and the asset's SHA-256; refuse a lower or equal version and a contract below the hub's `min_contract`; unpack beside the running binary, swap by rename (on Windows rename the running `.exe` aside first, since it is locked), restart through the installed service or logon task; keep the previous binary for one rollback (`self-update --rollback`). A `--check` mode only reports.
       **Done when:** a bad signature, a bad hash and a downgrade are refused, and a good update swaps and restarts on all three OSes (Windows by test double for the task scheduler).
