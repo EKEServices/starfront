@@ -74,7 +74,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** a hub can be built against the contract alone.
       **Verify:** `npx --yes @redocly/cli@latest lint docs/api/openapi.yaml && (cd backend && node scripts/gen-contract.js) && git diff --exit-code backend/lambdas/shared/contract.json && node scripts/check-contract.mjs`
 
-- [ ] T002 — The `collab-hub` crate: scaffold and workspace dependencies
+- [x] T002 — The `collab-hub` crate: scaffold and workspace dependencies
       **Files:** RSC `worker/Cargo.toml`, `worker/Cargo.lock`, `worker/crates/hub/`
       **Do:** §0.B: `collab-hub` lib + binary (`--help` only), `[lints] workspace = true`; workspace deps `axum`, `tokio`, `tower-http`, `rusqlite` (bundled), `hmac`, `ulid`, `rand`, `hex`, `mime_guess`, `sysinfo`. `worker-ci` builds it on three OSes with no workflow change.
       **Done when:** the crate builds, is linted, and the dependency-skew check still passes.
