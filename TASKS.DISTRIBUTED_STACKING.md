@@ -80,7 +80,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Done when:** the crate builds, is linted, and the dependency-skew check still passes.
       **Verify:** `cd worker && cargo build -p collab-hub && cargo clippy -p collab-hub --all-targets -- -D warnings && bash scripts/check-dep-skew.sh && bash scripts/check-no-local-patch.sh`
 
-- [ ] T003 — A shared `wire` module for the RPC shapes
+- [x] T003 — A shared `wire` module for the RPC shapes
       **Files:** RSC `worker/crates/worker/src/wire.rs`, `worker/crates/worker/src/daemon/ports.rs`, `worker/crates/worker/src/daemon/child.rs`, `worker/crates/worker/src/lib.rs`
       **Do:** move the typed route structs of `ports.rs` and the request/reply op enums of `child.rs` into `wire.rs`, re-exported from both; no behaviour change.
       **Done when:** the hub can depend on one definition of every wire shape.
