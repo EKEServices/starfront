@@ -224,7 +224,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.6: one cone search per project and `grid.spec()` on the hub; 202 `building`; rebuild on `grid_rev`; the worker fetches, falls back to its own XPSD on 404 and `PUT`s the result back.
       **Verify:** `cd worker && cargo test -p collab-hub && cargo test -p collab-worker`
 
-- [ ] T307 — `collab-hub simulate` and the strict contract check
+- [x] T307 — `collab-hub simulate` and the strict contract check
       **Files:** RSC `worker/crates/hub/src/main.rs`, `worker/crates/hub/src/simulate.rs`, `scripts/lib/hub.mjs`
       **Do:** §3.7, §0.C: a seeded hub on a free loopback port printing `{url, admin_token, enrol_code}`; the contract check drives every profile operation and validates answers; missing profile routes become an error.
       **Verify:** `node scripts/check-contract.mjs`
