@@ -29,7 +29,7 @@ Source plan: `STARFRONT_DISTRIBUTED_STACKING_PLAN.md` (section numbers below ref
 | 3 | T301–T310 | the hub as a standalone backend (RSC) |
 | 4 | T401–T418 | the Starfront server (SF, plus three RSC tasks) |
 | 5 | T501–T507 | the Starfront desktop (SF) |
-| 6 | T601–T606 | the N.I.N.A. plugin (SF) |
+| 6 | T601–T607 | the N.I.N.A. plugin (SF) |
 | 7 | T701–T705 | local mode, docs, CI, the full night |
 
 Check progress with `python3 tools/task_progress.py`: per-phase counts, the next task, which decisions are blocking, manual checks left behind, and recent branches in both repositories. `--pending` lists what is left, `--phase N` one phase, `--verify T104` re-runs a task's Verify command, and `--verify-done` re-runs every ticked task's (exits 1 if any no longer passes).
@@ -395,6 +395,12 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Files:** SF `nina/MANUAL_CHECKLIST.md`, `nina/src/RapidStackerCollab.Core/SOURCE.md`, `nina/README.md`, `nina/CHANGELOG.md`, `server/nina_plugin/CHANGELOG.md`
       **Do:** §6.4, §6.5: the "Hub projects" checklist section; "Local differences: none" with the two upstream candidates; a draft changelog entry (the version number and release are the author's).
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release`
+
+- [ ] T607 — Hub authentication failures stay with the hub; one rig id per backend
+      **Files:** SF `nina/src/Starfront.Collab/Services/Stacking/{StackingUploader,RoutingApiClient,HubJoiner,StackingLink}.cs`, `nina/src/Starfront.Collab/Settings/StarfrontSettings.cs`, `nina/tests/Starfront.Collab.Tests/`
+      **Do:** found in T604. (1) A 401 from a hub during an upload reaches Core's `UploadRunner.OnAuthRequired` and marks the cloud sign-in required, which stops every upload. Make the router or `StackingUploader.OnAuthRequired` tell a hub 401 from a cloud one: a hub 401 clears that link's grant (`GrantTokenStore.Clear()`), pauses only that link's items until the next check-in brings a fresh grant, and never touches the cloud sign-in. Core stays verbatim. (2) D001 (one library per backend): the hub path stores its rig id in the shared `StackingRigId` and overwrites the cloud rig. Keep a rig id per backend (cloud: the existing per-profile setting; each hub: on the link or a per-hub map), and route rig-scoped calls with the matching id.
+      **Done when:** a hub 401 mid-upload leaves cloud uploads running and the hub link recovers at the next check-in; cloud and hub rig ids no longer overwrite each other.
+      **Verify:** `cd nina && dotnet build Starfront.sln -c Release && dotnet test tests/Starfront.Collab.Tests`
 
 - [ ] T606 — The hub checklist in N.I.N.A.
       **Manual:** run `nina/MANUAL_CHECKLIST.md` "Hub projects" on the Windows PC against the home-network topology.
