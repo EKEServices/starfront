@@ -208,8 +208,9 @@ class HubSupervisor:
         """The hub token and grant secret, mode 0600 from the moment of creation."""
         path = self.credentials_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = (f"server = {_toml_str(self.server_url())}\n"
-                f"hub_id = {_toml_str(hub.get('hubId', ''))}\n"
+        # Exactly the keys the hub reads (RSC hub `starfront/` credentials): it refuses unknown
+        # keys, and the server address belongs in collab-hub.toml's [starfront] url.
+        text = (f"hub_id = {_toml_str(hub.get('hubId', ''))}\n"
                 f"hub_token = {_toml_str(hub.get('hubToken', ''))}\n"
                 f"grant_secret = {_toml_str(hub.get('grantSecret', ''))}\n")
         tmp = path.with_suffix(".toml.tmp")

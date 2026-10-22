@@ -327,6 +327,10 @@ cdoc = tomllib.loads(creds.read_text())
 case("the credentials file holds the hub token and grant secret",
      cdoc["hub_token"] == "hubtok_SECRET" and cdoc["grant_secret"] == "grant_SECRET"
      and cdoc["hub_id"] == "hub_FAKE1")
+# The hub refuses a credentials file with any other key ("unknown field"), and then runs
+# without Starfront: an extra `server` key once made exactly that happen silently.
+case("the credentials file holds exactly the keys the hub accepts",
+     set(cdoc) == {"hub_id", "hub_token", "grant_secret"}, str(sorted(cdoc)))
 if os.name != "nt":
     case("the credentials file is 0600", stat.S_IMODE(creds.stat().st_mode) == 0o600,
          oct(stat.S_IMODE(creds.stat().st_mode)))
