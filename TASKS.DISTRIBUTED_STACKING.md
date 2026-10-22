@@ -28,7 +28,7 @@ Source plan: `STARFRONT_DISTRIBUTED_STACKING_PLAN.md` (section numbers below ref
 | 2 | T201–T208 | worker changes (RSC) |
 | 3 | T301–T310 | the hub as a standalone backend (RSC) |
 | 4 | T401–T418 | the Starfront server (SF, plus three RSC tasks) |
-| 5 | T501–T507 | the Starfront desktop (SF) |
+| 5 | T501–T508 | the Starfront desktop (SF) |
 | 6 | T601–T607 | the N.I.N.A. plugin (SF) |
 | 7 | T701–T705 | local mode, docs, CI, the full night |
 
@@ -365,6 +365,12 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Files:** SF `README.md` (CRLF)
       **Do:** §5.6: the design decisions (pull from the server, per-hub grants, the Windows logon task, the user's own catalogue copy, what a volunteer's machine sees) and the Layout entries for the new modules.
       **Verify:** `python3 -c "import sys; d=open('README.md','rb').read(); sys.exit(0 if b'Live stacking at home' in d and d.count(b'\n')==d.count(b'\r\n') else 1)"`
+
+- [ ] T508 — The desktop writes the worker's N.I.N.A. pause setting
+      **Files:** SF `astrocontrol/volunteer.py`, `tools/check_volunteer.py`
+      **Do:** found when T206 named the key: the Volunteer page stores `pauseWhileNina` but writes nothing. Write `pause_while_nina = true|false` (a TOML bool) into the worker's `collab-worker.toml` beside `busy_file`, `idle_policy` and `work_window`, on install and whenever the volunteer settings are saved.
+      **Done when:** the worker's TOML carries the setting the person chose.
+      **Verify:** `/usr/local/bin/python3 tools/check_volunteer.py`
 
 - [ ] T507 — A volunteer installs from the desktop
       **Manual:** on the Windows PC, the Volunteer page installs from the Mac hub's manifest; the worker runs as a logon task and appears in the Mac's fleet table; it pauses while N.I.N.A. is open; `packaging/build.ps1` builds an installer that includes `cryptography` and the new pages.
