@@ -27,7 +27,7 @@ Source plan: `STARFRONT_DISTRIBUTED_STACKING_PLAN.md` (section numbers below ref
 | 1 | T101–T111 | the hub core (RSC) |
 | 2 | T201–T208 | worker changes (RSC) |
 | 3 | T301–T311 | the hub as a standalone backend (RSC) |
-| 4 | T401–T418 | the Starfront server (SF, plus three RSC tasks) |
+| 4 | T401–T422 | the Starfront server (SF, plus three RSC tasks) |
 | 5 | T501–T508 | the Starfront desktop (SF) |
 | 6 | T601–T607 | the N.I.N.A. plugin (SF) |
 | 7 | T701–T706 | local mode, docs, CI, the full night |
@@ -338,6 +338,30 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** D005: fetch `latest.json` and `latest.json.sig` from the hub's mirror, then the Starfront server; verify the Ed25519 signature against the embedded public key and the asset's SHA-256; refuse a lower or equal version and a contract below the hub's `min_contract`; unpack beside the running binary, swap by rename (on Windows rename the running `.exe` aside first, since it is locked), restart through the installed service or logon task; keep the previous binary for one rollback (`self-update --rollback`). A `--check` mode only reports.
       **Done when:** a bad signature, a bad hash and a downgrade are refused, and a good update swaps and restarts on all three OSes (Windows by test double for the task scheduler).
       **Verify:** `cd worker && cargo test -p collab-worker --test self_update && cargo clippy -p collab-worker --all-targets -- -D warnings`
+
+- [ ] T419 — Hub-token reads of member and rig records, and member removals in the feed
+      **Files:** SF `server/stack/records.py` (new), `server/hubs.py` (mount), `server/stack/projects.py`, `tools/check_server.py`, `tools/check_stack_relay.py`
+      **Do:** found in T415: the change feed carries only keys and the server has a hub-readable route for projects only, so a hub sees members as placeholders and never sees rigs or removals. Add hub-token routes (beside the relay; plain `{"detail"}` errors like it) returning the full records a hub needs in RSC `docs/api/records.md` shapes: `GET /api/v1/hubs/{id}/records/member/{project_id}/{user_id}` (display name, role, status, filter mapping, terms; collab user ids only, never a Discord id), `GET /api/v1/hubs/{id}/records/rig/{user_id}/{rig_id}`, and a batch form taking several keys. Only records of projects bound to this hub (a rig is visible when its owner is a member of such a project). A member leaving or being removed appends a `member` feed row whose record answers `status: removed`.
+      **Done when:** a hub can turn every feed row into a full record, and removals reach it.
+      **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
+
+- [ ] T420 — The hub reads members and rigs from Starfront; no placeholder names (RSC)
+      **Files:** RSC `worker/crates/hub/src/starfront/`, `worker/crates/hub/tests/starfront_sync.rs`
+      **Do:** after T419: the sync fetches full member and rig records for feed rows (batched), upserts them (members: the display-name uniqueness rule — check inside the transaction, T302 danger note), applies removals, and never writes a placeholder display name; `collab-hub check` reports whether the Starfront credentials are present and readable.
+      **Done when:** members carry their real display names on the hub and on every pushed status document.
+      **Verify:** `cd worker && cargo test -p collab-hub --test starfront_sync`
+
+- [ ] T421 — Large master files: a streamed upload route for hub pushes
+      **Files:** SF `server/stack/push.py`, `tools/check_server.py`, `tools/check_stack_relay.py`
+      **Do:** found in T415: push parts are capped at 32 MiB and masters are larger, so the masters list stays empty. Add `PUT /api/v1/hubs/{id}/push/{project_id}/masters/{name}` (hub token; streamed to a temp file and renamed; the same path rules, per-hub byte budget and project-binding check as the multipart push; `Content-Length` required; sha256 in a header verified), so a hub can send each master data file alone; the masters list (T407) then finds the data file beside its record.
+      **Done when:** a multi-hundred-MB master pushed this way appears in the members-only masters list.
+      **Verify:** `/usr/local/bin/python3 tools/check_server.py && /usr/local/bin/python3 tools/check_stack_relay.py`
+
+- [ ] T422 — The hub pushes master data files (RSC)
+      **Files:** RSC `worker/crates/hub/src/starfront/`, `worker/crates/hub/tests/starfront_sync.rs`
+      **Do:** after T421: push each new master's `.xisf`/`.fits` through the streamed route (resumable by re-sending; skip ones already pushed), never for a private project's public tree.
+      **Done when:** a gold run's masters reach Starfront and show in the masters list.
+      **Verify:** `cd worker && cargo test -p collab-hub --test starfront_sync`
 
 ## Phase 5 — the Starfront desktop (SF, §Phase 5)
 
