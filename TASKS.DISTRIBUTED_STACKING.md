@@ -93,7 +93,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 1 — the hub core (RSC, §Phase 1)
 
-- [ ] T101 — A generic store conformance suite, `DirStore` held to it
+- [x] T101 — A generic store conformance suite, `DirStore` held to it
       **Files:** RSC `worker/crates/engine/src/test_support.rs`, `worker/crates/engine/tests/`
       **Do:** §1.4: `store_conformance<S: Store>(make)` from the `Store`-only assertions of `tests/{lease,accumulate,pipeline_gold}.rs`; a `FaultStore` wrapper for the fault plans; a test running it over `DirStore`.
       **Done when:** any `Store` can be checked by one call, and `DirStore` passes.
