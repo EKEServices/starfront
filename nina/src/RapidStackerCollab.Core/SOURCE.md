@@ -34,7 +34,37 @@ commits in the table, build, run the tests, and diff the ported files below agai
 
 ## Local differences
 
-None.
+None. The copied `.cs` files and the copied tests match commit `956fe16` exactly (checked by diff on 2026-10-22); the only
+files here that upstream does not have are the ones the rules above name: the two `Directory.Build.props`, the two
+`.editorconfig` files and this file.
+
+## Candidates for upstream
+
+Not local differences, so nothing below is patched here. These are changes Starfront would like upstream first, so a
+later re-sync can drop a local workaround:
+
+- `ApiClientOptions` taking a `Func<Uri>`, so one client could switch its base between the cloud and a hub's LAN address.
+  Starfront keeps one client per base and chooses between them in `RoutingApiClient`, using `LanProbe`.
+- A per-item base field on the upload queue, so that a resume after a base change stays on the base the item started on.
+  Starfront pins an item's base in memory only (T603), so a resume after a base change can still move to the other base.
+- A hook that tells a project's 401 from a global one. T607 works around it in the router: a hub 401 is isolated in
+  `RoutingApiClient` and never reaches `UploadRunner.OnAuthRequired`, so the cloud sign-in is not marked as needed.
+- `prefer_relative_part_urls` (plan section 6.4): a hint that lets a hub return relative part URLs, which a client can
+  resolve against the base it used.
+
+## Starfront's hub files (no upstream counterpart)
+
+These sit on top of the Core's `ApiClient`, `UploadRunner` and upload queue. They are Starfront's own, but a re-sync must
+diff them against the Core surface they call (the `ApiClient` members, `UploadRunner.OnAuthRequired`, the queue's
+types) and fix any signature that moved:
+
+- `Services/Stacking/ClientCache.cs`
+- `Services/Stacking/GrantTokenStore.cs`
+- `Services/Stacking/RoutingApiClient.cs`
+- `Services/Stacking/LanProbe.cs`
+- `Services/Stacking/HubJoiner.cs`
+- `Services/Stacking/HubBackend.cs`
+- `Services/Stacking/StackingLink.cs`
 
 ## Ported by hand, not copied
 

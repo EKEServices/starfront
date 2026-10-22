@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+*Draft: the version number and the release are the author's.*
+
+- Live stacking can send to a Rapid Stacker Collab hub as well as to the cloud. A collaboration whose stacking project is on a hub is linked the same way, and its lights go to the hub the collaboration is bound to.
+- Hub collaborations need no sign-in to Rapid Stacker Collab. The options page says so, and the Linked collaborations list shows each hub link as `(Hub: name)`. The Rapid Stacker Collab sign-in is asked for only when a cloud collaboration needs it.
+- On the home network a hub is reached directly over its LAN address, and the lights go through the Starfront server whenever it does not answer. The plugin writes one log line each time it switches.
+- A hub that refuses the telescope's grant holds only that hub's lights, which wait for the next check-in. A fresh grant is picked up at that check-in, and the held and new lights are sent without a restart. Cloud uploads keep going, and the cloud sign-in is not asked for again.
+- Each backend has its own rig id: the cloud keeps the rig id it was given, and each hub keeps its own, so one backend's join no longer overwrites another's.
+
 ## 1.0.0.33
 
 - *Live stacking* sends a light only if it was pointed at the stacking project's field. The target name says what the sequence meant to shoot, not where the telescope was; a light pointed well away from the field (farther from its centre than the field's half-diagonal plus a degree, and not named after the project) could only be rejected by Rapid Stacker Collab after it had cost you quota. The log says how far off it was.
