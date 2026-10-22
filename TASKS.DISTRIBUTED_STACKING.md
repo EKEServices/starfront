@@ -464,7 +464,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §7.4: move `ci.yml` and `release.yml` to the root with `working-directory: nina` and `paths: ['nina/**']`; run every `tools/check_*.py` on ubuntu and windows with Python 3.12. Can land at any time. (`CLAUDE.md` is git-ignored here; update the local copy's "Nothing runs CI" line.)
       **Verify:** `test -f .github/workflows/ci.yml && test -f .github/workflows/python-checks.yml && test ! -d nina/.github/workflows`
 
-- [ ] T704 — Deleting a hub-backed collaboration
+- [x] T704 — Deleting a hub-backed collaboration
       **Files:** RSC `docs/runbooks/deleting-a-hub-project.md`, `worker/crates/hub/src/routes/admin.rs`; SF `server/app.py`, `server/hubs.py`, `tools/check_server.py`
       **Do:** §9.2 item 4, per D004: closing or deleting a collaboration files a delayed deletion on the hub and purges the relay copy; the runbook.
       **Verify:** `python3 tools/check_server.py`
