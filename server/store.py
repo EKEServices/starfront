@@ -116,6 +116,110 @@ CREATE TABLE IF NOT EXISTS presence_log (
     target      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS presence_log_by_time ON presence_log (at);
+
+-- Live stacking (distributed): the hub link and the front door's mirror.
+-- Every table is new, so CREATE IF NOT EXISTS is the whole migration for a
+-- database that predates them. `doc` columns are JSON in the shapes of the
+-- Collab contract; `rev` is bumped on each change so a hub can follow a
+-- cursor; `stack_changes` is the feed it long-polls.
+CREATE TABLE IF NOT EXISTS hubs (
+    id           TEXT PRIMARY KEY,
+    owner        TEXT NOT NULL DEFAULT '',
+    name         TEXT NOT NULL DEFAULT '',
+    token        TEXT UNIQUE NOT NULL,
+    grant_secret TEXT NOT NULL DEFAULT '',
+    lan_url      TEXT NOT NULL DEFAULT '',
+    created      REAL NOT NULL,
+    seen         REAL NOT NULL DEFAULT 0,
+    status       TEXT NOT NULL DEFAULT '{}',
+    cursor       INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS stack_projects (
+    project_id  TEXT PRIMARY KEY,
+    sf_project  TEXT UNIQUE NOT NULL,
+    hub         TEXT NOT NULL DEFAULT '',
+    slug        TEXT UNIQUE NOT NULL,
+    join_code   TEXT UNIQUE,
+    rev         INTEGER NOT NULL DEFAULT 1,
+    doc         TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS stack_members (
+    project_id  TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    rev         INTEGER NOT NULL DEFAULT 1,
+    doc         TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (project_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS stack_rigs (
+    user_id     TEXT NOT NULL,
+    rig_id      TEXT NOT NULL,
+    rev         INTEGER NOT NULL DEFAULT 1,
+    doc         TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (user_id, rig_id)
+);
+
+CREATE TABLE IF NOT EXISTS stack_frames (
+    frame_id    TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    user_id     TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'uploading',
+    sha256      TEXT NOT NULL DEFAULT '',
+    size        INTEGER NOT NULL DEFAULT 0,
+    path        TEXT NOT NULL DEFAULT '',
+    upload_id   TEXT NOT NULL DEFAULT '',
+    rev         INTEGER NOT NULL DEFAULT 1,
+    received    REAL NOT NULL DEFAULT 0,
+    relayed     REAL NOT NULL DEFAULT 0,
+    doc         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS stack_frames_by_project ON stack_frames (project_id, status);
+CREATE INDEX IF NOT EXISTS stack_frames_by_upload ON stack_frames (upload_id);
+
+CREATE TABLE IF NOT EXISTS stack_parts (
+    upload_id   TEXT NOT NULL,
+    part_number INTEGER NOT NULL,
+    size        INTEGER NOT NULL DEFAULT 0,
+    etag        TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (upload_id, part_number)
+);
+
+CREATE TABLE IF NOT EXISTS stack_library (
+    frame_id    TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL DEFAULT '',
+    rig_id      TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'uploading',
+    path        TEXT NOT NULL DEFAULT '',
+    rev         INTEGER NOT NULL DEFAULT 1,
+    doc         TEXT NOT NULL DEFAULT '{}'
+);
+
+-- AUTOINCREMENT, not a bare rowid: a seq must never be handed out twice, even
+-- after the newest rows are pruned, or a hub's cursor would skip changes.
+CREATE TABLE IF NOT EXISTS stack_changes (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    hub         TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    key         TEXT NOT NULL DEFAULT '',
+    at          REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stack_changes_by_hub ON stack_changes (hub, seq);
+
+CREATE TABLE IF NOT EXISTS stack_identities (
+    user_id         TEXT PRIMARY KEY,
+    collab_user_id  TEXT UNIQUE,
+    display_name    TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS stack_notified (
+    project_id  TEXT NOT NULL,
+    event       TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    at          REAL NOT NULL,
+    PRIMARY KEY (project_id, event, key)
+);
 """
 
 #: How long a telescope's track across the sky is kept. Two nights: a chart
@@ -218,6 +322,27 @@ class Store:
     def _one(self, sql: str, *args: Any) -> dict[str, Any] | None:
         rows = self._all(sql, *args)
         return rows[0] if rows else None
+
+    # -- live stacking: hubs and the change feed -----------------------------
+    def add_hub(self, hub_id: str, owner: str, name: str, token: str,
+                grant_secret: str, lan_url: str = "") -> dict[str, Any]:
+        self._run(
+            "INSERT INTO hubs (id, owner, name, token, grant_secret, lan_url,"
+            " created) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            hub_id, owner, name, token, grant_secret, lan_url, time.time())
+        return self.hub(hub_id)
+
+    def hub(self, hub_id: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM hubs WHERE id = ?", hub_id)
+        if row is not None:
+            row["status"] = json.loads(row["status"] or "{}")
+        return row
+
+    def append_change(self, hub: str, kind: str, key: str = "") -> int:
+        """Append to a hub's pull feed; the returned `seq` only ever grows."""
+        return int(self._run(
+            "INSERT INTO stack_changes (hub, kind, key, at) VALUES (?, ?, ?, ?)",
+            hub, kind, key, time.time()).lastrowid)
 
     # -- agents ------------------------------------------------------------
     def add_agent(self, agent_id: str, token: str, name: str,

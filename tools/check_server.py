@@ -2242,6 +2242,62 @@ status, _, _ = raw("POST", "/files/signout", b"", {"Cookie": jar})
 status, info, _ = raw("GET", "/api/v1/files/projects", None, {"Cookie": jar})
 case("signing out on the page forgets the cookie's token", not info["signedIn"])
 
+# ------------------------------------------- live stacking: the schema
+print("\n-- live stacking: hub and stacking tables --")
+import sqlite3                                                   # noqa: E402
+from server import store as store_module                         # noqa: E402
+
+STACK_TABLES = {"hubs", "stack_projects", "stack_members", "stack_rigs",
+                "stack_frames", "stack_parts", "stack_library", "stack_changes",
+                "stack_identities", "stack_notified"}
+
+
+def tables_of(path):
+    link = sqlite3.connect(str(path))
+    try:
+        return {row[0] for row in link.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        link.close()
+
+
+fresh_path = Path(tempfile.mkdtemp()) / "fresh.db"
+fresh = store_module.Store(fresh_path)
+case("a fresh database has every hub and stacking table",
+     STACK_TABLES <= tables_of(fresh_path), str(STACK_TABLES - tables_of(fresh_path)))
+
+# A database from before this change: today's schema without the new tables,
+# holding a row that must survive being opened by the new code.
+old_path = Path(tempfile.mkdtemp()) / "old.db"
+link = sqlite3.connect(str(old_path))
+link.executescript(store_module.SCHEMA.split("-- Live stacking")[0])
+link.execute("INSERT INTO agents (id, token, name, created) VALUES"
+             " ('a1', 't1', 'Old rig', 1)")
+link.commit()
+case("the test's pre-change database really lacks the new tables",
+     not (STACK_TABLES & tables_of(old_path)))
+link.close()
+old = store_module.Store(old_path)
+case("opening a pre-change database adds the tables",
+     STACK_TABLES <= tables_of(old_path))
+case("...and keeps what was in it", (old.agent("a1") or {}).get("name") == "Old rig")
+old.close()
+again = store_module.Store(old_path)
+case("opening it a second time is harmless", (again.agent("a1") or {}).get("name") == "Old rig")
+again.close()
+
+made_hub = fresh.add_hub("hub_1", "u1", "Eddie's hub", "sfh_tok", "secret", "http://10.0.0.5:8790")
+case("a hub can be stored and read back",
+     made_hub["name"] == "Eddie's hub" and made_hub["status"] == {}
+     and fresh.hub("hub_1")["grant_secret"] == "secret" and fresh.hub("nope") is None)
+seqs = [fresh.append_change("hub_1", "project", "prj_a"),
+        fresh.append_change("hub_1", "member", "prj_a/u1"),
+        fresh.append_change("hub_2", "project", "prj_b")]
+case("stack_changes.seq only ever increases", seqs == sorted(set(seqs)) and seqs[0] >= 1, str(seqs))
+fresh._run("DELETE FROM stack_changes")
+case("...and is not reused after the rows are pruned", fresh.append_change("hub_1", "project", "x") > seqs[-1])
+fresh.close()
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
