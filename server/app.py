@@ -43,6 +43,7 @@ import astrocontrol                                              # noqa: E402
 from astrocontrol import catalog, collab, filters                # noqa: E402
 from astrocontrol.config import data_root                        # noqa: E402
 from server import auth                                          # noqa: E402
+from server import notify                                        # noqa: E402
 from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
 from server.hubs import Hubs, mint_grant                          # noqa: E402
 from server.stack import defaults as stack_defaults             # noqa: E402
@@ -165,6 +166,25 @@ def owns_project(who: dict[str, Any], project: dict[str, Any]) -> bool:
         return True
     owner = str(project.get("owner_id") or "")
     return bool(owner) and owner == who["id"]
+
+
+def _discord_webhook(text: str | None) -> str:
+    """The webhook as stored: blank, or a Discord webhook URL, else 400."""
+    cleaned = (text or "").strip()
+    if not notify.webhook_ok(cleaned):
+        raise HTTPException(status_code=400,
+                            detail="discordWebhookUrl must be a Discord webhook, "
+                                   "https://discord.com/api/webhooks/<id>/<token>, or blank")
+    return cleaned
+
+
+def _without_owner_fields(project: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A project record as anybody may read it: owner-only fields left out."""
+    if project is None:
+        return None
+    payload = {k: v for k, v in (project.get("payload") or {}).items()
+               if k != "discordWebhookUrl"}
+    return {**project, "payload": payload}
 
 
 def _require_project_owner(who: dict[str, Any], project_id: str) -> dict[str, Any]:
@@ -649,6 +669,9 @@ class ProjectRequest(BaseModel):
     # page, and in time the programs themselves), for the coordinator to
     # stack. Off unless asked: gigabytes a night are nobody's by accident.
     collectFiles: bool = False
+    # The Discord webhook joins and gold integrations are posted to (server/
+    # notify.py). Owner-only: `_without_owner_fields` keeps it out of every read.
+    discordWebhookUrl: str = Field(default="", max_length=300)
     # The join code of the Rapid Stacker Collab project that stacks this
     # collaboration's lights as they land, or blank for none. Validated by
     # `_stacking_join_code` and stored canonical, XXXX-XXXX-XXXX.
@@ -1919,6 +1942,7 @@ def create_project(body: ProjectRequest,
         "goals": _goals(body.goals),
         "notes": body.notes,
         "collectFiles": bool(body.collectFiles),
+        "discordWebhookUrl": _discord_webhook(body.discordWebhookUrl),
     }
     blank = _stacking_of({})
     if body.stacking is not None:
@@ -1946,6 +1970,8 @@ class ProjectUpdateRequest(BaseModel):
     goals: dict[str, float] | None = None
     notes: str | None = Field(default=None, max_length=2000)
     collectFiles: bool | None = None
+    # Blank clears the webhook; left out, it is left alone.
+    discordWebhookUrl: str | None = Field(default=None, max_length=300)
     # Blank clears it; left out, it is left alone like every other field.
     stackingJoinCode: str | None = Field(default=None, max_length=40)
     # Where it is stacked; see ProjectRequest. Left out, the binding stands.
@@ -1983,6 +2009,8 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
         payload["notes"] = body.notes
     if body.collectFiles is not None:
         payload["collectFiles"] = bool(body.collectFiles)
+    if body.discordWebhookUrl is not None:
+        payload["discordWebhookUrl"] = _discord_webhook(body.discordWebhookUrl)
     before = _stacking_of(payload)
     binding = before
     if body.stacking is not None:
@@ -2037,7 +2065,7 @@ def redeal_project(project_id: str,
 @app.get("/api/v1/projects")
 def list_projects() -> dict[str, Any]:
     """Open to anyone: browsing is how people find a collab to join."""
-    return {"projects": store.projects()}
+    return {"projects": [_without_owner_fields(p) for p in store.projects()]}
 
 
 @app.get("/api/v1/lookup")
@@ -2073,7 +2101,7 @@ def read_project(project_id: str) -> dict[str, Any]:
     project = store.project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="no such project")
-    return {"project": project, "tasks": store.tasks_in(project_id),
+    return {"project": _without_owner_fields(project), "tasks": store.tasks_in(project_id),
             "contributions": store.contributions(project_id)}
 
 

@@ -18,6 +18,7 @@ from fastapi import APIRouter, Request
 
 from . import defaults
 from .auth import Auth, Caller, json_body, now_iso
+from .. import notify
 from .envelope import ApiError, ok, validation_failed
 
 #: What a member must have accepted, as the contract's `TermsVersion`.
@@ -253,6 +254,11 @@ class Projects:
             self.store._run("INSERT INTO stack_members (project_id, user_id, doc) VALUES (?, ?, ?)",
                             row["project_id"], who.user_id, json.dumps(doc))
             self.changed(row, who.user_id)
+            if doc["status"] == "active":
+                # Only a new active membership is announced: a re-join is refused
+                # above, and a pending one is not in yet.
+                notify.notify_member_joined(self.store, self.store.project(row["sf_project"]),
+                                            name, member_id=who.user_id)
             return ok(membership=self.membership(row, self.member(row["project_id"], who.user_id)))
 
         @router.get("/projects/{project}/membership")
