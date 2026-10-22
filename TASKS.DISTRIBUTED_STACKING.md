@@ -356,7 +356,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §5.3: touch `<data_root>/collab-worker/busy` at sequence start, remove at the end and on recovery exit.
       **Verify:** `python3 tools/check_night.py && python3 tools/check_recovery.py`
 
-- [ ] T505 — The Collab tab: stacking fieldset, hub wizard, volunteer section
+- [x] T505 — The Collab tab: stacking fieldset, hub wizard, volunteer section
       **Files:** SF `astrocontrol/web/index.html` (CRLF), `astrocontrol/web/collab.js`, `astrocontrol/web/style.css`
       **Do:** §5.5: backend choice on the collaboration form; the hub section (folders, check, start/stop, register, enrol code, fleet, log); the volunteer section (hub, code, install/update/status, idle switches).
       **Verify:** `python3 tools/check_controls.py`

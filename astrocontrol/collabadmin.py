@@ -208,15 +208,26 @@ class CollabAdmin:
                     goals: dict[str, float] | None = None,
                     coordinator: str = "", notes: str = "",
                     kind: str = "mosaic", collect_files: bool = False,
-                    stacking_join_code: str = "") -> dict[str, Any]:
-        return self._call("POST", "/api/v1/projects", {
+                    stacking_join_code: str = "",
+                    stacking: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = {
             "name": name, "region": region, "kind": kind,
             "requirements": requirements or {},
             "goals": goals or {},
             "coordinator": coordinator, "notes": notes,
             "collectFiles": bool(collect_files),
             "stackingJoinCode": stacking_join_code or "",
-        })
+        }
+        # The newer, fuller way to say where the lights are stacked; the server
+        # checks it (and who may bind to which hub) and ignores the join code
+        # above when it is present.
+        if stacking is not None:
+            body["stacking"] = stacking
+        return self._call("POST", "/api/v1/projects", body)
+
+    def hubs(self) -> list[dict[str, Any]]:
+        """The hubs registered by the person this program is signed in as."""
+        return self._call("GET", "/api/v1/hubs").get("hubs", [])
 
     def update_project(self, project_id: str,
                        changes: dict[str, Any]) -> dict[str, Any]:
