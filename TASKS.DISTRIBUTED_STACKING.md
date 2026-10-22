@@ -294,7 +294,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.6: `/download/collab-worker/{name}` and `/download/collab-hub/{name}` under strict regexes; `latest.json` and `latest.json.sig` served as files; archives git-ignored.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T411 — Release archives and the signed manifest (RSC)
+- [x] T411 — Release archives and the signed manifest (RSC)
       **Files:** RSC `worker/scripts/sign-manifest.sh`, `worker/scripts/build-manifest.sh`, `.github/workflows/worker-release.yml`
       **Do:** §4.6: per-OS archives of `collab-worker` and `collab-hub`; a manifest in rapid-stacker's shape plus `contract`; an Ed25519 signature by an offline key (key generation is the author's; the workflow never runs on its own).
       **Verify:** `bash worker/scripts/build-manifest.sh --dry-run`
