@@ -161,7 +161,7 @@ namespace Starfront.Collab.Tests {
             var link = links.Lookup("s1")!;
             Assert.That(link.Grant, Is.Empty);
             Assert.That(link.GrantExpiresUtc, Is.Null);
-            Assert.That(link.Status, Is.EqualTo(LinkStatus.Failed));
+            Assert.That(link.Status, Is.EqualTo(LinkStatus.GrantRefresh));
             Assert.That(link.NextAttemptUtc, Is.Null, "the next check-in fetches a new grant at once");
             Assert.That(links.Lookup("s2")!.Grant, Is.EqualTo("sfg_other.sig"));
             Assert.That(links.Lookup("s2")!.Status, Is.EqualTo(LinkStatus.Active));

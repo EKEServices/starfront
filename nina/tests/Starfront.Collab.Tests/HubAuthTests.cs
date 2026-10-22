@@ -85,7 +85,9 @@ namespace Starfront.Collab.Tests {
             Assert.That(runner.AuthRequired, Is.False);
             Assert.That(routes.Refused, Is.EqualTo(new[] { "s-hub" }));
             Assert.That(hubLink.Grant, Is.Empty, "that link's grant is gone");
-            Assert.That(hubLink.Status, Is.EqualTo(LinkStatus.Failed));
+            Assert.That(hubLink.Status, Is.EqualTo(LinkStatus.GrantRefresh));
+            Assert.That(hubLink.Feeds, Is.True, "new lights are still queued for this collaboration");
+            Assert.That(hubLink.Describe(), Does.Contain("Waiting for a new grant from Starfront"));
             Assert.That(queue.IsPaused(HubProject), Is.True, "the hub project's items are held");
             Assert.That(queue.IsPaused(FakeCollabServer.ProjectId), Is.False);
             Assert.That(queue.Get(cloudItem.Id)!.State, Is.EqualTo(QueueStates.Uploaded), "the cloud item was sent");
@@ -114,6 +116,26 @@ namespace Starfront.Collab.Tests {
             Assert.That(HubAuth.ResumeRefreshed(queue, id => id == HubProject ? hubLink : null), Is.EqualTo(1));
             Assert.That(queue.IsPaused(HubProject), Is.False);
             Assert.That(queue.Get(hubItem.Id)!.State, Is.EqualTo(QueueStates.Pending));
+        }
+
+        [Test]
+        public async Task ALightShotWhileTheGrantIsBeingRefreshedIsQueuedAndUploadsWithTheNewGrant() {
+            Enqueue(HubProject);
+            HubAnswers401();
+            await Runner().RunOnceAsync();
+            Assert.That(hubLink.Feeds, Is.True, "the intake queues lights for a link that feeds");
+
+            var later = Enqueue(HubProject);   // shot while the link waits
+            var runner = Runner();
+            Assert.That(await runner.RunOnceAsync(), Is.Zero, "held by the project pause, not dropped");
+            Assert.That(queue.Get(later.Id)!.State, Is.EqualTo(QueueStates.Pending));
+
+            hubLink.Grant = "sfg_new.grant";
+            hubLink.Status = LinkStatus.Active;   // what the check-in's re-join does
+            hub.Script[nameof(IApiClient.InitFrameAsync)] = _ => throw new ApiException(ApiCodes.Duplicate, "Already there.", 409);
+            Assert.That(HubAuth.ResumeRefreshed(queue, id => id == HubProject ? hubLink : null), Is.EqualTo(1));
+            Assert.That(await runner.RunOnceAsync(), Is.GreaterThanOrEqualTo(1));
+            Assert.That(queue.Get(later.Id)!.State, Is.EqualTo(QueueStates.Duplicate), "it went to the hub once the grant was back");
         }
 
         [Test]

@@ -147,7 +147,7 @@ namespace Starfront.Collab.Tests {
             Assert.That(store.Load(), Is.EqualTo("g-2"));
             store.Clear();
             Assert.That(store.Load(), Is.Null);
-            Assert.That(link.Status, Is.EqualTo(LinkStatus.Failed));
+            Assert.That(link.Status, Is.EqualTo(LinkStatus.GrantRefresh));
             Assert.That(link.NextAttemptUtc, Is.Null, "fetched at the next check-in, not waited for");
             Assert.That(saved, Has.Count.EqualTo(2));
             Assert.DoesNotThrow(() => new GrantTokenStore("gone", _ => null, _ => { }).Clear());

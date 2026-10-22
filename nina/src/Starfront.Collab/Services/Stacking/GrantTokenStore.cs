@@ -6,7 +6,7 @@ namespace Starfront.Collab.Services.Stacking {
     /// The token source of a hub link: the grant the link holds now, read on every request, so a grant the
     /// joiner fetched at a check-in is used at once. It never touches the Rapid Stacker Collab cloud token.
     /// When the hub refuses the grant the engine calls <see cref="Clear"/>: the grant is dropped and the link
-    /// is marked failed with no wait, so the next check-in fetches a fresh grant instead of this one being
+    /// is marked <see cref="LinkStatus.GrantRefresh"/> (it still feeds: lights are queued and held), so the next check-in fetches a fresh grant instead of this one being
     /// retried (a grant the hub has refused is not going to start working).
     /// </summary>
     public sealed class GrantTokenStore : ITokenStore {
@@ -39,7 +39,7 @@ namespace Starfront.Collab.Services.Stacking {
             if (link == null) return;
             link.Grant = "";
             link.GrantExpiresUtc = null;
-            link.Status = LinkStatus.Failed;
+            link.Status = LinkStatus.GrantRefresh;
             link.Message = "The hub refused this telescope's grant; a new one is fetched at the next check-in.";
             link.NextAttemptUtc = null;
             persist(link);
