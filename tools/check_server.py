@@ -3522,6 +3522,184 @@ everything = json.dumps([server_app.store._all("SELECT * FROM stack_frames"), se
 case("no Starfront or Discord id appears in a frame row, a library row, a relay path or the feed",
      not any(f'"{sid}"' in everything or f"/{sid}/" in everything for sid in ("1002", JOINED_ID)), "")
 
+# ------------------------------------------- live stacking: relay
+# What the hub fetches: its projects' uploaded frames, ranged bytes, ack, and
+# the deletion of relay copies (server/stack/relay.py).
+print("\n-- live stacking: relay --")
+
+BHB, BHBTOK = reg_b["hubId"], reg_b["hubToken"]
+KEEP_ENV = "STARFRONT_STACK_RELAY_KEEP_DAYS"
+
+
+def raw_call(method, path, token=None, headers=None):
+    request = urllib.request.Request(f"{BASE}{path}", method=method,
+                                     headers={**({"Authorization": f"Bearer {token}"} if token else {}), **(headers or {})})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
+def upload_frame(data, name):
+    status, got = init_for(data, name)
+    assert status == 200, got
+    etags = {}
+    for part in got["upload"]["part_urls"]:
+        n = part["part_number"]
+        lo = (n - 1) * PART
+        etags[n] = put_part(part["url"], data[lo:lo + part["size"]])[1].get("ETag", "")
+    status, done = front("POST", f"/projects/{FD_ID}/frames/{got['frame_id']}/complete",
+                         {"etags": etag_list(etags)}, token=OWNER_GRANT)
+    assert status == 200, done
+    return got["frame_id"]
+
+
+def listed(hub=BH, tok=BHTOK, query="state=uploaded&limit=500"):
+    status, got = call("GET", f"/api/v1/hubs/{hub}/frames?{query}", token=tok)
+    return status, got.get("frames", [])
+
+
+def relay_path(frame_id):
+    return RELAY / server_app.store._one("SELECT path FROM stack_frames WHERE frame_id = ?", frame_id)["path"]
+
+
+def ack(frame_id, data, hub=BH, tok=BHTOK, kind=""):
+    return call("POST", f"/api/v1/hubs/{hub}/frames/{frame_id}/ack{kind}", {"sha256": _hl.sha256(data).hexdigest()}, token=tok)
+
+
+def collected_names():
+    return [f["name"] for f in call("GET", f"/api/v1/projects/{HUBP}/files", token=BOBH)[1]["files"]]
+
+
+os.environ.pop(KEEP_ENV, None)
+DATA_B = fits_bytes(2 * PART + 1000, 40)       # three parts, so a range can cross a boundary
+FB = upload_frame(DATA_B, "relay_big.fits")
+status, mine_list = listed()
+ours = [f for f in mine_list if f["project_id"] == FD_ID]
+case("a hub lists uploaded frames of its projects, oldest first",
+     status == 200 and ours and len(ours) == len(mine_list)
+     and [f["frame_id"] for f in mine_list] == [r["frame_id"] for r in server_app.store._all(
+         "SELECT frame_id FROM stack_frames WHERE status = 'uploaded' AND project_id = ? ORDER BY received, frame_id", FD_ID)],
+     f"{status} {len(mine_list)}")
+rec = next((f for f in mine_list if f["frame_id"] == FB), {})
+case("...each record has the contract's fields plus the user, header, stripped and rig",
+     all(k in rec for k in ("frame_id", "project_id", "user_id", "filter", "size", "sha256", "filename", "header",
+                            "uploaded_at", "rig_id", "stripped", "frame_type"))
+     and rec["user_id"] == OWNER_UID and rec["sha256"] == _hl.sha256(DATA_B).hexdigest()
+     and rec["header"].get("FILTER") == "Ha" and rec["stripped"] is True, str(rec)[:300])
+status, other = listed(BHB, BHBTOK)
+case("another hub's token lists none of them", status == 200 and other == [])
+case("a hub token only speaks for its own hub id: 401", listed(BH, BHBTOK)[0] == 401)
+case("another hub's bytes request: 404", raw_call("GET", f"/api/v1/hubs/{BHB}/frames/{FB}/bytes", BHBTOK)[0] == 404)
+case("bytes without a token: 401", raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes")[0] == 401)
+status, headers, body = raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes", BHTOK, {"Range": "bytes=0-99"})
+case("bytes with Range: bytes=0-99 answer 206 with Content-Range and the right slice",
+     status == 206 and body == DATA_B[:100] and headers.get("Content-Range") == f"bytes 0-99/{len(DATA_B)}",
+     f"{status} {headers.get('Content-Range')} {len(body)}")
+status, headers, body = raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes", BHTOK, {"Range": f"bytes={PART - 5}-{PART + 4}"})
+case("...a slice across a part boundary is right too", status == 206 and body == DATA_B[PART - 5:PART + 5])
+status, headers, body = raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes", BHTOK, {"Range": f"bytes={len(DATA_B) - 10}-"})
+case("...and an open-ended range reaches the end", status == 206 and body == DATA_B[-10:])
+status, headers, body = raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes", BHTOK)
+case("the full download matches the sha256", status == 200 and _hl.sha256(body).hexdigest() == rec["sha256"])
+status, got = call("POST", f"/api/v1/hubs/{BH}/frames/{FB}/ack", {"sha256": "0" * 64}, token=BHTOK)
+case("ack with a wrong sha256: 409, still listed", status == 409 and any(f["frame_id"] == FB for f in listed()[1]))
+case("another hub cannot ack it: 404", ack(FB, DATA_B, BHB, BHBTOK)[0] == 404)
+before = feed_since(0)["seq"]
+status, got = ack(FB, DATA_B)
+row_a = server_app.store._one("SELECT * FROM stack_frames WHERE frame_id = ?", FB)
+case("ack with the right sha256: relayed (a timestamp), no longer listed, no feed row",
+     status == 200 and row_a["relayed"] > 0 and all(f["frame_id"] != FB for f in listed()[1])
+     and feed_since(0)["seq"] == before, f"{status} {got}")
+case("...the bytes are still there (default keep is seven days) and a repeated ack is fine",
+     (RELAY / row_a["path"]).is_file() and ack(FB, DATA_B)[0] == 200)
+
+# -- retention
+case("retention: a sweep now (seven days kept) deletes nothing of the relayed frame",
+     FRONT.relay.sweep() == 0 and (RELAY / row_a["path"]).is_file())
+case("...at eight days it is deleted, the row stays with its status",
+     FRONT.relay.sweep(time.time() + 8 * 86400) >= 1 and not (RELAY / row_a["path"]).exists()
+     and server_app.store._one("SELECT status FROM stack_frames WHERE frame_id = ?", FB)["status"] == "uploaded")
+case("...and its bytes are 404 afterwards", raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FB}/bytes", BHTOK)[0] == 404)
+DATA_R = fits_bytes(5000, 31)
+FR = upload_frame(DATA_R, "keep0.fits")
+p_r = relay_path(FR)
+os.environ[KEEP_ENV] = "0"
+case("KEEP_DAYS=0: a sweep leaves an unrelayed frame alone and it is listed",
+     any(f["frame_id"] == FR for f in listed()[1]) and FRONT.relay.sweep() == 0 and p_r.is_file())
+os.environ.pop(KEEP_ENV)
+DATA_R2 = fits_bytes(5000, 32)
+FR2 = upload_frame(DATA_R2, "keep0b.fits")
+ack(FR2, DATA_R2)
+p_r2 = relay_path(FR2)
+os.environ[KEEP_ENV] = "0"
+case("KEEP_DAYS=0: the next sweep deletes a relayed frame's bytes and keeps its row",
+     p_r2.is_file() and FRONT.relay.sweep() == 1 and not p_r2.exists()
+     and server_app.store._one("SELECT status FROM stack_frames WHERE frame_id = ?", FR2) is not None)
+DATA_R3 = fits_bytes(5000, 33)
+FR3 = upload_frame(DATA_R3, "keep0c.fits")
+p_r3 = relay_path(FR3)
+ack(FR3, DATA_R3)
+case("...and with KEEP_DAYS=0 the ack itself deletes them", not p_r3.exists())
+os.environ.pop(KEEP_ENV)
+status, got = front("POST", f"/projects/{FD_ID}/frames/{FR}/withdraw", token=OWNER_GRANT)
+case("a withdrawn frame is no longer listed to the hub, and its bytes are refused",
+     status == 200 and all(f["frame_id"] != FR for f in listed()[1])
+     and raw_call("GET", f"/api/v1/hubs/{BH}/frames/{FR}/bytes", BHTOK)[0] == 404)
+case("...its bytes stay until raw_delete_after, then the sweep deletes them (row kept)",
+     p_r.is_file() and FRONT.relay.sweep() == 0 and FRONT.relay.sweep(time.time() + 8 * 86400) >= 1
+     and not p_r.exists() and server_app.store._one("SELECT status FROM stack_frames WHERE frame_id = ?", FR)["status"] == "withdrawn")
+
+# -- collectFiles
+call("PUT", f"/api/v1/projects/{HUBP}", {"collectFiles": True}, token=BOBH)
+DATA_C = fits_bytes(6000, 34)
+FC = upload_frame(DATA_C, "collect_Ha.fits")
+p_c = relay_path(FC)
+case("a collectFiles project's frame appears in /files at upload completion", "collect_Ha.fits" in collected_names(),
+     str(collected_names()))
+collected = list(Path(server_app.FILES_DIR).glob(f"{HUBP}/*/lights/collect_Ha.fits"))
+case("...as a file in the files layout holding the same bytes", len(collected) == 1 and collected[0].read_bytes() == DATA_C)
+ack(FC, DATA_C)
+os.environ[KEEP_ENV] = "0"
+FRONT.relay.sweep()
+os.environ.pop(KEEP_ENV)
+case("the relay copy is deleted but the collected file survives",
+     not p_c.exists() and collected[0].read_bytes() == DATA_C and collected_names().count("collect_Ha.fits") == 1)
+call("PUT", f"/api/v1/projects/{HUBP}", {"collectFiles": False}, token=BOBH)
+DATA_N = fits_bytes(3000, 35)
+FN = upload_frame(DATA_N, "not_collected.fits")
+case("a project that does not collect puts nothing in /files", "not_collected.fits" not in collected_names())
+call("PUT", f"/api/v1/projects/{HUBP}", {"collectFiles": True}, token=BOBH)
+ack(FN, DATA_N)
+case("...but one collecting from later on gets it at the ack", "not_collected.fits" in collected_names())
+
+# -- library frames
+DATA_LL = fits_bytes(7000, 36)
+status, got = lib_init(DATA_LL, "dark_relay.fits")
+LL = got["frame_id"]
+etag = put_part(got["upload"]["part_urls"][0]["url"], DATA_LL)[1]["ETag"]
+front("POST", f"{LIB}/frames/{LL}/complete", {"etags": [{"part_number": 1, "etag": etag}]}, token=OWNER_GRANT)
+status, libs = listed(query="kind=library")
+lrec = next((f for f in libs if f["frame_id"] == LL), {})
+case("library frames are listed with kind=library: owner, rig, sha256, header, and not among the project frames",
+     status == 200 and lrec.get("user_id") == OWNER_UID and lrec.get("rig_id") == RID
+     and lrec.get("sha256") == _hl.sha256(DATA_LL).hexdigest() and lrec.get("header", {}).get("IMAGETYP") == "Dark"
+     and all(f["frame_id"] != LL for f in listed()[1]), str(libs)[:300])
+case("...another hub (no project of that owner) sees none and gets 404 on the bytes",
+     listed(BHB, BHBTOK, "kind=library")[1] == []
+     and raw_call("GET", f"/api/v1/hubs/{BHB}/frames/{LL}/bytes?kind=library", BHBTOK)[0] == 404)
+status, headers, body = raw_call("GET", f"/api/v1/hubs/{BH}/frames/{LL}/bytes?kind=library", BHTOK, {"Range": "bytes=10-19"})
+case("...ranged bytes work for them", status == 206 and body == DATA_LL[10:20])
+case("a wrong sha256 on a library ack: 409",
+     call("POST", f"/api/v1/hubs/{BH}/frames/{LL}/ack?kind=library", {"sha256": "1" * 64}, token=BHTOK)[0] == 409)
+status, _ = ack(LL, DATA_LL, kind="?kind=library")
+case("a right one: relayed, no longer listed", status == 200 and all(f["frame_id"] != LL for f in listed(query="kind=library")[1]))
+p_l = RELAY / server_app.store._one("SELECT path FROM stack_library WHERE frame_id = ?", LL)["path"]
+case("...its bytes go after the keep period and the row stays",
+     p_l.is_file() and FRONT.relay.sweep() == 0 and FRONT.relay.sweep(time.time() + 8 * 86400) >= 1
+     and not p_l.exists() and server_app.store._one("SELECT 1 AS x FROM stack_library WHERE frame_id = ?", LL) is not None)
+
 # ------------------------------------------- live stacking: the schema
 print("\n-- live stacking: hub and stacking tables --")
 import sqlite3                                                   # noqa: E402

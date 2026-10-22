@@ -393,6 +393,8 @@ class Frames:
         self.projects = projects
         self.rigs = rigs
         self.up = uploads
+        #: `after_upload(project, row)`, set by the relay: the collectFiles registration (relay.py).
+        self.after_upload: Any = None
         uploads.finders.append(self.target)
         self._routes(router)
 
@@ -676,6 +678,11 @@ class Frames:
             row["doc"].pop("expires", None)
             self.save(row, status="uploaded", upload_id="", received=time.time())
         self.announce(project, frame_id)
+        if self.after_upload is not None:
+            try:
+                self.after_upload(project, self.row(frame_id))
+            except OSError:
+                pass        # a collected copy is a convenience; the upload is done
         return ok(message="Upload complete. The frame is queued for analysis.", frame_id=frame_id,
                   status="uploaded", already_complete=False)
 

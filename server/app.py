@@ -48,6 +48,7 @@ from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
 from server.hubs import Hubs, mint_grant                          # noqa: E402
 from server.stack import defaults as stack_defaults             # noqa: E402
 from server.stack import front as stack_front                   # noqa: E402
+from server.stack import relay as stack_relay                   # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -2538,6 +2539,9 @@ STACK_FRONT = stack_front.build(store, DATA / "stack" / "relay", DATA / "stack" 
 app.mount("/stack/api", STACK_FRONT)
 # The frame part PUTs (`/stack/s3/...`) and the sweep of abandoned uploads.
 stack_front.install(app, STACK_FRONT)
+# The frame relay for the hub: list, ranged bytes, ack, retention (server/stack/relay.py).
+STACK_RELAY = stack_relay.install(app, store, hubs, STACK_FRONT, files)
+STACK_FRONT.state.frames.after_upload = STACK_RELAY.collect
 # What a hub pushes back: POST /api/v1/hubs/{id}/push (server/stack/push.py).
 STACK_FRONT.state.pushed.install(app, hubs)
 
