@@ -345,7 +345,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §5.2, §5.4: write the TOML, run `check`, start, tail the JSON log, poll status, restart with back-off, `caffeinate` on macOS, register with the server, mint enrol codes; the `/api/hub*` routes and the `/ws` summary.
       **Verify:** `python3 tools/check_hub.py`
 
-- [ ] T503 — `astrocontrol/volunteer.py`: install a verified worker
+- [x] T503 — `astrocontrol/volunteer.py`: install a verified worker
       **Files:** SF `astrocontrol/volunteer.py`, `astrocontrol/main.py` (CRLF), `requirements.txt`, `packaging/starfront.spec`, `tools/check_volunteer.py`
       **Do:** §5.3, §5.4: manifest from the hub then the server; Ed25519 and SHA-256 checks; unpack; `enrol`; `service install`; status; update by copy-and-rename; the `/api/volunteer*` routes.
       **Done when:** a bad signature is refused and no unverified binary is ever run.
