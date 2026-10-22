@@ -179,7 +179,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.4: `contract` from `openapi.yaml` at build time; `probe_xpsd` at start and every 5 min; RAM through `sysinfo` on every OS; 409 `contract_mismatch` drains and exits 3.
       **Verify:** `cd worker && cargo test -p collab-worker`
 
-- [ ] T206 — Pause while imaging and work windows
+- [x] T206 — Pause while imaging and work windows
       **Files:** RSC `worker/crates/worker/src/daemon/run.rs`, a shared window parser moved from `worker/crates/uploader/src/`, tests
       **Do:** §2.4: a `Gate` before each receive; `busy` from `COLLAB_BUSY_FILE`, a `NINA.exe` process check, or `COLLAB_WORK_WINDOW`; jobs in flight finish; the heartbeat reports why the worker is idle.
       **Verify:** `cd worker && cargo test -p collab-worker && cargo test -p collab-uploader`
