@@ -279,7 +279,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.2, §4.5: multipart push of records and files, atomic writes, per-hub byte budget; `/stack/public/{project_id}/…` with the hub's cache headers; verdicts shown by `frames?mine=1`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T408 — The ported pages, their routes and the CSP
+- [x] T408 — The ported pages, their routes and the CSP
       **Files:** SF `server/web/stack/`, `server/app.py`, `tools/check_csp.py`, `README.md` (CRLF)
       **Do:** §4.5: project, filter, combined pages and their JS/CSS from RSC `website/`, re-accented; the five page routes; generated `site-config.js`; the CSP middleware on `/stack/*`; licence notice per D007; the README's "no web interface" sentence replaced by the decision.
       **Verify:** `python3 tools/check_csp.py && python3 tools/check_server.py`

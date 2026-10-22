@@ -2677,6 +2677,108 @@ fresh._run("DELETE FROM stack_changes")
 case("...and is not reused after the rows are pruned", fresh.append_change("hub_1", "project", "x") > seqs[-1])
 fresh.close()
 
+# ------------------------------------------- the progress pages under /stack/
+print("\n-- the progress pages: routes, CSP, public artefacts --")
+
+
+def raw_get(path, method="GET"):
+    """(status, headers, body) without following redirects or raising."""
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+    request = urllib.request.Request(f"{BASE}{path}", method=method)
+    try:
+        with opener.open(request, timeout=10) as response:
+            return response.status, response.headers, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, exc.read()
+
+
+CSP_WANTED = ("default-src 'self'; script-src 'self'; style-src 'self'; "
+              "style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; "
+              "connect-src 'self'; frame-ancestors 'none'")
+for label, page, marker in (
+        ("the project page", "/stack/p/horsehead-sho", b"project-body"),
+        ("a filter page", "/stack/p/horsehead-sho/filter/HA@osc", b"filter-body"),
+        ("a filter page with an escaped stream key", "/stack/p/horsehead-sho/filter/HA%40osc", b"filter-body"),
+        ("the combined page", "/stack/p/horsehead-sho/combined", b"combined-body")):
+    status, headers, body = raw_get(page)
+    case(f"{label} is HTML with the CSP",
+         status == 200 and headers.get("Content-Type", "").startswith("text/html")
+         and marker in body and headers.get("Content-Security-Policy") == CSP_WANTED
+         and headers.get("X-Content-Type-Options") == "nosniff",
+         f"{status} {headers.get('Content-Type')}")
+status, headers, _ = raw_get("/stack/p/x")
+case("a slug that cannot exist is a 404 (still under the CSP)",
+     status == 404 and headers.get("Content-Security-Policy") == CSP_WANTED)
+status, headers, body = raw_get("/stack/js/pages/project.js")
+case("a page script is served as a script under the CSP",
+     status == 200 and b"parseProjectPath" in body and "javascript" in headers.get("Content-Type", "")
+     and headers.get("Content-Security-Policy") == CSP_WANTED, headers.get("Content-Type", ""))
+status, headers, body = raw_get("/stack/js/site-config.js")
+case("site-config.js points the pages at /stack/api and /stack/public",
+     status == 200 and b'"/stack/api"' in body and b'"/stack/public"' in body)
+status, headers, _ = raw_get("/stack/css/tokens.css")
+case("a stylesheet is served as CSS", status == 200 and "text/css" in headers.get("Content-Type", ""))
+status, headers, _ = raw_get("/stack/")
+case("/stack/ redirects somewhere useful", status == 302 and headers.get("Location", "").startswith("/"),
+     str(headers.get("Location")))
+
+PUB = DATA / "stack" / "public" / "prj_x"
+(PUB / "deepzoom" / "HA" / "g000001" / "image_files" / "0").mkdir(parents=True)
+(PUB / "HA" / "gold").mkdir(parents=True)
+(PUB / "status.json").write_text('{"schema_version": 1}')
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+(PUB / "HA" / "gold" / "latest.png").write_bytes(PNG)
+(PUB / "deepzoom" / "HA" / "g000001" / "image.dzi").write_text("<Image/>")
+(PUB / "deepzoom" / "HA" / "g000001" / "image_files" / "0" / "0_0.jpg").write_bytes(b"\xff\xd8\xff")
+(DATA / "stack" / "secret.txt").write_text("not for the web")
+
+status, headers, body = raw_get("/stack/public/prj_x/status.json")
+case("a pushed status.json is served as JSON for a minute",
+     status == 200 and json.loads(body) == {"schema_version": 1}
+     and headers.get("Content-Type", "").startswith("application/json")
+     and headers.get("Cache-Control") == "public, max-age=60", str(headers.get("Cache-Control")))
+case("...under the CSP and nosniff", headers.get("Content-Security-Policy") == CSP_WANTED
+     and headers.get("X-Content-Type-Options") == "nosniff")
+status, headers, body = raw_get("/stack/public/prj_x/HA/gold/latest.png")
+case("a preview PNG is served as image/png for a minute",
+     status == 200 and body == PNG and headers.get("Content-Type") == "image/png"
+     and headers.get("Cache-Control") == "public, max-age=60")
+status, headers, body = raw_get("/stack/public/prj_x/deepzoom/HA/g000001/image_files/0/0_0.jpg")
+case("a deep-zoom tile is image/jpeg and immutable",
+     status == 200 and headers.get("Content-Type") == "image/jpeg"
+     and headers.get("Cache-Control") == "public, max-age=31536000, immutable")
+status, headers, _ = raw_get("/stack/public/prj_x/deepzoom/HA/g000001/image.dzi")
+case("...and its descriptor is XML and immutable",
+     status == 200 and headers.get("Content-Type") == "application/xml"
+     and "immutable" in headers.get("Cache-Control", ""))
+status, _, _ = raw_get("/stack/public/prj_x/HA/gold/latest.png", method="HEAD")
+case("HEAD works on a public file", status == 200)
+status, _, _ = raw_get("/stack/public/prj_x/missing.json")
+case("a missing public file is a 404", status == 404)
+status, _, _ = raw_get("/stack/public/prj_nobody/status.json")
+case("...and so is a project that has pushed nothing", status == 404)
+for label, bad in (("a dot-dot path", "/stack/public/prj_x/../secret.txt"),
+                   ("an encoded dot-dot", "/stack/public/prj_x/%2e%2e/secret.txt"),
+                   ("a dot-dot inside the folder", "/stack/public/prj_x/HA/../../secret.txt"),
+                   ("an encoded slash", "/stack/public/prj_x/..%2fsecret.txt"),
+                   ("a doubled slash (an absolute path)", "/stack/public/prj_x//etc/hosts"),
+                   ("a backslash", "/stack/public/prj_x/..%5csecret.txt"),
+                   ("a dot-dot as the project", "/stack/public/../secret.txt"),
+                   ("an encoded dot-dot as the project", "/stack/public/%2e%2e/secret.txt")):
+    status, _, body = raw_get(bad)
+    case(f"{label} is refused", status in (400, 404) and b"not for the web" not in body, str(status))
+
+status, headers, _ = raw_get("/download")
+case("/download is untouched: no CSP header", "Content-Security-Policy" not in headers
+     and status in (200, 404))
+status, headers, _ = raw_get("/sky")
+case("/sky has none either", "Content-Security-Policy" not in headers)
+status, headers, _ = raw_get("/api/v1/health")
+case("...nor does the API", "Content-Security-Policy" not in headers)
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

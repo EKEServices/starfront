@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -2449,6 +2450,111 @@ hubs = Hubs(app, store, _person, may_start)
 
 
 # ---------------------------------------------------------------------------
+# The progress pages: read-only, under /stack/. See server/web/stack/.
+# ---------------------------------------------------------------------------
+#
+# Static HTML, CSS and JS ported from Rapid Stacker Collab's website, plus the
+# artefacts a hub has pushed (status.json, previews, deep-zoom tiles), served
+# from STARFRONT_DATA/stack/public/<project id>/. This is the port of that
+# site's CloudFront rewrite (website/cloudfront/rewrite.js) for the pages that
+# are ported. The /stack/api front door is not here: where it is mounted it
+# must be registered BEFORE the static mount at the foot of this file.
+
+STACK_WEB = Path(__file__).resolve().parent / "web" / "stack"
+STACK_PUBLIC = DATA / "stack" / "public"
+
+#: Script, style, images and fetches from this origin only; nothing inline
+#: except style attributes (the charts set custom properties). Only /stack/.
+STACK_CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; "
+             "style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; "
+             "connect-src 'self'; frame-ancestors 'none'")
+
+
+@app.middleware("http")
+async def _stack_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/stack" or path.startswith("/stack/"):
+        response.headers["Content-Security-Policy"] = STACK_CSP
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Static files and pages are revalidated, so a deploy shows at once;
+        # the public artefacts below set their own.
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
+#: A slug is [a-z0-9]+(-[a-z0-9]+)*, 3-40 characters (the rewrite's rule).
+_STACK_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _stack_page(name: str, slug: str | None = None) -> FileResponse:
+    path = STACK_WEB / name
+    if (slug is not None and not (3 <= len(slug) <= 40 and _STACK_SLUG.match(slug))) \
+            or not path.is_file():
+        raise HTTPException(status_code=404, detail="no such page")
+    return FileResponse(path, media_type="text/html; charset=utf-8")
+
+
+@app.api_route("/stack", methods=["GET", "HEAD"])
+@app.api_route("/stack/", methods=["GET", "HEAD"])
+def stack_home():
+    """The home of the pages: the dashboard once there is one."""
+    here = "/stack/dashboard" if (STACK_WEB / "dashboard.html").is_file() else "/download"
+    return RedirectResponse(here, status_code=302)
+
+
+@app.api_route("/stack/p/{slug}", methods=["GET", "HEAD"])
+def stack_project_page(slug: str):
+    return _stack_page("project.html", slug)
+
+
+@app.api_route("/stack/p/{slug}/filter/{stream}", methods=["GET", "HEAD"])
+def stack_filter_page(slug: str, stream: str):
+    return _stack_page("filter.html", slug)
+
+
+@app.api_route("/stack/p/{slug}/combined", methods=["GET", "HEAD"])
+def stack_combined_page(slug: str):
+    return _stack_page("combined.html", slug)
+
+
+@app.api_route("/stack/dashboard", methods=["GET", "HEAD"])
+def stack_dashboard_page():
+    return _stack_page("dashboard.html")
+
+
+_STACK_TYPES = {".json": "application/json", ".png": "image/png",
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".dzi": "application/xml", ".xml": "application/xml",
+                ".bin": "application/octet-stream"}
+_STACK_PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+@app.api_route("/stack/public/{project_id}/{path:path}", methods=["GET", "HEAD"])
+def stack_public(project_id: str, path: str):
+    """What a hub pushed for a project, with the cache headers of the public
+    bucket (docs/api/s3-layout.md): a minute for the mutable files, forever
+    for a deep-zoom tile, whose directory is named by the gold sequence and is
+    never rewritten. A path that leaves the project's folder is a 404."""
+    parts = path.split("/")
+    if (not _STACK_PROJECT.match(project_id) or not path
+            or any(p in ("", ".", "..") or "\\" in p or "\0" in p for p in parts)):
+        raise HTTPException(status_code=404, detail="no such file")
+    root = (STACK_PUBLIC / project_id).resolve()
+    target = (root / path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise HTTPException(status_code=404, detail="no such file")
+    media = _STACK_TYPES.get(target.suffix.lower(), "application/octet-stream")
+    if parts[0] == "deepzoom":
+        cache = "public, max-age=31536000, immutable"
+    elif project_id == "filters":
+        cache = "public, max-age=300"
+    else:
+        cache = "public, max-age=60"
+    return FileResponse(target, media_type=media, headers={"Cache-Control": cache})
+
+
+# ---------------------------------------------------------------------------
 # Everything else
 # ---------------------------------------------------------------------------
 
@@ -2475,3 +2581,8 @@ def health() -> dict[str, Any]:
 async def _unhandled(_request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500,
                         content={"detail": f"{type(exc).__name__}: {exc}"})
+
+
+# The pages' own files (css, js, favicon), last so that every route above
+# (and a /stack/api router added anywhere above) is tried first.
+app.mount("/stack", StaticFiles(directory=str(STACK_WEB), check_dir=False), name="stack-web")
