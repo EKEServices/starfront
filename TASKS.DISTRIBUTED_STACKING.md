@@ -120,7 +120,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §1.4: every read; T4, T4b, T4c, T4d, T13, T16; `set_photometric_anchor_if_absent`; the `project_status` column kept in step.
       **Verify:** `cd worker && cargo test -p collab-hub store`
 
-- [ ] T106 — `SqliteStore`: leases, checkpoints and gold
+- [x] T106 — `SqliteStore`: leases, checkpoints and gold
       **Files:** RSC `worker/crates/hub/src/store/`, `worker/crates/hub/tests/store_conformance.rs`
       **Do:** `StreamLeases`, `commit_checkpoint` (incl. mark-only and preview-only forms), `record_tier1`, `mark_in_gold`, `publish_gold`, `set_stream_preview`, `reserve_gold_seq`, job creation with the `active_gold_job` guard.
       **Done when:** the T101 suite passes over `SqliteStore`.
