@@ -2135,6 +2135,26 @@ Local mode is the same picture with the server on the same Mac:
 `server/run_local.py --lan` binds the server to the LAN address, and
 nothing has to leave the house.
 
+### Deleting a hub-backed collaboration
+
+Closing a collaboration only takes it off everybody's list.  *Deleting* a
+collaboration that is stacked on a hub (`DELETE /api/v1/projects/{id}`, its
+owner or the server owner) files a **seven-day, restorable, delayed deletion**:
+the stacking project becomes `deleted` with `deleted_at`, `delete_after` and
+`deleted_by`, the collaboration is closed, and the hub is told through its
+change feed, so it stops taking frames and runs its own purge once
+`delete_after` passes.  Joins and uploads on `/stack/api` answer 409
+`project_deleted`.  `POST /api/v1/projects/{id}/restore` undoes it until
+`delete_after` and puts everything back as it was; after that it is refused
+with the date.  When the window is over the `stack-sweep` thread deletes the
+project's relay bytes (its frames, and the library frames of people who are in
+no other live hub project) and keeps the rows.  The **final masters and
+`status.json` are kept**, so the project page still opens, read-only, saying
+"deleted on the date, final results kept", until the owner removes them with
+`DELETE /api/v1/projects/{id}/stack/results` (only once the window is over).
+The desktop has no delete button yet (it can only close); the plugin and
+desktop follow with the end-to-end pass.
+
 ### Grants: one secret per hub
 
 A hub is registered once, by its owner, from the desktop.  The server gives it

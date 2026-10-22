@@ -171,6 +171,14 @@ class Projects:
                "terms_version": terms_version(), "my_membership": None,
                "updated_at": d.get("updated_at", d.get("created_at", ""))}
         out.pop("combined_preview_url")      # a summary field, not a Project one
+        if d.get("status") == "deleted":
+            # Only while deleted (the contract); `results_kept` is Starfront's own:
+            # the raw frames are gone after delete_after, the final results stay
+            # until the owner removes them (D004).
+            for k in ("deleted_at", "delete_after", "deleted_by_role"):
+                if d.get(k):
+                    out[k] = d[k]
+            out["results_kept"] = not d.get("results_removed_at")
         if d.get("rotation_from_first_light"):
             out["rotation_from_first_light"] = True
         if mine is not None:
