@@ -68,6 +68,7 @@ def install(app: FastAPI, sub: FastAPI, *, sweep: bool = True) -> None:
             try:
                 sub.state.frames.sweep()
                 sub.state.library.sweep()
+                sub.state.relay.sweep()
             except Exception:       # a sweep must never end the thread
                 pass
 
