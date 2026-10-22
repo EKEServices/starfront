@@ -24,6 +24,7 @@ from . import (allsky, astro, autoplan, calibrating, calibration, catalog,
                piercam, plans, safety, schedule, solarsystem, survey)
 from . import collab
 from . import filters
+from . import hub as hubmod
 from . import identify
 from . import ninaimport
 from . import warnings
@@ -96,6 +97,11 @@ collab_client.start()
 # than contributing to one. Stateless, starts nothing, and holds the coordinator
 # token so it never has to reach the browser.
 collab_admin = collabadmin.CollabAdmin(config)
+
+# The collaboration hub this machine may host: the child process, its
+# configuration and its log. Started from the startup hook, and only if the
+# person turned it on; nothing here runs at import.
+hub_supervisor = hubmod.HubSupervisor(config, log=rigs.log)
 
 # Telling somebody who is not in the room.
 notifier = notify.Notifier(config, log=rigs.log)
@@ -1221,6 +1227,9 @@ def _snapshot() -> dict[str, Any]:
         "notify": notifier.status(),
         "filterOffsets": offsets_run.status(),
         "collab": {**collab_client.status(), "me": _me_brief()},
+        # State, address, worker count and last error: a snapshot, never a
+        # call to the hub, so a hub that hangs cannot slow this feed.
+        "hub": hub_supervisor.summary(),
         # The run, plus where the library resolved to — the settings form shows
         # the folder a blank field actually means.
         "calibration": {**calibrator.status(), "libraryRoot": str(library.root)},
@@ -3691,10 +3700,15 @@ def get_settings(rig: str | None = None) -> dict[str, Any]:
         collab_settings["adminToken"] = "***"
     if collab_settings.get("userToken"):
         collab_settings["userToken"] = "***"
+    # The hub's own administration token is no different.
+    hub_settings = dict(everything.get("hub") or {})
+    if hub_settings.get("adminToken"):
+        hub_settings["adminToken"] = "***"
     return {
         **everything,
         "notify": notify_settings,
         "collab": collab_settings,
+        "hub": hub_settings,
         "site": {**config.section("site"),
                  "effective": effective_site(config, target.manager)},
         "rig": target.id,
@@ -6777,6 +6791,110 @@ def delete_profile(profile_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The collaboration hub on this machine
+# ---------------------------------------------------------------------------
+#
+# Every handler here either reads a snapshot or sets a flag the supervising
+# thread acts on, so a hub that hangs, crashes or is slow to stop never holds a
+# request. The two that talk over the network (register, enrol-code) are plain
+# `def` handlers and so run in the thread pool, like the collaboration ones.
+
+class HubSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    binary: str | None = Field(default=None, max_length=1024)
+    configDir: str | None = Field(default=None, max_length=1024)
+    dataRoot: str | None = Field(default=None, max_length=1024)
+    catalogueDir: str | None = Field(default=None, max_length=1024)
+    bind: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:\[\]-]*:[0-9]{1,5}$")
+    publicUrl: str | None = Field(default=None, max_length=512)
+    adminToken: str | None = Field(default=None, max_length=256)
+    autoStart: bool | None = None
+
+
+class HubRegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    force: bool = False
+
+
+class HubEnrolRequest(BaseModel):
+    kind: str = Field(default="worker", pattern="^(worker|uploader)$")
+    note: str = Field(default="", max_length=200)
+    ttl_s: int = Field(default=900, ge=60, le=86400)
+
+
+def _hub_error(exc: collabadmin.CollabError) -> HTTPException:
+    return HTTPException(status_code=exc.status or 502, detail=str(exc))
+
+
+@app.get("/api/hub")
+def get_hub() -> dict[str, Any]:
+    return hub_supervisor.status()
+
+
+@app.post("/api/settings/hub")
+def set_hub_settings(body: HubSettingsRequest) -> dict[str, Any]:
+    """No generic `/api/settings/<section>` exists, so the hub has its own."""
+    values = body.model_dump(exclude_none=True)
+    if not values:
+        raise HTTPException(status_code=400, detail="nothing to change")
+    # The form shows a mask where the token is stored (see set_collab_settings).
+    if values.get("adminToken") == "***":
+        values.pop("adminToken")
+    config.update("hub", values)
+    return hub_supervisor.status()
+
+
+@app.post("/api/hub/start")
+def start_hub() -> dict[str, Any]:
+    hub_supervisor.start()
+    return hub_supervisor.status()
+
+
+@app.post("/api/hub/stop")
+def stop_hub() -> dict[str, Any]:
+    hub_supervisor.request_stop()
+    return hub_supervisor.status()
+
+
+@app.post("/api/hub/check")
+def check_hub() -> dict[str, Any]:
+    """Run `collab-hub check` in the background; the report arrives in /api/hub."""
+    hub_supervisor.check_async()
+    return hub_supervisor.status()
+
+
+@app.post("/api/hub/register")
+def register_hub(body: HubRegisterRequest) -> dict[str, Any]:
+    try:
+        hub_supervisor.register(body.name, force=body.force)
+    except collabadmin.CollabError as exc:
+        raise _hub_error(exc) from exc
+    return hub_supervisor.status()
+
+
+@app.post("/api/hub/enrol-code")
+def hub_enrol_code(body: HubEnrolRequest | None = None) -> dict[str, Any]:
+    body = body or HubEnrolRequest()
+    try:
+        return hub_supervisor.new_enrol_code(body.kind, body.note, body.ttl_s)
+    except collabadmin.CollabError as exc:
+        raise _hub_error(exc) from exc
+    except Exception as exc:                       # noqa: BLE001 - e.g. the binary vanished
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/hub/log")
+def hub_log(n: int = Query(200, ge=1, le=500)) -> dict[str, Any]:
+    return {"lines": hub_supervisor.log_lines(n)}
+
+
+@app.on_event("startup")
+def _start_hub() -> None:
+    with contextlib.suppress(Exception):
+        hub_supervisor.start_if_enabled()
+
+
+# ---------------------------------------------------------------------------
 # Live status
 # ---------------------------------------------------------------------------
 
@@ -6797,6 +6915,8 @@ async def status_socket(socket: WebSocket) -> None:
 
 @app.on_event("shutdown")
 def _shutdown() -> None:
+    with contextlib.suppress(Exception):
+        hub_supervisor.shutdown()
     with contextlib.suppress(Exception):
         safety_watcher.stop()
     with contextlib.suppress(Exception):

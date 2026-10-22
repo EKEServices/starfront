@@ -340,7 +340,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §5.1: both sections in `DEFAULTS` (unknown keys are dropped on save).
       **Verify:** `python3 tools/check_controls.py`
 
-- [ ] T502 — `astrocontrol/hub.py`: supervising `collab-hub`
+- [x] T502 — `astrocontrol/hub.py`: supervising `collab-hub`
       **Files:** SF `astrocontrol/hub.py`, `astrocontrol/main.py` (CRLF), `tools/check_hub.py`
       **Do:** §5.2, §5.4: write the TOML, run `check`, start, tail the JSON log, poll status, restart with back-off, `caffeinate` on macOS, register with the server, mint enrol codes; the `/api/hub*` routes and the `/ws` summary.
       **Verify:** `python3 tools/check_hub.py`
