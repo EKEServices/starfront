@@ -254,7 +254,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §0.3, §4.2: register (shown-once `sfh_` token and grant secret), list, revoke, heartbeat; HMAC grant mint and verify; `pull?since=` long poll over `stack_changes`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T403 — The project binding and the listing
+- [x] T403 — The project binding and the listing
       **Files:** SF `server/app.py`, `server/stack/defaults.py`, `tools/check_server.py`
       **Do:** §4.3: the `stacking` block (cloud or hub, per D002 and D003), `stack_projects` minted on bind, contract policy defaults, `_stacking_of` for old payloads, the listing's `stacking` object with the grant under the join-code secrecy rule, old fields kept.
       **Verify:** `python3 tools/check_server.py`

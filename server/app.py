@@ -43,7 +43,8 @@ from astrocontrol import catalog, collab, filters                # noqa: E402
 from astrocontrol.config import data_root                        # noqa: E402
 from server import auth                                          # noqa: E402
 from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
-from server.hubs import Hubs                                         # noqa: E402
+from server.hubs import Hubs, mint_grant                          # noqa: E402
+from server.stack import defaults as stack_defaults             # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -440,6 +441,197 @@ def _stacking_join_code(text: str) -> str:
     return f"{cleaned[0:4]}-{cleaned[4:8]}-{cleaned[8:12]}"
 
 
+class StackingRequest(BaseModel):
+    """Where a collaboration's lights are stacked.
+
+    `cloud`: Rapid Stacker Collab's service, reached with `joinCode`. `hub`: a
+    `collab-hub` registered with this server (`hubId`), reached through this
+    server's own front door. Blank `backend` means the lights are not stacked.
+    """
+
+    backend: str = Field(default="", pattern="^(cloud|hub|)$")
+    joinCode: str = Field(default="", max_length=40)
+    apiBase: str = Field(default="", max_length=200)
+    hubId: str = Field(default="", max_length=80)
+    # public | unlisted | private; hub projects only. Unlisted unless asked.
+    visibility: str | None = Field(default=None, pattern="^(public|unlisted|private)$")
+
+
+def _stacking_of(payload: dict[str, Any]) -> dict[str, str]:
+    """How a stored collaboration is stacked, whatever wrote it.
+
+    A payload from before the `stacking` block has only `stackingJoinCode`,
+    which was always Rapid Stacker Collab's cloud, so it reads as `cloud`.
+    """
+    block = payload.get("stacking")
+    if isinstance(block, dict) and block.get("backend") in ("cloud", "hub"):
+        return {"backend": block["backend"],
+                "joinCode": str(block.get("joinCode") or ""),
+                "apiBase": str(block.get("apiBase") or ""),
+                "hubId": str(block.get("hubId") or ""),
+                "visibility": str(block.get("visibility") or "")}
+    code = str(payload.get("stackingJoinCode") or "")
+    if code and not isinstance(block, dict):
+        return {"backend": "cloud", "joinCode": code, "apiBase": "", "hubId": "",
+                "visibility": ""}
+    return {"backend": "", "joinCode": "", "apiBase": "", "hubId": "", "visibility": ""}
+
+
+def _may_bind_to(who: dict[str, Any], hub_id: str) -> dict[str, Any]:
+    """The hub, when `who` owns it or is a coordinator listed on it, else 403.
+
+    One answer for "no such hub" and "not yours", as for any action the
+    caller may not take: a hub id is not worth confirming to a stranger.
+    """
+    hub = store.hub(hub_id) if hub_id else None
+    if hub is None or not (who["id"] == hub["owner"] or who["id"] in hub["coordinators"]):
+        raise HTTPException(status_code=403,
+                            detail="you may not bind a collaboration to that hub; "
+                                   "only its owner, or a coordinator the owner "
+                                   "listed, can")
+    return hub
+
+
+def _resolve_stacking(who: dict[str, Any], sf_project: str, current: dict[str, str],
+                      want: StackingRequest) -> dict[str, str]:
+    """The binding a request asks for, checked, or 400, 403 or 409."""
+    if want.backend == "cloud":
+        code = _stacking_join_code(want.joinCode)
+        if not code:
+            raise HTTPException(status_code=400,
+                                detail="stacking on the cloud needs a Rapid Stacker "
+                                       "Collab join code")
+        base = want.apiBase.strip()
+        if base and not re.match(r"^https?://[^\s/]+\S*$", base, re.I):
+            raise HTTPException(status_code=400, detail="apiBase must be an http:// or "
+                                                        "https:// address")
+        new = {"backend": "cloud", "joinCode": code, "apiBase": base, "hubId": "",
+               "visibility": ""}
+    elif want.backend == "hub":
+        # Rebinding to the hub it is already on is not a new grant of power
+        # (a coordinator removed from the list can still edit the name).
+        if not (current["backend"] == "hub" and current["hubId"] == want.hubId):
+            _may_bind_to(who, want.hubId)
+        new = {"backend": "hub", "joinCode": "", "apiBase": "", "hubId": want.hubId,
+               "visibility": want.visibility or current["visibility"] or "unlisted"}
+    else:
+        new = {"backend": "", "joinCode": "", "apiBase": "", "hubId": "", "visibility": ""}
+    if (new["backend"], new["hubId"]) != (current["backend"], current["hubId"]):
+        row = store.stack_project_of(sf_project)
+        if row is not None and store.stack_frame_count(row["project_id"]):
+            raise HTTPException(status_code=409,
+                                detail="frames are already stacked for this "
+                                       "collaboration, so its stacking backend can "
+                                       "no longer change")
+    return new
+
+
+def _stacking_into(payload: dict[str, Any], binding: dict[str, str]) -> None:
+    """Write a binding into a payload, both ways: the `stacking` block and the
+    old `stackingJoinCode`, which a 1.0.0.33 plugin still reads."""
+    payload["stacking"] = dict(binding)
+    payload["stackingJoinCode"] = binding["joinCode"] if binding["backend"] == "cloud" else ""
+
+
+_PROJECT_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
+
+
+def _slug_of(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-")
+    return base if len(base) >= 3 else (base + "-project").strip("-")[:40]
+
+
+def _unique_slug(name: str) -> str:
+    base = _slug_of(name)
+    slug, n = base, 1
+    while store.stack_slug_taken(slug):
+        n += 1
+        suffix = f"-{n}"
+        slug = base[:40 - len(suffix)].strip("-") + suffix
+    return slug
+
+
+def _stack_doc(sf_project: str, name: str, coordinator: str, payload: dict[str, Any],
+               binding: dict[str, str], old: dict[str, Any] | None,
+               keep_grid: bool = False) -> dict[str, Any]:
+    """The Collab `Project` record (records.md, `collab-projects`) for a collaboration.
+
+    The grid is a placeholder from the region: the first light sets the real
+    rotation, centre and scale (`rotation_from_first_light`), and once any
+    frame exists (`keep_grid`) the grid in `old` is kept as it is.
+    """
+    region = payload.get("region") or {}
+    wanted = (payload.get("requirements") or {}).get("filters") or {}
+    chosen = stack_defaults.contract_filters(wanted)
+    doc = dict(old or {})
+    doc.update({
+        "name": name, "target_name": name,
+        "description": str(payload.get("notes") or "")[:2000],
+        "filters": chosen, "palette": stack_defaults.palette_for(chosen),
+        "visibility": binding["visibility"] or "unlisted",
+        "status": "open", "owner_name": coordinator,
+    })
+    if old is None:
+        doc.update({
+            "project_id": "", "slug": "", "licence": "members_only",
+            "approval": "open", "rotation_from_first_light": True,
+            "policy": {**stack_defaults.POLICY,
+                       "gold_exclude_classes": list(stack_defaults.POLICY["gold_exclude_classes"])},
+            "quotas": dict(stack_defaults.QUOTAS),
+            "counts": {"member_count": 0, "frames_accepted": 0, "integration_s": 0},
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        })
+    doc["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    if region and not (keep_grid and old and old.get("grid")):
+        doc["grid"] = stack_defaults.placeholder_grid(
+            region.get("ra", 0.0), region.get("dec", 0.0),
+            region.get("width", 1.0), region.get("height", 1.0))
+    return doc
+
+
+def _sync_stack(sf_project: str, name: str, coordinator: str, payload: dict[str, Any],
+                before: dict[str, str], after: dict[str, str]) -> None:
+    """Make the `stack_projects` row and the hub's feed agree with a binding.
+
+    Binding to a hub mints the stacking project (or reopens the one this
+    collaboration had) and tells the hub; moving off a hub, or clearing the
+    binding, marks it closed and tells the hub. It is never deleted here.
+    """
+    row = store.stack_project_of(sf_project)
+    if after["backend"] == "hub":
+        if row is None:
+            for _ in range(20):
+                project_id = "prj_" + "".join(secrets.choice(_PROJECT_ID_ALPHABET)
+                                              for _ in range(20))
+                code = "".join(secrets.choice(_JOIN_CODE_ALPHABET) for _ in range(12))
+                code = f"{code[0:4]}-{code[4:8]}-{code[8:12]}"
+                slug = _unique_slug(name)
+                doc = _stack_doc(sf_project, name, coordinator, payload, after, None)
+                doc.update({"project_id": project_id, "slug": slug})
+                if store.add_stack_project(project_id, sf_project, after["hubId"], slug,
+                                           code, doc):
+                    store.append_change(after["hubId"], "project", project_id)
+                    return
+            raise HTTPException(status_code=500,
+                                detail="could not mint a stacking project id")
+        doc = _stack_doc(sf_project, name, coordinator, payload, after, row["doc"],
+                         keep_grid=bool(store.stack_frame_count(row["project_id"])))
+        # `updated_at` alone is not a change worth a hub's attention.
+        quiet = {k: v for k, v in doc.items() if k != "updated_at"}
+        was = {k: v for k, v in row["doc"].items() if k != "updated_at"}
+        if quiet != was or row["hub"] != after["hubId"]:
+            store.set_stack_project(row["project_id"], after["hubId"], doc)
+            for hub_id in {row["hub"], after["hubId"]} - {""}:
+                store.append_change(hub_id, "project", row["project_id"])
+    elif row is not None and row["doc"].get("status") != "closed":
+        doc = dict(row["doc"])
+        doc["status"] = "closed"
+        doc["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        store.set_stack_project(row["project_id"], row["hub"], doc)
+        if row["hub"]:
+            store.append_change(row["hub"], "project", row["project_id"])
+
+
 class ProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     coordinator: str = Field(default="", max_length=80)
@@ -459,6 +651,9 @@ class ProjectRequest(BaseModel):
     # collaboration's lights as they land, or blank for none. Validated by
     # `_stacking_join_code` and stored canonical, XXXX-XXXX-XXXX.
     stackingJoinCode: str = Field(default="", max_length=40)
+    # Where it is stacked, and how: the newer form of the field above, which
+    # it wins over when both are sent. Only `cloud` and `hub` are stacked.
+    stacking: StackingRequest | None = None
 
 
 class TaskRequest(BaseModel):
@@ -762,6 +957,36 @@ def activity(agent: dict[str, Any] = Depends(agent_from),
     }
 
 
+def _stacking_listing(project: dict[str, Any], binding: dict[str, str],
+                      agent: dict[str, Any], entitled: bool) -> dict[str, Any]:
+    """The `stacking` object of the project listing.
+
+    `grant` is the hub's bearer for this telescope, so it is held to the rule
+    the join code is: only telescopes on the collaboration, and the owner's
+    own, get one. Everyone else is told where it is stacked and nothing more.
+    """
+    out = {"backend": binding["backend"], "hubId": "", "hubName": "", "hubLanUrl": "",
+           "apiBase": binding["apiBase"], "collabProjectId": "", "grant": ""}
+    if binding["backend"] != "hub":
+        return out
+    hub = store.hub(binding["hubId"])
+    row = store.stack_project_of(project["id"])
+    if hub is None or row is None or row["doc"].get("status") == "closed":
+        return out
+    person_id = str(agent.get("owner_id") or "")
+    person = store.user(person_id) if person_id else None
+    out.update({
+        "hubId": hub["id"], "hubName": hub["name"], "hubLanUrl": hub["lan_url"],
+        "apiBase": (DISCORD.public_url.rstrip("/") + "/stack/api/") if DISCORD.public_url else "",
+        "collabProjectId": row["project_id"],
+    })
+    if entitled:
+        out["grant"] = mint_grant(hub, person_id or str(agent["id"]),
+                                  (person or {}).get("name") or agent.get("owner") or agent["name"],
+                                  agent["id"], row["project_id"])
+    return out
+
+
 @app.get("/api/v1/agent/projects")
 def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]:
     """Every project that is open, and whether this telescope can help.
@@ -790,9 +1015,11 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
         # telescopes whether or not they are on it, because the owner's
         # program fills its Edit form from this listing and an owner who
         # could not see the code would save it away blank.
-        stacking_code = payload.get("stackingJoinCode") or ""
+        binding = _stacking_of(payload)
+        stacking_code = binding["joinCode"] if binding["backend"] == "cloud" else ""
         owner_id = project.get("owner_id") or ""
         owns = bool(owner_id) and owner_id == (agent.get("owner_id") or "")
+        entitled = project["id"] in mine or owns
         listed.append({
             "id": project["id"],
             "name": project["name"],
@@ -814,7 +1041,8 @@ def open_projects(agent: dict[str, Any] = Depends(agent_from)) -> dict[str, Any]
             # Whether the lights are stacked as they land, and the code that
             # gets a telescope on this collaboration into that stack.
             "stackingLinked": bool(stacking_code),
-            "stackingJoinCode": stacking_code if (project["id"] in mine or owns) else "",
+            "stackingJoinCode": stacking_code if entitled else "",
+            "stacking": _stacking_listing(project, binding, agent, entitled),
             "compatibility": collab.compatibility(profile, wants),
             "joined": project["id"] in mine,
             # What everyone together has collected, so somebody choosing where
@@ -1681,6 +1909,7 @@ def create_project(body: ProjectRequest,
                             detail="starting a collaboration on this server needs "
                                    "a Discord role you do not hold")
     region = collab.Region.read(body.region)
+    project_id = collab.new_id()
     payload = {
         "region": region.payload(),
         "kind": body.kind,
@@ -1688,13 +1917,20 @@ def create_project(body: ProjectRequest,
         "goals": _goals(body.goals),
         "notes": body.notes,
         "collectFiles": bool(body.collectFiles),
-        "stackingJoinCode": _stacking_join_code(body.stackingJoinCode),
     }
+    blank = _stacking_of({})
+    if body.stacking is not None:
+        binding = _resolve_stacking(who, project_id, blank, body.stacking)
+    else:
+        code = _stacking_join_code(body.stackingJoinCode)
+        binding = {**blank, "backend": "cloud", "joinCode": code} if code else blank
+    _stacking_into(payload, binding)
     # The name on it is the person's Discord name unless the owner, on the
     # admin token, chose to write one.
     coordinator = who["name"] if not who["admin"] else (body.coordinator or who["name"])
-    project = store.add_project(collab.new_id(), body.name, coordinator, payload,
+    project = store.add_project(project_id, body.name, coordinator, payload,
                                 owner_id=who["id"])
+    _sync_stack(project_id, body.name, coordinator, payload, blank, binding)
     return {"project": project}
 
 
@@ -1710,6 +1946,8 @@ class ProjectUpdateRequest(BaseModel):
     collectFiles: bool | None = None
     # Blank clears it; left out, it is left alone like every other field.
     stackingJoinCode: str | None = Field(default=None, max_length=40)
+    # Where it is stacked; see ProjectRequest. Left out, the binding stands.
+    stacking: StackingRequest | None = None
     # open | closed. Closing takes it off everybody's list without deleting
     # the record of what was collected.
     status: str | None = Field(default=None, pattern="^(open|closed)$")
@@ -1743,11 +1981,26 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
         payload["notes"] = body.notes
     if body.collectFiles is not None:
         payload["collectFiles"] = bool(body.collectFiles)
-    if body.stackingJoinCode is not None:
-        payload["stackingJoinCode"] = _stacking_join_code(body.stackingJoinCode)
+    before = _stacking_of(payload)
+    binding = before
+    if body.stacking is not None:
+        binding = _resolve_stacking(who, project_id, before, body.stacking)
+    elif body.stackingJoinCode is not None:
+        code = _stacking_join_code(body.stackingJoinCode)
+        if code:
+            binding = _resolve_stacking(who, project_id, before, StackingRequest(
+                backend="cloud", joinCode=code, apiBase=before["apiBase"]))
+        elif before["backend"] == "cloud":
+            binding = _stacking_of({})
+        # A blank code on a hub-backed collaboration is left alone: the
+        # listing never shows a hub project's code, so a plugin that saves
+        # its Edit form sends blank and must not unbind it by accident.
+    _stacking_into(payload, binding)
+    name = body.name.strip() if body.name is not None else project["name"]
     if body.name is not None:
-        store.rename_project(project_id, body.name.strip())
+        store.rename_project(project_id, name)
     updated = store.set_project(project_id, payload, body.status)
+    _sync_stack(project_id, name, project.get("coordinator") or "", payload, before, binding)
     return {"project": updated}
 
 
