@@ -274,7 +274,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.2: list uploaded frames, `Range` bytes, ack, deletion after `STARFRONT_STACK_RELAY_KEEP_DAYS`, a `collectFiles` project's frames also on `/files`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T407 — Push ingestion and `/stack/public`
+- [x] T407 — Push ingestion and `/stack/public`
       **Files:** SF `server/hubs.py`, `server/app.py`, `tools/check_server.py`
       **Do:** §4.2, §4.5: multipart push of records and files, atomic writes, per-hub byte budget; `/stack/public/{project_id}/…` with the hub's cache headers; verdicts shown by `frames?mine=1`.
       **Verify:** `python3 tools/check_server.py`

@@ -19,6 +19,7 @@ from . import envelope
 from .auth import Auth
 from .frames import Frames, Uploads
 from .library import Library
+from .push import Pushed
 from .projects import Projects
 from .rigs import Rigs
 
@@ -26,7 +27,7 @@ from .rigs import Rigs
 SWEEP_EVERY = 900
 
 
-def build(store: Any, relay: Path | None = None) -> FastAPI:
+def build(store: Any, relay: Path | None = None, public: Path | None = None) -> FastAPI:
     sub = FastAPI(title="Starfront stacking front door", docs_url=None, redoc_url=None,
                   openapi_url=None)
     envelope.install(sub)
@@ -41,6 +42,11 @@ def build(store: Any, relay: Path | None = None) -> FastAPI:
     sub.state.uploads = uploads
     sub.state.frames = Frames(store, auth, sub.state.projects, sub.state.rigs, uploads, router)
     sub.state.library = Library(store, auth, sub.state.rigs, uploads, router)
+    # What the hub pushed back (T407): the push route is installed on the main
+    # app (`sub.state.pushed.install(app, hubs)`); these are its read routes.
+    pushed = Pushed(store, public if public is not None else Path(store.path).parent / "stack" / "public")
+    sub.state.pushed = pushed
+    pushed.routes(router, auth, sub.state.projects)
     sub.include_router(router)
     return sub
 
