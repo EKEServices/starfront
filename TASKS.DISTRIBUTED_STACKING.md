@@ -174,7 +174,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.3, §3.3: `POST /api/hub/v1/enrol-codes` (admin token) and `POST /api/hub/v1/enrol` (code-gated, rate-limited, one use, expiry); `enrol` writes `collab-worker.toml` and a 0600 `worker-token`, runs `config check`, is idempotent and revokes the old token.
       **Verify:** `cd worker && cargo test -p collab-worker --test hub_ports --test cli && cargo test -p collab-hub`
 
-- [ ] T205 — Capabilities, catalogue probe, Windows RAM and the version handshake
+- [x] T205 — Capabilities, catalogue probe, Windows RAM and the version handshake
       **Files:** RSC `worker/crates/worker/src/daemon/{capabilities,housekeeping,run}.rs`, `worker/crates/worker/build.rs`, `worker/crates/worker/Cargo.toml`
       **Do:** §2.4: `contract` from `openapi.yaml` at build time; `probe_xpsd` at start and every 5 min; RAM through `sysinfo` on every OS; 409 `contract_mismatch` drains and exits 3.
       **Verify:** `cd worker && cargo test -p collab-worker`
