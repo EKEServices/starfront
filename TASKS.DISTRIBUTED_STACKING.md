@@ -214,7 +214,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.4: `/public/{project_id}/…` with `s3-layout.md` cache headers and content types, `..` refused; a `status.json` write queues a push (consumed in T415).
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T305 — Background tasks: sweep, gold scheduler, retention, DLQ drain, free-space floor
+- [x] T305 — Background tasks: sweep, gold scheduler, retention, DLQ drain, free-space floor
       **Files:** RSC `worker/crates/hub/src/tasks/`, tests
       **Do:** §3.5: ports of `sweep`, `gold-scheduler`, `retention-sweeper` (with `project-purge.js`), `prepare-dlq`, `gold-dlq`; the `reg/` cache pruned below `free_gb_floor`.
       **Verify:** `cd worker && cargo test -p collab-hub`
