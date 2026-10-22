@@ -22,6 +22,7 @@
     <Compile Include="../../src/Starfront.Collab/Sky/Filters.cs" Link="Linked/Filters.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/StackingLink.cs" Link="Linked/StackingLink.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/ClientCache.cs" Link="Linked/ClientCache.cs" />
+    <Compile Include="../../src/Starfront.Collab/Services/Stacking/LanProbe.cs" Link="Linked/LanProbe.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/GrantTokenStore.cs" Link="Linked/GrantTokenStore.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/RoutingApiClient.cs" Link="Linked/RoutingApiClient.cs" />
     <Compile Include="../../src/Starfront.Collab/Services/Stacking/BrowserUrls.cs" Link="Linked/BrowserUrls.cs" />

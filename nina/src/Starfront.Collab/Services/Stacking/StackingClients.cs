@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Reflection;
 using RapidStackerCollab.Core.Api;
 using RapidStackerCollab.Core.Auth;
+using NINA.Core.Utility;
 using Starfront.Collab.Settings;
 
 namespace Starfront.Collab.Services.Stacking {
@@ -28,6 +29,7 @@ namespace Starfront.Collab.Services.Stacking {
             this.settings = settings;
             this.links = links;
             userAgent = "Starfront-NINA/" + (Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0");
+            Lan = new LanProbe(ApiHttp, () => settings.StackingHubTrustLan, line => Logger.Info(line), TimeSpan.FromSeconds(2));
             Cloud = CloudClient();
             Router = new RoutingApiClient(new Routes(this));
         }
@@ -47,7 +49,8 @@ namespace Starfront.Collab.Services.Stacking {
         public IApiClient For(StackingLink link) {
             if (link == null || !link.IsHub || string.IsNullOrWhiteSpace(link.ApiBase)) return CloudClient();
             var id = link.StarfrontProjectId;
-            return cache.For(link.ApiBase, "grant:" + id, () => Make(link.ApiBase, new GrantTokenStore(id, links.Lookup, links.Upsert)));
+            var effective = Lan.EffectiveBase(link);
+            return cache.For(effective, "grant:" + id, () => Make(effective, new GrantTokenStore(id, links.Lookup, links.Upsert)));
         }
 
         private sealed class Routes : IStackingRoutes {
@@ -61,6 +64,8 @@ namespace Starfront.Collab.Services.Stacking {
                 owner.links.All().FirstOrDefault(l => l.IsHub && l.Feeds && l.Grant.Length > 0 && l.ApiBase.Trim().Length > 0);
         }
 
+        /// <summary>The LAN short-cut: which hub links answer on their own network right now.</summary>
+        public LanProbe Lan { get; }
         public HttpClient ApiHttp { get; }
         public HttpClient S3Http { get; }
         /// <summary>The cloud client: sign-in and the token, and what a project nobody linked goes to.</summary>
