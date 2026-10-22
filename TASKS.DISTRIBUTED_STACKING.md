@@ -194,7 +194,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 3 — the hub as a standalone backend (RSC, §Phase 3)
 
-- [ ] T301 — Frame ingress: multipart init, part PUT, complete; library frames
+- [x] T301 — Frame ingress: multipart init, part PUT, complete; library frames
       **Files:** RSC `worker/crates/hub/src/routes/frames.rs`, `worker/crates/hub/src/store/frames.rs`, tests
       **Do:** §3.1: T1 (sentinel, quota), resume, duplicate; parts written at offset; ETags; `bad_etags`, `upload_incomplete`, `size_mismatch`; magic check; T2/T2b and the prepare send; expired uploads aborted; `library/frames/*` under `lib/`.
       **Verify:** `cd worker && cargo test -p collab-hub`
