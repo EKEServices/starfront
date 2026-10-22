@@ -159,7 +159,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.2: `COLLAB_HUB_URL`, `COLLAB_HUB_CERT_SHA256`, `COLLAB_IDLE_POLICY`, `COLLAB_BUSY_FILE`, `COLLAB_WORK_WINDOW`, `COLLAB_WORKER_TOKEN_FILE`; AWS names not required with a hub; a mixed configuration refused by `config check`.
       **Verify:** `cd worker && cargo test -p collab-worker && cd ../backend/terraform && terraform init -backend=false -input=false >/dev/null && env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN terraform test`
 
-- [ ] T202 — `daemon/hub.rs`: `HubStore`, `HubObjects`, `HubQueues` and the `hub` feature
+- [x] T202 — `daemon/hub.rs`: `HubStore`, `HubObjects`, `HubQueues` and the `hub` feature
       **Files:** RSC `worker/crates/worker/src/daemon/hub.rs`, `daemon/start.rs`, `daemon/mod.rs`, `worker/crates/worker/Cargo.toml`, `worker/crates/worker/tests/hub_ports.rs`
       **Do:** §2.1: `HubStore` in `DdbStore`'s shape over the RPC; `LocalBlobs`/`LocalQueues` at the hub origin; backend selection in `start.rs`; a `hub` feature needing only `ureq`.
       **Verify:** `cd worker && cargo test -p collab-worker --test hub_ports && cargo build -p collab-worker --no-default-features --features hub,synthetic`
