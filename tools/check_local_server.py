@@ -12,6 +12,8 @@ What it must get right, besides working: the stand-in signs in whoever asks,
 so it must never be pointed at a real server's data, never listen beyond this
 machine, never send a browser anywhere but the server's own callback, and
 never let a real Discord secret already exported in the shell leak into it.
+With --lan it listens on the network, and that is checked too: reachable at
+this machine's LAN address, and only there when --lan is not given.
 """
 
 import json
@@ -37,6 +39,31 @@ def case(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  — {detail}" if detail else ""))
     results.append(bool(ok))
     return ok
+
+
+def lan_ip():
+    """This machine's address on the network, or None with no network. A UDP
+    connect sends nothing; it only asks which local address would be used."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.0.2.1", 9))
+            ip = sock.getsockname()[0]
+    except OSError:
+        return None
+    return None if ip.startswith(("127.", "169.254.", "0.")) else ip
+
+
+def local_name():
+    """This machine's .local name, as run_local.py hands it out."""
+    return socket.gethostname().split(".")[0] + ".local"
+
+
+def reachable(host, port):
+    try:
+        with socket.create_connection((host, port), timeout=3):
+            return True
+    except OSError:
+        return False
 
 
 def free_port():
@@ -100,6 +127,17 @@ done = run_briefly("--host", "0.0.0.0")
 case("there is no --host: it never listens beyond this machine",
      done.returncode != 0 and "--host" in done.stderr)
 
+done = run_briefly("--lan", "--data", str(real), "--port", str(free_port()))
+case("--lan does not get past a folder with a discord.env either",
+     done.returncode != 0 and "discord.env" in done.stderr, done.stderr.strip()[:120])
+case("...and still nothing was written to it", sorted(p.name for p in real.iterdir()) == ["discord.env"])
+
+done = subprocess.run([sys.executable, str(LAUNCHER), "--lan", "--data", str(default_home / "collab"),
+                       "--port", str(free_port())], env=env,
+                      capture_output=True, text=True, timeout=60)
+case("--lan does not get past the folder a real server would use",
+     done.returncode != 0 and "real server" in done.stderr, done.stderr.strip()[:120])
+
 done = run_briefly("--name", "<script>")
 case("an owner name Discord could not have is refused", done.returncode != 0)
 
@@ -128,6 +166,10 @@ try:
          status["discord"] and status["publicUrl"] == BASE, str(status))
     case("the data folder was made and holds the database",
          (DATA / "collab.sqlite").is_file())
+
+    ip = lan_ip()
+    case("without --lan the server is not reachable at this machine's network address",
+         ip is None or not reachable(ip, PORT), f"{ip}:{PORT}")
 
     def sign_in(name=None, cancel=False):
         """The program's and the plugin's sign-in, step by step."""
@@ -219,6 +261,63 @@ case("the banner says Discord sign-in is on, at this machine only",
      "sign-in on, guild local" in out and f"http://127.0.0.1:{PORT}" in out)
 case("the shell's real Discord settings were not used",
      "the-real-guild" not in out and "the-real-secret" not in out)
+
+# ------------------------------------------------------------- --lan
+LAN_PORT = free_port()
+LAN_DATA = Path(tempfile.mkdtemp()) / "lan"
+lan = subprocess.Popen([sys.executable, str(LAUNCHER), "--lan", "--port", str(LAN_PORT),
+                        "--data", str(LAN_DATA)],
+                       env=launcher_env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True)
+try:
+    local = f"http://127.0.0.1:{LAN_PORT}"
+    for _ in range(150):
+        try:
+            urllib.request.urlopen(f"{local}/api/v1/health", timeout=1).read()
+            break
+        except Exception:
+            if lan.poll() is not None:
+                break
+            time.sleep(0.2)
+    if not case("--lan starts and serves", lan.poll() is None):
+        print(lan.stdout.read())
+        sys.exit(1)
+
+    ip = lan_ip()
+    lan_host = ip or local_name()
+    lan_base = f"http://{lan_host}:{LAN_PORT}"
+    if ip:
+        case("--lan listens on the network: reachable at this machine's LAN address",
+             reachable(ip, LAN_PORT), f"{ip}:{LAN_PORT}")
+    else:
+        case("--lan: no network here, so the server is checked as configured",
+             True, "no LAN address; host 0.0.0.0 is checked from the banner below")
+    status = json.loads(get(f"{local}/api/v1/auth")[2])
+    case("--lan hands out the LAN address as its public address, not loopback",
+         status["publicUrl"] == lan_base and "127.0.0.1" not in status["publicUrl"],
+         status["publicUrl"])
+    login = json.loads(get(f"{local}/api/v1/auth/login", data=b"")[2])
+    case("--lan sign-in links point at the LAN address, so another PC can open them",
+         login["url"].startswith(f"{lan_base}/auth/discord/start?"), login["url"][:80])
+    authorize = get(f"{local}{login['url'][len(lan_base):]}")[1]
+    case("--lan: the stand-in's sign-in page is at the LAN address too",
+         authorize.startswith(f"{lan_base}/_local/discord/oauth2/authorize?"), authorize[:80])
+finally:
+    lan.terminate()
+    try:
+        lan_out, _ = lan.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        lan.kill()
+        lan_out, _ = lan.communicate()
+
+case("--lan binds every interface (0.0.0.0), and says so",
+     f"listening http://0.0.0.0:{LAN_PORT}" in lan_out)
+case("--lan prints a loud warning that anyone on the network can sign in as anyone",
+     "WARNING" in lan_out and "can sign in as ANYONE" in lan_out)
+case("--lan prints the LAN URL for the other PC",
+     f"http://{lan_host}:{LAN_PORT}" in lan_out)
+case("without --lan there is no warning and the bind stays loopback",
+     "WARNING" not in out and f"listening http://127.0.0.1:{PORT}" in out)
 
 passed = sum(results)
 print(f"\n{passed}/{len(results)} passed")

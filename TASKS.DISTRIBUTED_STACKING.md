@@ -304,7 +304,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.7: the owner-only `discordWebhookUrl`; `gold_published` and `member_joined`; de-duplicated through `stack_notified`; a fake webhook in the check.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T413 — `run_local.py --lan`
+- [x] T413 — `run_local.py --lan`
       **Files:** SF `server/run_local.py`, `tools/check_local_server.py`
       **Do:** §4.9: bind `0.0.0.0` only with `--lan`, refused on a real data folder or one with `discord.env`, a loud warning and the LAN URL.
       **Verify:** `python3 tools/check_local_server.py`

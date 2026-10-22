@@ -2,6 +2,7 @@
 """Run the collaboration server on this machine, with a stand-in for Discord.
 
     python server/run_local.py
+    python server/run_local.py --lan
 
 For trying the server, the Starfront program and the N.I.N.A. plugin out
 locally. The real server signs people in through Discord, which needs a
@@ -16,17 +17,25 @@ sees.
     --name NAME     the owner's Discord name (default ncedelliott)
     --port N        listen port (default 8800)
     --data DIR      where the database and token live (default ~/starfront-local)
+    --lan           listen on the whole network (0.0.0.0), so another PC on the
+                    same home network, such as the Windows PC running Starfront,
+                    can reach the server directly
 
 The stand-in is served by the server itself, under /_local/discord, so there
-is one address to reach: an SSH tunnel to 8800 is all another PC needs.
+is one address to reach. By default that is this machine only (127.0.0.1); an
+SSH tunnel to 8800 is the alternative for another PC. With --lan the server
+listens on every interface and hands out this machine's LAN address (or its
+.local name if it has none), so device sign-in links and the /stack/api base
+work from the other PC. Anyone on that network can then sign in as anyone.
 
-**Never on a network, never on a real server's data.** The stand-in signs in
-whoever asks, as the owner if they like, so it listens on 127.0.0.1 and there
-is no --host. A folder with a discord.env in it, or the default folder a real
-server would use, is refused: signing in to a real database through a door
-with no lock is exactly the mistake this must not make easy. Discord settings
-already in the environment (a shell that has the real secret exported) are
-overridden, never mixed in.
+**Never on a real server's data.** The stand-in signs in whoever asks, as the
+owner if they like. A folder with a discord.env in it, or the default folder a
+real server would use, is refused, with or without --lan: signing in to a real
+database through a door with no lock is exactly the mistake this must not make
+easy. --lan is refused unless --data is a folder of its own (the default
+~/starfront-local, or one passed explicitly) that is not inside a real server's
+folder. Discord settings already in the environment (a shell that has the real
+secret exported) are overridden, never mixed in.
 """
 
 # No `from __future__ import annotations`: FastAPI reads the stand-in's
@@ -37,6 +46,7 @@ import html
 import os
 import re
 import secrets
+import socket
 import sys
 import urllib.parse
 from pathlib import Path
@@ -148,6 +158,35 @@ def stand_in_discord(secret: str, callback: str, owner: str):
     return router
 
 
+def lan_addresses() -> list[str]:
+    """This machine's IPv4 addresses on the network, the one the route out
+    uses first. Loopback and link-local (169.254.x.x) are not reachable from
+    another PC, so they are left out. Empty when there is no network."""
+    found: list[str] = []
+    try:
+        # A UDP connect sends nothing; it only asks the system which local
+        # address it would route from. No network makes it fail, which is fine.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.0.2.1", 9))
+            found.append(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            found.append(info[4][0])
+    except OSError:
+        pass
+    usable = [a for a in dict.fromkeys(found)
+              if not a.startswith(("127.", "169.254.", "0."))]
+    return usable
+
+
+def local_name() -> str:
+    """This machine's .local (mDNS) name, which another PC can often use when
+    the address is not known."""
+    return socket.gethostname().split(".")[0] + ".local"
+
+
 def refuse(message: str) -> None:
     print(f"run_local: {message}", file=sys.stderr)
     sys.exit(2)
@@ -161,6 +200,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=8800)
     parser.add_argument("--data", default=str(Path.home() / "starfront-local"),
                         help="data folder (default ~/starfront-local)")
+    parser.add_argument("--lan", action="store_true",
+                        help="listen on the network (0.0.0.0) for another PC to reach")
     args = parser.parse_args(argv)
 
     owner = args.name.strip().lstrip("@").lower()
@@ -176,9 +217,24 @@ def main(argv: list[str] | None = None) -> None:
     if data == (data_root() / "collab").resolve():
         refuse(f"{data} is where a real server keeps its database."
                " Give --data a folder of its own.")
+    if args.lan:
+        # Both refusals above already ran. The one more: a --data folder inside
+        # a real server's folder is not a test folder of its own.
+        real_folder = data_root() / "collab"
+        if data == real_folder.resolve() or real_folder.resolve() in data.parents:
+            refuse(f"{data} is inside where a real server keeps its database."
+                   " Give --data a folder of its own.")
     data.mkdir(parents=True, exist_ok=True)
 
+    # The server's own calls to the stand-in always go to loopback. What a
+    # browser is sent to (sign-in page, callback, the public address) is the
+    # address another PC can reach when --lan is given.
     base = f"http://127.0.0.1:{args.port}"
+    public = base
+    lan_ips = lan_addresses() if args.lan else []
+    if args.lan:
+        public = f"http://{lan_ips[0]}:{args.port}" if lan_ips \
+            else f"http://{local_name()}:{args.port}"
     secret = secrets.token_urlsafe(24)
     # Whatever the shell had, under either name, gives way: a real client
     # secret or guild must not be mixed with the stand-in.
@@ -188,26 +244,39 @@ def main(argv: list[str] | None = None) -> None:
             del os.environ[key]
     os.environ.update({
         "STARFRONT_DATA": str(data),
-        "STARFRONT_PUBLIC_URL": base,
+        "STARFRONT_PUBLIC_URL": public,
         "STARFRONT_DISCORD_CLIENT_ID": "starfront-local",
         "STARFRONT_DISCORD_CLIENT_SECRET": secret,
         "STARFRONT_DISCORD_GUILD": GUILD,
         "STARFRONT_DISCORD_OWNERS": person_id(owner),
         "STARFRONT_DISCORD_API": base + PREFIX,
-        "STARFRONT_DISCORD_AUTHORIZE": base + PREFIX + "/oauth2/authorize",
+        "STARFRONT_DISCORD_AUTHORIZE": public + PREFIX + "/oauth2/authorize",
     })
 
     # The server reads its settings when it is imported, so only now; the
     # routes are added to the same app object run.py then serves.
     from server import app as server_app
     server_app.app.include_router(stand_in_discord(
-        secret, base + "/auth/discord/callback", owner))
+        secret, public + "/auth/discord/callback", owner))
 
-    print(f"Stand-in Discord at {base}{PREFIX}: signing in asks only for a name.")
+    if args.lan:
+        print("=" * 72)
+        print("  WARNING: --lan. Anyone on this network who can reach the port")
+        print("  can sign in as ANYONE, including the owner. Local testing only.")
+        print("  Stop the server (Ctrl+C) when the test is over.")
+        print("=" * 72)
+        print("Reach it from another PC on this network at:")
+        for ip in lan_ips:
+            print(f"  http://{ip}:{args.port}")
+        print(f"  http://{local_name()}:{args.port}")
+        print(f"The server listens on 0.0.0.0:{args.port} (every interface).\n")
+    print(f"Stand-in Discord at {public}{PREFIX}: signing in asks only for a name.")
     print(f"  @{owner} owns this server; any other name is an ordinary member.")
-    print("  Local use only: anyone who can reach this port can sign in as anyone.\n")
+    if not args.lan:
+        print("  Local use only: anyone who can reach this port can sign in as anyone.\n")
     from server import run
-    run.main(["--host", "127.0.0.1", "--port", str(args.port)])
+    host = "0.0.0.0" if args.lan else "127.0.0.1"
+    run.main(["--host", host, "--port", str(args.port)])
 
 
 if __name__ == "__main__":
