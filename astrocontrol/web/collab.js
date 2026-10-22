@@ -376,11 +376,9 @@
     // Editing keeps the region it has unless a new one was chosen; starting
     // needs one either way.
     const editing = col.editing;
-    // Where the lights are stacked. On an edit it is sent only when it was
-    // changed: the server hands the join code only to telescopes on the
-    // collaboration and to its owner's, so this form may have loaded it
-    // blank, and sending that back would clear (or refuse) a code nobody
-    // meant to touch.
+    // Where the lights are stacked. A new collaboration always says so (the
+    // form starts on the server's default); an edit sends it only when it
+    // was changed, so a binding nobody touched is never rewritten.
     const wanted = stackingChoice();
     if (wanted.error) {
       stackMessage(wanted.error, true);
@@ -388,7 +386,7 @@
       return;
     }
     stackMessage('');
-    if (editing ? stackingChanged(wanted.value) : wanted.value.backend) {
+    if (!editing || stackingChanged(wanted.value)) {
       body.stacking = wanted.value;
     }
     const wantsRegion = !editing || col.regionChanged;
@@ -693,7 +691,10 @@
         ? `<button class="btn small ghost" data-col-edit="${esc(project.id)}">Edit</button>
            <button class="btn small ghost" data-col-redeal="${esc(project.id)}"
                    title="Forget tonight's lists so every telescope is dealt afresh on its next poll - after changing the filters or goals">Re-deal tonight</button>
-           <button class="btn small ghost danger" data-col-close="${esc(project.id)}">Close</button>`
+           <button class="btn small ghost danger" data-col-close="${esc(project.id)}">Close</button>
+           ${(project.stacking || {}).backend === 'hub' || (project.stacking || {}).managed
+             ? `<button class="btn small ghost danger" data-col-delete="${esc(project.id)}"
+                  title="Restorable for seven days; then the raw frames are purged">Delete</button>` : ''}`
         : '';
 
       const open = col.expanded.has(project.id);
@@ -782,6 +783,10 @@
     box.querySelectorAll('[data-col-close]').forEach((button) => {
       button.addEventListener('click', () => closeProject(
         projects.find((p) => p.id === button.dataset.colClose)));
+    });
+    box.querySelectorAll('[data-col-delete]').forEach((button) => {
+      button.addEventListener('click', () => deleteProject(
+        projects.find((p) => p.id === button.dataset.colDelete)));
     });
     box.querySelectorAll('[data-col-redeal]').forEach((button) => {
       button.addEventListener('click', () => redealProject(
@@ -1019,8 +1024,10 @@
   }
 
   function endEdit() {
+    const was = col.editing;
     col.editing = null;
     col.stackLoaded = null;
+    if (was) resetStacking();
     col.regionChanged = false;
     if ($('btnColCreate')) $('btnColCreate').textContent = 'Start it';
   }
@@ -1134,19 +1141,14 @@
 
   /* --------------------------------------- the live stacking fieldset */
 
-  /** A join code the way the plugin sends it: XXXX-XXXX-XXXX. Letters that
-   *  look like digits (0, 1, I, L, O, U) are not in the alphabet, so a code
-   *  containing one was mistyped. Blank is fine here; the caller decides. */
-  const JOIN_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-  function normaliseJoinCode(text) {
-    const cleaned = String(text || '').toUpperCase().replace(/[\s\-_]/g, '');
-    if (!cleaned) return { code: '' };
-    if (cleaned.length !== 12 || [...cleaned].some((ch) => !JOIN_ALPHABET.includes(ch))) {
-      return { error: 'A Rapid Stacker Collab join code is twelve letters and '
-        + 'digits, like H4RT-92BK-WNPC.' };
-    }
-    return { code: `${cleaned.slice(0, 4)}-${cleaned.slice(4, 8)}-${cleaned.slice(8)}` };
-  }
+  /* Stacking follows the collaboration (T706, the author's rule): the
+     collaboration is the only place a project is made. A new one is stacked
+     where the server says by default - the person's hub, else Rapid Stacker
+     Collab when their account is linked - and this form shows that choice
+     and offers off or another. Every save sends the collaboration's fields
+     down to the stacking project; nothing is ever edited on the stacking side.
+     A cloud project is made and kept by the server through the Collab API;
+     an old collaboration's pasted join code is kept as it is, read-only. */
 
   const stackBackend = () => {
     if ($('stkCloud') && $('stkCloud').checked) return 'cloud';
@@ -1161,35 +1163,59 @@
     node.style.color = bad ? 'var(--warn)' : '';
   }
 
+  /** An old collaboration's pasted code, kept as it is unless converted. */
+  const legacyCode = () => {
+    const loaded = col.stackLoaded;
+    return loaded && loaded.backend === 'cloud' && !loaded.managed ? loaded.joinCode : '';
+  };
+
+  /** "Live stacking: on (hub NAME)", in words, for what the form says now. */
+  function stackSummary() {
+    const backend = stackBackend();
+    const cloud = (col.stackOpts || {}).cloud || {};
+    if (backend === 'hub') {
+      const pick = $('stkHubPick');
+      const hub = (col.hubs || []).find((h) => h.id === (pick && pick.value));
+      return `Live stacking: on (hub ${hub ? hub.name : (pick && pick.value) || '?'})`;
+    }
+    if (backend === 'cloud') {
+      if (legacyCode() && !($('stkConvert') && $('stkConvert').checked)) {
+        return 'Live stacking: on (Rapid Stacker Collab, the pasted join code it already has)';
+      }
+      return cloud.linked
+        ? `Live stacking: on (Rapid Stacker Collab${cloud.user ? `, as ${cloud.user}` : ''})`
+        : 'Live stacking: Rapid Stacker Collab, once your account is linked (below)';
+    }
+    return 'Live stacking: off';
+  }
+
   /** Show the parts of the fieldset the chosen backend needs. */
   function drawStacking() {
     const backend = stackBackend();
-    if ($('stkCodeBox')) $('stkCodeBox').hidden = backend !== 'cloud';
+    if ($('stkCodeBox')) $('stkCodeBox').hidden = !(backend === 'cloud' && legacyCode());
     if ($('stkHubBox')) $('stkHubBox').hidden = backend !== 'hub';
-    if ($('stkVisBox')) $('stkVisBox').hidden = backend !== 'hub';
+    if ($('stkVisBox')) $('stkVisBox').hidden = backend === '';
+    if ($('stkSummary')) $('stkSummary').textContent = stackSummary();
   }
 
   /** What the fieldset says, or the reason it cannot be sent. */
   function stackingChoice() {
     const backend = stackBackend();
-    const value = { backend, joinCode: '', hubId: '' };
+    const value = { backend };
     if (backend === 'cloud') {
-      const typed = ($('stkJoinCode').value || '');
-      const answer = normaliseJoinCode(typed);
-      if (answer.error) return { error: answer.error };
-      const loaded = col.stackLoaded;
-      // Editing a project whose code this program was not given: blank
-      // means "leave it", not "needs one".
-      if (!answer.code && !(loaded && loaded.backend === 'cloud')) {
-        return { error: 'Enter the join code of the Rapid Stacker Collab project.' };
+      const kept = legacyCode();
+      if (kept && !$('stkConvert').checked) {
+        value.joinCode = kept;              // the old link, read-only: kept as it is
+      } else if (!((col.stackOpts || {}).cloud || {}).linked) {
+        return { error: 'Link your Rapid Stacker Collab account first (Rapid Stacker '
+          + 'Collab account, below): the server makes the project with it.' };
       }
-      value.joinCode = answer.code;
-      $('stkJoinCode').value = answer.code;
+      value.visibility = $('stkVisibility').value || 'unlisted';
     } else if (backend === 'hub') {
       const hubId = $('stkHubPick').value;
       if (!hubId) {
-        return { error: 'Choose one of your hubs. Register a hub under '
-          + 'Live stacking hub, below, if the list is empty.' };
+        return { error: 'Choose a hub. Register one under Live stacking hub, below, '
+          + 'or ask a hub\'s owner to list you as a coordinator.' };
       }
       value.hubId = hubId;
       value.visibility = $('stkVisibility').value || 'unlisted';
@@ -1199,46 +1225,113 @@
 
   /** Whether the fieldset differs from what the project had when it was loaded. */
   function stackingChanged(now) {
-    const was = col.stackLoaded || { backend: '', joinCode: '', hubId: '', visibility: 'unlisted' };
+    const was = col.stackLoaded || { backend: '', hubId: '', visibility: 'unlisted' };
     if (now.backend !== was.backend) return true;
-    if (now.backend === 'cloud') return !!now.joinCode && now.joinCode !== was.joinCode;
+    if (now.backend === 'cloud') {
+      if (legacyCode()) return !now.joinCode;          // converting to a server-made project
+      return now.visibility !== was.visibility;
+    }
     if (now.backend === 'hub') return now.hubId !== was.hubId || now.visibility !== was.visibility;
     return false;
   }
 
-  function loadStacking(project) {
+  function setVisibility(value) {
+    $('stkVisibility').value = ['public', 'private'].includes(value) ? value : 'unlisted';
+  }
+
+  /** A new collaboration's form shows where the server would stack it. */
+  function applyStackDefault() {
+    if (col.editing || col.stackTouched) return;
+    const fallback = (col.stackOpts || {}).default || { backend: '' };
+    $('stkNone').checked = fallback.backend === '';
+    $('stkCloud').checked = fallback.backend === 'cloud';
+    $('stkHub').checked = fallback.backend === 'hub';
+    if (fallback.backend === 'hub') drawHubPick(fallback.hubId);
+    drawStacking();
+  }
+
+  /** The Edit form: where this collaboration is stacked, read from the
+   *  server as its owner (the listing tells a telescope less). */
+  async function loadStacking(project) {
     const block = project.stacking || {};
-    const payload = (project.payload && project.payload.stacking) || {};
     const code = project.stackingJoinCode || '';
     const backend = block.backend || (code ? 'cloud' : '');
     col.stackLoaded = {
-      backend, joinCode: code, hubId: block.hubId || payload.hubId || '',
-      visibility: payload.visibility || 'unlisted',
+      backend, managed: !!block.managed, joinCode: code, hubId: block.hubId || '',
+      visibility: block.visibility || 'unlisted',
     };
-    $('stkNone').checked = backend === '';
-    $('stkCloud').checked = backend === 'cloud';
-    $('stkHub').checked = backend === 'hub';
-    $('stkJoinCode').value = code;
-    $('stkVisibility').value = col.stackLoaded.visibility === 'public' ? 'public' : 'unlisted';
-    drawHubPick(col.stackLoaded.hubId);
+    showLoaded();
+    try {
+      const got = await app.api(`/api/collab/projects/${encodeURIComponent(project.id)}/stacking`);
+      if (!col.editing || col.editing.id !== project.id) return;
+      col.stackLoaded = {
+        backend: got.backend, managed: !!got.managed, joinCode: got.joinCode || '',
+        hubId: got.hubId || '', visibility: got.visibility || 'unlisted',
+      };
+      showLoaded();
+      drawStackState(got);
+    } catch (error) {
+      drawStackState(null, error.message);
+    }
+  }
+
+  function showLoaded() {
+    const loaded = col.stackLoaded;
+    $('stkNone').checked = loaded.backend === '';
+    $('stkCloud').checked = loaded.backend === 'cloud';
+    $('stkHub').checked = loaded.backend === 'hub';
+    $('stkJoinCode').value = legacyCode();
+    $('stkConvert').checked = false;
+    setVisibility(loaded.visibility);
+    drawHubPick(loaded.hubId);
     drawStacking();
-    stackMessage(backend === 'cloud' && !code
-      ? 'The join code is kept by the server; leave this blank to keep it.' : '');
+  }
+
+  /** How the stacking project of the collaboration being edited is doing. */
+  function drawStackState(got, failed = '') {
+    const node = $('stkState');
+    if (!node) return;
+    if (failed) { node.textContent = `Could not read its stacking state: ${failed}`; return; }
+    const lines = [];
+    const cloud = got && got.cloud;
+    if (got && got.deletion && got.deletion.status === 'deleted') {
+      lines.push(`Deleted; restorable until ${String(got.deletion.delete_after || '').slice(0, 10)}.`);
+    }
+    if (cloud && got.managed) {
+      if (cloud.state === 'ok') {
+        lines.push(`Rapid Stacker Collab project ${cloud.slug || ''} is in step`
+          + `${cloud.remoteStatus ? ` (${cloud.remoteStatus})` : ''}.`);
+      } else if (cloud.state === 'pending') {
+        lines.push('Rapid Stacker Collab project: being made.');
+      } else if (cloud.error) {
+        lines.push(`Rapid Stacker Collab: ${cloud.error}`
+          + (cloud.state === 'failed' && cloud.nextAt
+            ? ` The server tries again at ${new Date(cloud.nextAt * 1000).toLocaleTimeString()}.` : ''));
+      }
+    } else if (got && got.backend === 'hub' && got.status) {
+      lines.push(`Stacking project on ${got.hubName || 'the hub'}: ${got.status}.`);
+    }
+    node.innerHTML = lines.map((line) => esc(line)).join('<br>')
+      + (cloud && cloud.pageUrl ? ` <a href="${esc(cloud.pageUrl)}" target="_blank" rel="noopener">Its page</a>` : '');
   }
 
   function resetStacking() {
     col.stackLoaded = null;
-    $('stkNone').checked = true;
+    col.stackTouched = false;
     $('stkJoinCode').value = '';
-    $('stkVisibility').value = 'unlisted';
-    drawStacking();
+    $('stkConvert').checked = false;
+    setVisibility('unlisted');
+    if ($('stkState')) $('stkState').textContent = '';
     stackMessage('');
+    applyStackDefault();
   }
 
-  /** The person's hubs, from the server through this program. */
+  /** What the server offers this person: the hubs they may bind to, the
+   *  default, their Collab link and their deleted collaborations. */
   async function loadHubs() {
     try {
-      const answer = await app.api('/api/collab/hubs');
+      const answer = await app.api('/api/collab/stacking');
+      col.stackOpts = answer;
       col.hubs = answer.hubs || [];
       col.hubsError = '';
     } catch (error) {
@@ -1246,6 +1339,10 @@
       col.hubsError = error.message;
     }
     drawHubPick();
+    drawCloudLink();
+    drawDeleted();
+    applyStackDefault();
+    drawStacking();
   }
 
   function drawHubPick(select) {
@@ -1254,6 +1351,7 @@
     const keep = select || pick.value;
     const hubs = col.hubs || [];
     pick.innerHTML = hubs.map((hub) => `<option value="${esc(hub.id)}">${esc(hub.name)}`
+      + `${hub.role === 'coordinator' ? ' (you coordinate)' : ''}`
       + `${hub.lanUrl ? ` (${esc(hub.lanUrl)})` : ''}</option>`).join('');
     // A project bound to a hub the list does not show (someone else's) still
     // has to show it, or saving would silently rebind it.
@@ -1264,9 +1362,105 @@
     if (keep) pick.value = keep;
     const note = $('stkHubNote');
     if (note) {
-      note.textContent = col.hubsError ? `Could not list your hubs: ${col.hubsError}`
-        : hubs.length ? '' : 'You have no hub registered with this server yet. '
-          + 'Set one up under Live stacking hub, below.';
+      note.textContent = col.hubsError ? `Could not ask the server: ${col.hubsError}`
+        : hubs.length ? '' : 'You have no hub to bind to. Set one up under Live '
+          + 'stacking hub, below, or ask a hub\'s owner to list you as a coordinator.';
+    }
+  }
+
+  /** The Rapid Stacker Collab account link: once per person, kept on the server. */
+  function drawCloudLink() {
+    const cloud = (col.stackOpts || {}).cloud || {};
+    const text = $('stkCloudLinkText');
+    if (text) {
+      text.textContent = cloud.linked
+        ? `Linked${cloud.user ? ` as ${cloud.user}` : ''} (${cloud.apiBase || ''})`
+          + `${cloud.expiresAt ? `; the token expires ${String(cloud.expiresAt).slice(0, 10)}` : ''}.`
+          + (cloud.sealed ? '' : ' This server keeps it unsealed: it has no key to seal it with.')
+        : cloud.unreadable
+          ? 'The link can no longer be read (the server\'s key changed): link again.'
+          : 'Not linked. Without it, collaborations cannot be stacked on Rapid Stacker Collab.';
+    }
+    if ($('btnStkCloudUnlink')) $('btnStkCloudUnlink').hidden = !cloud.linked;
+    if ($('stkCloudBase') && !$('stkCloudBase').value && cloud.apiBase) $('stkCloudBase').value = cloud.apiBase;
+  }
+
+  async function linkCloud() {
+    const token = ($('stkCloudToken').value || '').trim();
+    if (!token) { app.toast('Paste the API token first', 'error'); $('stkCloudToken').focus(); return; }
+    $('btnStkCloudLink').disabled = true;
+    try {
+      const answer = await app.api('/api/collab/stacking/cloud', 'POST',
+        { token, apiBase: ($('stkCloudBase').value || '').trim() });
+      $('stkCloudToken').value = '';
+      col.stackOpts = { ...(col.stackOpts || {}), cloud: answer.cloud };
+      app.toast('Rapid Stacker Collab is linked', 'success');
+      await loadHubs();
+    } catch (error) {
+      app.toast(error.message, 'error');
+      stackMessage(error.message, true);
+    }
+    $('btnStkCloudLink').disabled = false;
+  }
+
+  async function unlinkCloud() {
+    const ok = await app.confirmAction('Forget your Rapid Stacker Collab token on the server? '
+      + 'Collaborations already on the cloud keep their projects, but their changes wait '
+      + 'until you link again.', { title: 'Unlink Rapid Stacker Collab', confirmLabel: 'Unlink', danger: true });
+    if (!ok) return;
+    try {
+      await app.api('/api/collab/stacking/cloud/unlink', 'POST', {});
+      await loadHubs();
+    } catch (error) { app.toast(error.message, 'error'); }
+  }
+
+  /** Deleted collaborations are off every list; this is where they are restored. */
+  function drawDeleted() {
+    const box = $('colDeleted');
+    if (!box) return;
+    const deleted = ((col.stackOpts || {}).deleted || []).filter((d) => d.restorable);
+    box.hidden = !deleted.length;
+    box.innerHTML = deleted.length
+      ? `<h4>Deleted collaborations</h4>${deleted.map((d) => `<div class="row gap small">
+          <span class="grow">${esc(d.name)} — restorable until ${esc(String(d.deleteAfter || '').slice(0, 10))}${
+            d.note ? `<br><span class="muted">${esc(d.note)}</span>` : ''}</span>
+          <button class="btn small" data-col-restore="${esc(d.id)}">Restore</button></div>`).join('')}`
+      : '';
+    box.querySelectorAll('[data-col-restore]').forEach((button) => {
+      button.addEventListener('click', () => restoreProject(button.dataset.colRestore, button));
+    });
+  }
+
+  async function deleteProject(project) {
+    if (!project) return;
+    const days = (col.stackOpts || {}).windowDays || 7;
+    const ok = await app.confirmAction(
+      `Delete “${project.name}”? It comes off everybody's list and its stacking project stops `
+      + `taking frames. You can restore it for ${days} days; after that the raw frames are `
+      + 'purged. The finished stacks are kept until you remove them.',
+      { title: 'Delete collaboration', confirmLabel: 'Delete it', danger: true });
+    if (!ok) return;
+    try {
+      const answer = await app.api(`/api/collab/projects/${encodeURIComponent(project.id)}/delete`, 'POST', {});
+      col.state = answer.state || col.state;
+      const cloud = (answer.deletion || {}).cloud;
+      app.toast(cloud && cloud.state === 'needs_owner' ? cloud.error
+        : `“${project.name}” is deleted; restorable until `
+          + `${String((answer.deletion || {}).delete_after || '').slice(0, 10)}`, 'success', 8000);
+      await load(true);
+    } catch (error) { app.toast(error.message, 'error'); }
+  }
+
+  async function restoreProject(id, button) {
+    button.disabled = true;
+    try {
+      const answer = await app.api(`/api/collab/projects/${encodeURIComponent(id)}/restore`, 'POST', {});
+      col.state = answer.state || col.state;
+      app.toast('Restored', 'success');
+      await load(true);
+    } catch (error) {
+      app.toast(error.message, 'error');
+      button.disabled = false;
     }
   }
 
@@ -1733,13 +1927,12 @@
     });
 
     // Live stacking on the form.
-    for (const id of ['stkNone', 'stkCloud', 'stkHub']) on(id, 'change', () => { drawStacking(); stackMessage(''); });
+    for (const id of ['stkNone', 'stkCloud', 'stkHub', 'stkConvert', 'stkHubPick']) {
+      on(id, 'change', () => { col.stackTouched = true; drawStacking(); stackMessage(''); });
+    }
     on('btnStkHubs', 'click', loadHubs);
-    on('stkJoinCode', 'blur', () => {
-      const answer = normaliseJoinCode($('stkJoinCode').value);
-      if (answer.error) stackMessage(answer.error, true);
-      else { $('stkJoinCode').value = answer.code; stackMessage(''); }
-    });
+    on('btnStkCloudLink', 'click', linkCloud);
+    on('btnStkCloudUnlink', 'click', unlinkCloud);
 
     // The hub on this machine.
     on('hubFold', 'toggle', () => {

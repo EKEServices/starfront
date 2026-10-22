@@ -456,8 +456,9 @@ class CollabAgentRequest(BaseModel):
 class CollabStackingRequest(BaseModel):
     """Where a collaboration's lights are stacked; the server checks it.
 
-    Blank `backend` is none; `cloud` needs `joinCode`; `hub` needs `hubId`
-    (one the signed-in person owns, or coordinates).
+    Blank `backend` is none; `cloud` is the Rapid Stacker Collab project the
+    server makes and keeps (`joinCode` only to keep an old pasted one); `hub`
+    needs `hubId` (one the signed-in person owns, or coordinates).
     """
 
     backend: str = Field(default="", pattern="^(cloud|hub|)$")
@@ -3061,6 +3062,57 @@ def collab_hubs() -> dict[str, Any]:
     only the hubs its caller owns.
     """
     return {"hubs": _admin(collab_admin.hubs)}
+
+
+class CollabCloudLinkRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=120)
+    apiBase: str = Field(default="", max_length=200)
+
+
+@app.get("/api/collab/stacking")
+def collab_stacking() -> dict[str, Any]:
+    """What the Live stacking fieldset offers the signed-in person: the hubs
+    they may bind to, the default a new collaboration gets, their Rapid
+    Stacker Collab link, and their deleted collaborations still restorable."""
+    return _admin(collab_admin.stacking_options)
+
+
+@app.post("/api/collab/stacking/cloud")
+def collab_link_cloud(body: CollabCloudLinkRequest) -> dict[str, Any]:
+    """Link the person's Rapid Stacker Collab account on the server, once.
+
+    Passed straight through and kept nowhere here: the server checks the token
+    and keeps it (sealed), so it never sits in this program's settings file.
+    """
+    return _admin(collab_admin.link_cloud, body.token.strip(), body.apiBase.strip())
+
+
+@app.post("/api/collab/stacking/cloud/unlink")
+def collab_unlink_cloud() -> dict[str, Any]:
+    return _admin(collab_admin.unlink_cloud)
+
+
+@app.get("/api/collab/projects/{project_id}/stacking")
+def collab_project_stacking(project_id: str) -> dict[str, Any]:
+    """Where a collaboration you started is stacked, and how that is going."""
+    return _admin(collab_admin.project_stacking, project_id)
+
+
+@app.post("/api/collab/projects/{project_id}/delete")
+def collab_delete_project(project_id: str) -> dict[str, Any]:
+    """Delete a stacked collaboration: restorable for seven days (D004)."""
+    made = _admin(collab_admin.delete_project, project_id)
+    with contextlib.suppress(Exception):
+        collab_client.poll()
+    return {**made, "state": _collab_state()}
+
+
+@app.post("/api/collab/projects/{project_id}/restore")
+def collab_restore_project(project_id: str) -> dict[str, Any]:
+    made = _admin(collab_admin.restore_project, project_id)
+    with contextlib.suppress(Exception):
+        collab_client.poll()
+    return {**made, "state": _collab_state()}
 
 
 @app.post("/api/collab/projects")

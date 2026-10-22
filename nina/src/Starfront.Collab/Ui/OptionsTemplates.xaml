@@ -342,7 +342,7 @@
                         <TextBlock Margin="0,12,0,4" FontWeight="SemiBold" Text="Linked collaborations" />
                         <TextBlock
                             Opacity="0.7"
-                            Text="None yet. When a collaboration you are on has a join code, this telescope joins its stacking project at the next check-in."
+                            Text="None yet. Stacking follows the collaboration: when one you are on is stacked (on a hub, or on Rapid Stacker Collab), this telescope joins its stacking project at the next check-in."
                             TextWrapping="Wrap"
                             Visibility="{Binding HasLinks, Converter={StaticResource Starfront_ShowWhenFalse}}" />
                         <ItemsControl ItemsSource="{Binding Links}">

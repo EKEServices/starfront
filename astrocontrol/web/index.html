@@ -1468,26 +1468,33 @@
 
             <fieldset class="col-stacking" id="colStacking">
               <legend>Live stacking</legend>
+              <p class="small" id="stkSummary" role="status">Live stacking: off</p>
               <p class="small muted">
-                Stack everyone's lights as they land. Only telescopes on this
-                collaboration are given the join code or the hub's grant.
+                Stacking follows this collaboration: it is on by default where
+                you have somewhere to stack, and its name, notes, region,
+                filters, requirements and who may watch reach the stacking
+                project every time you save here. Nothing is made or changed
+                anywhere else. Only telescopes on it are given the join code
+                or the hub's grant.
               </p>
               <div class="row gap">
                 <label class="inline"><input type="radio" name="stkBackend"
-                       id="stkNone" value="" checked> None</label>
-                <label class="inline" title="Rapid Stacker Collab's own service, reached with a join code"><input type="radio" name="stkBackend"
+                       id="stkNone" value="" checked> Off</label>
+                <label class="inline" title="Rapid Stacker Collab's service: this server makes the project there and keeps it in step, with your linked account"><input type="radio" name="stkBackend"
                        id="stkCloud" value="cloud"> Rapid Stacker Collab (cloud)</label>
-                <label class="inline" title="A live stacking hub you run (set it up under Live stacking hub, below)"><input type="radio" name="stkBackend"
-                       id="stkHub" value="hub"> My hub</label>
+                <label class="inline" title="A live stacking hub: yours, or one whose owner listed you as a coordinator"><input type="radio" name="stkBackend"
+                       id="stkHub" value="hub"> A hub</label>
               </div>
-              <label id="stkCodeBox" hidden title="The join code of a Rapid Stacker Collab project, like H4RT-92BK-WNPC.">Join code
-                <input type="text" id="stkJoinCode" spellcheck="false" autocomplete="off"
-                       placeholder="H4RT-92BK-WNPC">
-              </label>
+              <div id="stkCodeBox" hidden>
+                <label title="Made on the Collab website before the server made them itself; kept as it is">Pasted join code (kept)
+                  <input type="text" id="stkJoinCode" readonly spellcheck="false" autocomplete="off"></label>
+                <label class="inline"><input type="checkbox" id="stkConvert"> Let this server make and keep a
+                  Rapid Stacker Collab project for it instead</label>
+              </div>
               <div id="stkHubBox" hidden>
                 <div class="row gap">
-                  <select id="stkHubPick" class="grow" title="A hub registered with this server by you"></select>
-                  <button class="btn small" id="btnStkHubs" title="Ask the server which hubs are yours">Reload</button>
+                  <select id="stkHubPick" class="grow" title="The hubs you may bind a collaboration to"></select>
+                  <button class="btn small" id="btnStkHubs" title="Ask the server again">Reload</button>
                 </div>
                 <div class="small muted" id="stkHubNote"></div>
               </div>
@@ -1496,9 +1503,33 @@
                   <select id="stkVisibility">
                     <option value="unlisted">Unlisted (anyone with the link)</option>
                     <option value="public">Public (listed)</option>
+                    <option value="private">Private (members only)</option>
                   </select></label>
               </div>
               <div class="small" id="stkMsg" role="status"></div>
+              <div class="small" id="stkState"></div>
+              <details class="fold" id="stkCloudFold">
+                <summary>Rapid Stacker Collab account</summary>
+                <p class="small" id="stkCloudLinkText"></p>
+                <ol class="small muted">
+                  <li>Sign in at Rapid Stacker Collab and open your Dashboard.</li>
+                  <li>Under API tokens, create a token named Starfront, tick
+                    Manage projects (projects:manage) and Read projects, and
+                    choose how long it lasts (up to 365 days).</li>
+                  <li>Copy the token (it starts rscu_ and is shown once) and
+                    paste it here. It is kept on the Starfront server, sealed,
+                    and never sent to a telescope.</li>
+                </ol>
+                <div class="row gap">
+                  <input type="password" id="stkCloudToken" class="grow" autocomplete="off"
+                         spellcheck="false" placeholder="rscu_…" title="A Rapid Stacker Collab API token with projects:manage">
+                  <button class="btn small primary" id="btnStkCloudLink">Link</button>
+                  <button class="btn small ghost danger" id="btnStkCloudUnlink" hidden>Unlink</button>
+                </div>
+                <label class="small">Service address
+                  <input type="text" id="stkCloudBase" spellcheck="false"
+                         placeholder="https://collab.astro.ekeservices.com/api"></label>
+              </details>
             </fieldset>
 
             <details class="fold">
@@ -1584,6 +1615,7 @@
         <div id="colBrowse">
           <p class="small muted">Set a server above, then refresh.</p>
         </div>
+        <div class="col-deleted" id="colDeleted" hidden></div>
 
         <div id="colTask"></div>
 

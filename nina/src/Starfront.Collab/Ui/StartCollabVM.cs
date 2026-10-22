@@ -127,11 +127,18 @@ namespace Starfront.Collab.Ui {
         /// <summary>Collect everyone's lights (and calibration frames) on the server, for the coordinator to stack.</summary>
         public bool CollectFiles { get => collectFiles; set { collectFiles = value; RaisePropertyChanged(); } }
         private bool collectFiles;
-        /// <summary>The Rapid Stacker Collab join code that stacks this collaboration's lights as they land; blank for none.</summary>
+        /// <summary>
+        /// An old collaboration's pasted Rapid Stacker Collab join code, kept as it is. Since T706
+        /// stacking follows the collaboration: the server binds a new one to its owner's hub, or makes
+        /// and keeps the Rapid Stacker Collab project itself, and refuses a newly pasted code. The box
+        /// shows only when the collaboration being edited has a pasted code (it may be cleared).
+        /// </summary>
         public string StackingJoinCode { get => stackingJoinCode; set { stackingJoinCode = value ?? ""; RaisePropertyChanged(); } }
         private string stackingJoinCode = "";
         /// <summary>The code as the form was loaded with it, so an edit sends it only when it was changed.</summary>
         private string loadedStackingJoinCode = "";
+        /// <summary>Whether the form shows the join code box: only for an old collaboration's pasted code.</summary>
+        public bool ShowJoinCode => loadedStackingJoinCode.Length > 0;
 
         /// <summary>
         /// A colour camera's data is its own band, kept apart from the mono
@@ -175,6 +182,7 @@ namespace Starfront.Collab.Ui {
             CollectFiles = false;
             StackingJoinCode = "";
             loadedStackingJoinCode = "";
+            RaisePropertyChanged(nameof(ShowJoinCode));
             Filters.Clear();
             acceptOscRgb = true; acceptOscNarrowband = true;
             RaisePropertyChanged(nameof(AcceptOscRgb));
@@ -218,8 +226,10 @@ namespace Starfront.Collab.Ui {
             Name = listing.Name;
             Notes = listing.Notes ?? "";
             CollectFiles = listing.CollectFiles;
-            StackingJoinCode = listing.StackingJoinCode ?? "";
+            // A server-made cloud project's code is the server's to keep: not shown, never sent.
+            StackingJoinCode = listing.Stacking?.Managed == true ? "" : listing.StackingJoinCode ?? "";
             loadedStackingJoinCode = StackingJoinCode;
+            RaisePropertyChanged(nameof(ShowJoinCode));
             Single = listing.Kind == "single";
             var region = listing.Region;
             if (region != null) {
@@ -461,14 +471,13 @@ namespace Starfront.Collab.Ui {
                 ["requirements"] = requirements,
                 ["goals"] = goals,
             };
-            // The stacking join code goes on an edit only when it was changed
-            // (blank then clears it). The server hands the code only to
-            // telescopes on the collaboration and to its owner's, and a
-            // collaboration started on the coordinator token has no owner, so
-            // this form may have loaded it blank: sending that back would
-            // clear a code nobody meant to touch.
+            // An old collaboration's pasted code goes on an edit only when it was
+            // changed (blank clears it; a different one the server refuses).
+            // A new collaboration sends none: the server stacks it where its
+            // owner can (their hub, or the Rapid Stacker Collab project it
+            // makes), and the Collab tab in Starfront changes that.
             JoinCodes.TryNormalize(loadedStackingJoinCode, out var loaded);
-            if (!Editing || stackingCode != loaded) body["stackingJoinCode"] = stackingCode;
+            if (Editing && stackingCode != loaded) body["stackingJoinCode"] = stackingCode;
             return body;
         }
 

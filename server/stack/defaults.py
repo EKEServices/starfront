@@ -67,10 +67,15 @@ GRID_MAX_SCALE = 20.0
 def contract_filters(names: Iterable[str]) -> list[str]:
     """A collaboration's filter names as the contract's canonical filters.
 
-    "H" -> "HA"; a one-shot colour band ("OSC-RGB", "OSC-Ha+OIII") -> "OSC";
-    a filter passing two lines at once ("Ha+OIII", "Dual") -> "DUO"; a name
-    the contract has no word for is left out rather than invented, because a
-    frame resolving to a filter the project did not declare is quarantined.
+    "H" -> "HA"; a one-shot colour camera's broadband band ("OSC-RGB") ->
+    "OSC", which is what the contract resolves an unfiltered (or L/clear)
+    Bayer frame to; its narrowband band ("OSC-Ha+OIII") -> "DUO", because a
+    Bayer frame behind a dual-band filter resolves to the filter, "DUO", and
+    an undeclared one is quarantined (`filter_not_in_project`; T706, until
+    then "OSC", which declared nothing that frame resolves to). A filter
+    passing two lines at once ("Ha+OIII", "Dual") -> "DUO"; a name the
+    contract has no word for is left out rather than invented. Whether Bayer
+    frames are taken at all is the policy's `osc_allowed`, not a filter.
     """
     found: list[str] = []
     for name in names:
@@ -79,7 +84,7 @@ def contract_filters(names: Iterable[str]) -> list[str]:
         if text in _CHANNEL:
             mapped = _CHANNEL[text]
         elif key.startswith("OSC"):
-            mapped = "OSC"
+            mapped = "DUO" if "+" in text else "OSC"
         elif "+" in text or key in ("DUAL", "DUO"):
             mapped = "DUO"
         elif key in CANONICAL_FILTERS:

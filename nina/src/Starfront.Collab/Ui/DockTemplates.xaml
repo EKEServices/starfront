@@ -216,11 +216,13 @@
                             <TextBlock Margin="6,0,0,0" VerticalAlignment="Center" Text="Collect the lights on the server" ToolTip="Everyone on it sends their lights, flats, darks and bias to the server's files page, sorted by collaboration and person, for you to stack. Off, the ledger records what was shot and the files stay with whoever shot them." />
                         </StackPanel>
 
-                        <TextBlock Margin="0,8,0,2" Text="Rapid Stacker Collab join code (optional)" />
-                        <TextBox
-                            Text="{Binding StackingJoinCode, UpdateSourceTrigger=PropertyChanged}"
-                            ToolTip="The code from the stacking project's page on Rapid Stacker Collab, like H4RT-92BK-WNPC. Every telescope on this collaboration with Live stacking turned on joins that project, and its lights are stacked as they land. Only telescopes on the collaboration are given the code. Leave it blank for none." />
-                        <TextBlock Margin="0,2,0,0" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Text="Stacks everyone's lights as they land. Make the project on Rapid Stacker Collab first, then paste its join code here." />
+                        <StackPanel Visibility="{Binding ShowJoinCode, Converter={StaticResource Starfront_Dock_ShowWhenTrue}}">
+                            <TextBlock Margin="0,8,0,2" Text="Rapid Stacker Collab join code (pasted before; kept)" />
+                            <TextBox
+                                Text="{Binding StackingJoinCode, UpdateSourceTrigger=PropertyChanged}"
+                                ToolTip="The code this collaboration was given before Starfront made stacking projects itself. It keeps working; clear it to stop stacking there. A different code is refused." />
+                        </StackPanel>
+                        <TextBlock Margin="0,8,0,0" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Text="Live stacking follows the collaboration: Starfront stacks it on your hub, or makes and keeps the Rapid Stacker Collab project itself once your Collab account is linked. Turn it off or choose another in Starfront's Collab tab." />
 
                         <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
                             <Button Padding="12,3" Command="{Binding StartCommand}" Content="{Binding SubmitLabel}" />
