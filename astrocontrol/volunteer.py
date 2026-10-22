@@ -51,12 +51,13 @@ Why each piece exists:
     back.  (`collab-worker self-update` can also do this by itself.)
   * **Settings reach the worker through its TOML.**  The CLI's `enrol` has no
     flags for them, so after `enrol` this module sets `busy_file`,
-    `idle_policy`, `work_window`, `scratch_dir` and `scratch_cap_gb` in
-    `collab-worker.toml` in the config dir (`<data_root>/collab-worker/config`
-    - the key is the variable's name without `COLLAB_`, lower-cased).
-    `busy_file` is `<data_root>/collab-worker/busy` (touched by the sequencer)
-    only while "pause while sequencing" is on.  "Pause while N.I.N.A. runs"
-    has no setting in the worker yet; it is stored but not applied.
+    `idle_policy`, `work_window`, `scratch_dir`, `scratch_cap_gb` and
+    `pause_while_nina` (a TOML bool) in `collab-worker.toml` in the config dir
+    (`<data_root>/collab-worker/config` - the key is the variable's name
+    without `COLLAB_`, lower-cased).  `busy_file` is
+    `<data_root>/collab-worker/busy` (touched by the sequencer) only while
+    "pause while sequencing" is on.  `pause_while_nina` is the worker's
+    "pause while N.I.N.A. runs" gate (T206).
   * **Nothing blocks a handler.**  Install, update, uninstall, start, stop
     and status run on one worker thread each; progress is a small state dict
     the routes and the live snapshot read under a lock.
@@ -106,7 +107,8 @@ _CODE_RE = re.compile(r"^[A-Za-z0-9-]{1,32}$")
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$")
 
 #: Settings the worker's TOML carries, as (toml key, how to take it).
-WORKER_KEYS = ("busy_file", "idle_policy", "work_window", "scratch_dir", "scratch_cap_gb")
+WORKER_KEYS = ("busy_file", "idle_policy", "work_window", "scratch_dir", "scratch_cap_gb",
+               "pause_while_nina")
 
 
 class VolunteerError(CollabError):
@@ -663,6 +665,7 @@ class Volunteer:
             "work_window": str(self._setting("workWindow") or "") or None,
             "scratch_dir": str(self._setting("scratchDir") or "") or None,
             "scratch_cap_gb": cap if cap > 0 else None,
+            "pause_while_nina": bool(self._setting("pauseWhileNina", True)),
         })
         if busy:
             self.busy_file().parent.mkdir(parents=True, exist_ok=True)

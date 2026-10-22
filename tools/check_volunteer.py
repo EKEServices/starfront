@@ -13,7 +13,8 @@ its argv.
     server is never even asked for the archive.
   * A good signature installs: the hub's manifest is tried first, the archive
     is checked, `enrol` and `service install` are run with the right argv,
-    and the worker's TOML carries the busy file and the idle policy.
+    and the worker's TOML carries the busy file, the idle policy and
+    `pause_while_nina` as a TOML bool, both on install and when saved.
   * A bad signature, a wrong SHA-256, a size mismatch (larger and smaller),
     a downgrade, and path-traversal / link archives are each refused, nothing
     is installed, and the fake worker is never run.
@@ -302,6 +303,25 @@ cfg.update("volunteer", {"pauseWhileSequencing": False})
 vol.apply_settings()
 case("turning off pause-while-sequencing removes busy_file",
      "busy_file" not in tomllib.loads(vol.toml_path().read_text()))
+
+# pause while N.I.N.A. runs: the worker reads a TOML bool (T206), never a string
+cfg.update("volunteer", {"pauseWhileNina": True})
+vol.install_blocking(code="ABCD-1234", hub_url=fake.url, worker_id="mac-mini")
+data = tomllib.loads(vol.toml_path().read_text())
+case("an install with pauseWhileNina on writes pause_while_nina = true",
+     "pause_while_nina = true" in vol.toml_path().read_text().splitlines()
+     and data.get("pause_while_nina") is True, vol.toml_path().read_text())
+cfg.update("volunteer", {"pauseWhileNina": False})
+vol.apply_settings()                                    # what the settings save does
+data = tomllib.loads(vol.toml_path().read_text())
+case("saving with pauseWhileNina off writes pause_while_nina = false",
+     "pause_while_nina = false" in vol.toml_path().read_text().splitlines()
+     and data.get("pause_while_nina") is False, vol.toml_path().read_text())
+cfg.update("volunteer", {"pauseWhileNina": True})
+vol.apply_settings()
+data = tomllib.loads(vol.toml_path().read_text())
+case("saving it back on updates the same key, not a second copy",
+     data.get("pause_while_nina") is True and vol.toml_path().read_text().count("pause_while_nina") == 1)
 
 print("-- refusals")
 def attempt(name, text, publish, key=PUB, hub=True):
