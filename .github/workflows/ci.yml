@@ -1,10 +1,12 @@
+# Lives at the repository root because GitHub reads workflows only from
+# .github/workflows/. Every run step works in nina/, the plugin's folder.
 name: Build the N.I.N.A. plugin
 on:
   push:
     branches: ['**']
-    paths: ['nina/**']
+    paths: ['nina/**', '.github/workflows/ci.yml']
   pull_request:
-    paths: ['nina/**']
+    paths: ['nina/**', '.github/workflows/ci.yml']
 permissions:
   contents: read
 jobs:
