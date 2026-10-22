@@ -259,7 +259,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.3: the `stacking` block (cloud or hub, per D002 and D003), `stack_projects` minted on bind, contract policy defaults, `_stacking_of` for old payloads, the listing's `stacking` object with the grant under the join-code secrecy rule, old fields kept.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T404 — The front door: envelope, auth, projects, membership, rigs, header allow-list
+- [x] T404 — The front door: envelope, auth, projects, membership, rigs, header allow-list
       **Files:** SF `server/stack/{envelope,auth,projects,rigs,header}.py`, `server/app.py`, `tools/check_server.py`
       **Do:** §4.4: the Collab envelope with no 403 or 404; `sfg_` and cookie auth; resolve-join-code, project, join, membership, rigs (the contract's fingerprint example), `InitHeader`.
       **Verify:** `python3 tools/check_server.py`
