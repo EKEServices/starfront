@@ -184,7 +184,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §2.4: a `Gate` before each receive; `busy` from `COLLAB_BUSY_FILE`, a `NINA.exe` process check, or `COLLAB_WORK_WINDOW`; jobs in flight finish; the heartbeat reports why the worker is idle.
       **Verify:** `cd worker && cargo test -p collab-worker && cargo test -p collab-uploader`
 
-- [ ] T207 — `collab-worker service install|uninstall|start|stop|status`
+- [x] T207 — `collab-worker service install|uninstall|start|stop|status`
       **Files:** RSC `worker/crates/worker/src/service.rs`, `worker/scripts/launch-agent.sh`, `docs/runbooks/worker-daemon.md`
       **Do:** §2.5: LaunchAgent as the script writes it; `systemd --user` with `RestartPreventExitStatus=3`; Windows logon Scheduled Task by default, `--as-service` via `windows-service`; exit 3 is "do not restart" everywhere; self-update is T418.
       **Verify:** `cd worker && cargo test -p collab-worker --test cli && cargo clippy --workspace --all-targets -- -D warnings`
