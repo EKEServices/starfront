@@ -269,7 +269,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §4.4: init, resume, duplicate, part `PUT` at `/stack/s3/{upload_id}/{n}` written at offset, complete, list, get, withdraw; library frames per D001; 429 `quota_exceeded` below `KEEP_FREE`.
       **Verify:** `python3 tools/check_server.py`
 
-- [ ] T406 — The relay: frames for the hub, ranged bytes, ack, retention
+- [x] T406 — The relay: frames for the hub, ranged bytes, ack, retention
       **Files:** SF `server/hubs.py`, `server/files.py` (the `collectFiles` registration), `tools/check_server.py`
       **Do:** §4.2: list uploaded frames, `Range` bytes, ack, deletion after `STARFRONT_STACK_RELAY_KEEP_DAYS`, a `collectFiles` project's frames also on `/files`.
       **Verify:** `python3 tools/check_server.py`
