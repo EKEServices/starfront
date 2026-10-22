@@ -23,6 +23,7 @@ namespace Starfront.Collab.Tests {
             var type = targetMethod.ReturnType;
             if (type == typeof(Task)) return Task.CompletedTask;
             var result = type.GetGenericArguments()[0];
+            if (result == typeof(FrameInitResponse)) return Task.FromResult(new FrameInitResponse { FrameId = "f1" });
             return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(result).Invoke(null, new object[] { result.IsValueType ? Activator.CreateInstance(result) : null });
         }
     }

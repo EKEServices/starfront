@@ -381,7 +381,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §6.2: a client per (base, token source); project-scoped calls routed by project, rig and library calls by the default backend (D001), device calls to the cloud; Core untouched.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release && dotnet test tests/Starfront.Collab.Tests`
 
-- [ ] T603 — The LAN short-cut
+- [x] T603 — The LAN short-cut
       **Files:** SF `nina/src/Starfront.Collab/Services/Stacking/LanProbe.cs`, `StackingUploader.cs`, `nina/tests/Starfront.Collab.Tests/`
       **Do:** §6.2: probe `{HubLanUrl}/api/hub/v1/health` with the hub id check; the effective base per link; a frame finishes on the base it started on.
       **Verify:** `cd nina && dotnet test tests/Starfront.Collab.Tests`

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using RapidStackerCollab.Core.Api;
 
 namespace Starfront.Collab.Services.Stacking {
@@ -28,7 +29,15 @@ namespace Starfront.Collab.Services.Stacking {
     public sealed class RoutingApiClient : IApiClient {
         private readonly IStackingRoutes routes;
 
+        // A frame started on one base finishes on it: init records the client it went through and complete,
+        // get and withdraw for that frame use the same one even if the LAN short-cut switched in between.
+        // Not persisted: after a restart the queue item re-inits, which the server answers resumed or duplicate.
+        private readonly ConcurrentDictionary<(string Project, string Frame), IApiClient> pinned = new();
+
         public RoutingApiClient(IStackingRoutes routes) => this.routes = routes;
+
+        private IApiClient ForFrame(string project, string frameId) =>
+            !string.IsNullOrEmpty(frameId) && pinned.TryGetValue((project ?? "", frameId), out var client) ? client : ForProject(project);
 
         private IApiClient Cloud => routes.Cloud;
 
@@ -76,10 +85,21 @@ namespace Starfront.Collab.Services.Stacking {
         public Task<ProjectStatusDoc> GetProjectStatusAsync(string project, CancellationToken ct = default) => ForProject(project).GetProjectStatusAsync(project, ct);
         public Task<MosaicState> GetMosaicAsync(string project, CancellationToken ct = default) => ForProject(project).GetMosaicAsync(project, ct);
         public Task<MosaicState> PutClaimsAsync(string project, IReadOnlyList<string> panels, CancellationToken ct = default) => ForProject(project).PutClaimsAsync(project, panels, ct);
-        public Task<FrameInitResponse> InitFrameAsync(string project, FrameInitRequest request, CancellationToken ct = default) => ForProject(project).InitFrameAsync(project, request, ct);
-        public Task<FrameCompleteResponse> CompleteFrameAsync(string project, string frameId, IReadOnlyList<CompletedPart> etags, CancellationToken ct = default) => ForProject(project).CompleteFrameAsync(project, frameId, etags, ct);
+        public async Task<FrameInitResponse> InitFrameAsync(string project, FrameInitRequest request, CancellationToken ct = default) {
+            var client = ForProject(project);
+            var response = await client.InitFrameAsync(project, request, ct).ConfigureAwait(false);
+            if (pinned.Count > 1000) pinned.Clear(); // duplicates never complete; keep the map small
+            if (response != null && !string.IsNullOrEmpty(response.FrameId)) pinned[(project ?? "", response.FrameId)] = client;
+            return response;
+        }
+
+        public async Task<FrameCompleteResponse> CompleteFrameAsync(string project, string frameId, IReadOnlyList<CompletedPart> etags, CancellationToken ct = default) {
+            var response = await ForFrame(project, frameId).CompleteFrameAsync(project, frameId, etags, ct).ConfigureAwait(false);
+            pinned.TryRemove((project ?? "", frameId ?? ""), out _);
+            return response;
+        }
         public Task<FrameListResponse> ListFramesAsync(string project, FrameListQuery query = null, CancellationToken ct = default) => ForProject(project).ListFramesAsync(project, query, ct);
-        public Task<Frame> GetFrameAsync(string project, string frameId, CancellationToken ct = default) => ForProject(project).GetFrameAsync(project, frameId, ct);
-        public Task<WithdrawResponse> WithdrawFrameAsync(string project, string frameId, CancellationToken ct = default) => ForProject(project).WithdrawFrameAsync(project, frameId, ct);
+        public Task<Frame> GetFrameAsync(string project, string frameId, CancellationToken ct = default) => ForFrame(project, frameId).GetFrameAsync(project, frameId, ct);
+        public Task<WithdrawResponse> WithdrawFrameAsync(string project, string frameId, CancellationToken ct = default) => ForFrame(project, frameId).WithdrawFrameAsync(project, frameId, ct);
     }
 }

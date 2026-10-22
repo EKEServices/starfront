@@ -298,6 +298,8 @@ namespace Starfront.Collab.Services.Stacking {
             var token = cts?.Token ?? CancellationToken.None;
             try {
                 await Joiner.ReconcileAsync(session.Projects, token).ConfigureAwait(false);
+                var lanClients = clients;
+                if (lanClients != null) await lanClients.Lan.CheckAsync(Links.All(), token).ConfigureAwait(false);
             } catch (OperationCanceledException) {
             } catch (Exception ex) {
                 Logger.Error("Starfront stacking: the links could not be brought up to date", ex);
