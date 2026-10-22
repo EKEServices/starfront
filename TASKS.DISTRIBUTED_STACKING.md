@@ -115,7 +115,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §1.6: the `daemon/fake/mod.rs` semantics on SQLite: visibility, receipts, redrive at 5 to `-dlq`, delayed send, attributes, retention; a `Notify` per queue for long polls; the fake's queue tests ported.
       **Verify:** `cd worker && cargo test -p collab-hub --test queue`
 
-- [ ] T105 — `SqliteStore`: reads and the prepare transitions
+- [x] T105 — `SqliteStore`: reads and the prepare transitions
       **Files:** RSC `worker/crates/hub/src/store/`
       **Do:** §1.4: every read; T4, T4b, T4c, T4d, T13, T16; `set_photometric_anchor_if_absent`; the `project_status` column kept in step.
       **Verify:** `cd worker && cargo test -p collab-hub store`
