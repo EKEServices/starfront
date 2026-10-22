@@ -31,12 +31,19 @@ namespace Starfront.Collab.Tests {
     internal sealed class FakeRoutes : IStackingRoutes {
         public List<StackingLink> Links = new();
         public string DefaultBackend { get; set; } = "cloud";
-        public IApiClient Cloud { get; } = FakeClient.Make("cloud");
+        public IApiClient Cloud { get; set; } = FakeClient.Make("cloud");
+        public string CloudRig = "";
+        public List<string> Refused = new();
         public Dictionary<string, IApiClient> PerLink = new();
 
         public StackingLink LinkOfProject(string project) => Links.FirstOrDefault(l => l.CollabProjectId == project);
         public IApiClient ForLink(StackingLink link) => PerLink.TryGetValue(link.StarfrontProjectId, out var c) ? c : Cloud;
         public StackingLink DefaultHubLink() => Links.FirstOrDefault(l => l.IsHub && l.Grant.Length > 0);
+        public string RigIdOf(StackingLink hubOrNull) => hubOrNull == null ? CloudRig : RigIds.OfHub(hubOrNull, Links);
+        public void HubRefused(StackingLink link) {
+            Refused.Add(link.StarfrontProjectId);
+            new GrantTokenStore(link.StarfrontProjectId, id => Links.FirstOrDefault(l => l.StarfrontProjectId == id), _ => { }).Clear();
+        }
         public StackingLink Add(string id, string collab, string backend, string grant = "") {
             var link = new StackingLink { StarfrontProjectId = id, CollabProjectId = collab, Backend = backend, Grant = grant, ApiBase = backend == "hub" ? "https://hub/" : "" };
             Links.Add(link);

@@ -29,9 +29,12 @@ namespace Starfront.Collab.Services.Stacking {
         private readonly SemaphoreSlim gate = new(1, 1);
         private FilterNormalizer normalizer;
         private readonly HubJoiner hub;
+        private readonly Func<IApiClient> cloud;
 
+        /// <param name="cloud">The cloud client itself: the cloud rig is made there whatever the default backend is.</param>
         /// <param name="forLink">The client a hub link talks through (its own base and grant); the router when omitted.</param>
-        public StackingJoiner(HostServices host, StarfrontSettings settings, StackingLinks links, Func<IApiClient> api, Func<StackingLink, IApiClient> forLink = null) {
+        public StackingJoiner(HostServices host, StarfrontSettings settings, StackingLinks links, Func<IApiClient> api, Func<StackingLink, IApiClient> forLink = null, Func<IApiClient> cloud = null) {
+            this.cloud = cloud ?? api;
             this.host = host;
             this.settings = settings;
             this.links = links;
@@ -43,7 +46,6 @@ namespace Starfront.Collab.Services.Stacking {
         private sealed class HubContext : IHubJoinContext {
             private readonly StackingJoiner owner;
             public HubContext(StackingJoiner owner) => this.owner = owner;
-            public string RigId { get => owner.settings.StackingRigId; set => owner.settings.StackingRigId = value; }
             public string WhatIsMissingForRig() => RigProfile.WhatIsMissing(owner.host, owner.settings);
             public RigUpsertRequest DescribeRig() => owner.DescribeRig();
             public IReadOnlyList<string> WheelFilterNames => RigProfile.FilterNames(owner.settings);
@@ -226,8 +228,8 @@ namespace Starfront.Collab.Services.Stacking {
                 if (rigId.Length == 0) {
                     var missing = RigProfile.WhatIsMissing(host, settings);
                     if (missing != null) return Hold(link, LinkStatus.NeedsRig, missing, AfterTransient);
-                    var saved = await client.UpsertRigAsync(DescribeRig()).ConfigureAwait(false);
-                    if (!saved.Confirmed) saved = await client.PatchRigAsync(saved.RigId, new RigPatchRequest { Confirmed = true }, ct).ConfigureAwait(false);
+                    var saved = await cloud().UpsertRigAsync(DescribeRig()).ConfigureAwait(false);
+                    if (!saved.Confirmed) saved = await cloud().PatchRigAsync(saved.RigId, new RigPatchRequest { Confirmed = true }, ct).ConfigureAwait(false);
                     rigId = saved.RigId;
                     settings.StackingRigId = rigId;
                     Logger.Info($"Starfront stacking: this telescope is rig {rigId} on Rapid Stacker Collab");

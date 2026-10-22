@@ -34,7 +34,6 @@ namespace Starfront.Collab.Tests {
     }
 
     internal sealed class FakeContext : IHubJoinContext {
-        public string RigId { get; set; } = "";
         public string Missing;
         public string WhatIsMissingForRig() => Missing;
         public RigUpsertRequest DescribeRig() => new() { Camera = "cam", Telescope = "scope" };
@@ -50,6 +49,7 @@ namespace Starfront.Collab.Tests {
         public Dictionary<string, StackingLink> Rows = new();
         public StackingLink Lookup(string id) => Rows.TryGetValue(id, out var l) ? l : null!;
         public void Upsert(StackingLink link) => Rows[link.StarfrontProjectId] = link;
+        public IReadOnlyList<StackingLink> All() => Rows.Values.ToList();
     }
 
     [TestFixture]
@@ -112,7 +112,7 @@ namespace Starfront.Collab.Tests {
             Assert.That(script.Calls, Is.EqualTo(new[] { "GetProjectAsync", "UpsertRigAsync", "JoinProjectAsync" }));
             Assert.That(script.Joins[0].DisplayName, Is.EqualTo("Ada"));
             Assert.That(script.Joins[0].AcceptedTermsVersion, Is.EqualTo("t1"));
-            Assert.That(context.RigId, Is.EqualTo("rig1"));
+            Assert.That(links.Lookup("s1")!.RigId, Is.EqualTo("rig1"), "the hub rig lives on the hub link; the cloud setting is not in reach");
         }
 
         [Test]
