@@ -53,9 +53,11 @@ namespace Starfront.Collab.Services.Stacking {
     public sealed class StackingIntake {
         private readonly UploadQueue queue;
         private readonly StarfrontSettings settings;
+        private readonly Func<string> rigId;
         private readonly TimeZoneInfo timeZone;
 
-        public StackingIntake(UploadQueue queue, StarfrontSettings settings, TimeZoneInfo timeZone) {
+        public StackingIntake(UploadQueue queue, StarfrontSettings settings, TimeZoneInfo timeZone, Func<string> rigId = null) {
+            this.rigId = rigId ?? (() => settings.StackingRigId);
             this.queue = queue;
             this.settings = settings;
             this.timeZone = timeZone;
@@ -142,7 +144,7 @@ namespace Starfront.Collab.Services.Stacking {
         }
 
         private string Rig() {
-            var rig = settings.StackingRigId;
+            var rig = rigId() ?? "";
             return rig.Length > 0 ? rig : null;
         }
 

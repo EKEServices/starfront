@@ -60,8 +60,12 @@ namespace Starfront.Collab.Services.Stacking {
             public string DefaultBackend => owner.settings.StackingDefaultBackend;
             public IApiClient Cloud => owner.CloudClient();
             public IApiClient ForLink(StackingLink link) => owner.For(link);
-            public StackingLink DefaultHubLink() =>
-                owner.links.All().FirstOrDefault(l => l.IsHub && l.Feeds && l.Grant.Length > 0 && l.ApiBase.Trim().Length > 0);
+            public StackingLink DefaultHubLink() => RigIds.DefaultHubLink(owner.links.All());
+            public string RigIdOf(StackingLink hubOrNull) => hubOrNull == null ? owner.settings.StackingRigId : RigIds.OfHub(hubOrNull, owner.links.All());
+            public void HubRefused(StackingLink link) {
+                new GrantTokenStore(link.StarfrontProjectId, owner.links.Lookup, owner.links.Upsert).Clear();
+                Logger.Info($"Starfront stacking: {link.StarfrontName}: the hub refused this telescope's grant; its uploads wait for the next check-in");
+            }
         }
 
         /// <summary>The LAN short-cut: which hub links answer on their own network right now.</summary>

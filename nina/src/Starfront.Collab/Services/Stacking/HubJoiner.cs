@@ -9,8 +9,6 @@ namespace Starfront.Collab.Services.Stacking {
 
     /// <summary>What the hub join needs to know about this PC, apart from the links: settings and the profile, behind a seam so the join can be tested without N.I.N.A.</summary>
     public interface IHubJoinContext {
-        /// <summary>The rig id kept in the settings; blank until one was made.</summary>
-        string RigId { get; set; }
         /// <summary>What stops the rig being described (camera never connected, no focal length), or null when it can be.</summary>
         string WhatIsMissingForRig();
         RigUpsertRequest DescribeRig();
@@ -27,6 +25,7 @@ namespace Starfront.Collab.Services.Stacking {
     public interface IHubLinkStore {
         StackingLink Lookup(string starfrontProjectId);
         void Upsert(StackingLink link);
+        IReadOnlyList<StackingLink> All();
     }
 
     /// <summary>Which joiner path a listing takes at a check-in, and whether the Rapid Stacker Collab sign-in stands in its way.</summary>
@@ -95,7 +94,11 @@ namespace Starfront.Collab.Services.Stacking {
         public async Task SyncAsync(ProjectListing listing, StackingBinding binding, CancellationToken ct) {
             var link = links.Lookup(listing.Id);
             var fresh = link == null || !link.IsHub || link.CollabProjectId != binding.CollabProjectId || link.HubId != binding.HubId;
-            if (fresh) link = new StackingLink { StarfrontProjectId = listing.Id, Backend = StackingBinding.Hub, Message = "joining" };
+            if (fresh) {
+                // A rebound collaboration is a new link, but the telescope is still the same rig on the same hub.
+                var rig = link != null && link.IsHub && link.HubId == binding.HubId ? link.RigId : "";
+                link = new StackingLink { StarfrontProjectId = listing.Id, Backend = StackingBinding.Hub, Message = "joining", RigId = rig };
+            }
             var expires = HubGrants.ExpiresUtc(binding.Grant);
             var lan = binding.HubLanUrl ?? "";
             var name = string.IsNullOrEmpty(listing.Name) ? link.StarfrontName : listing.Name;
@@ -138,17 +141,18 @@ namespace Starfront.Collab.Services.Stacking {
                     return;
                 }
 
-                var rigId = context.RigId;
+                // The hub's rig id lives on the hub side (this link, or a sibling on the same hub); the cloud's setting is never read or written here.
+                var rigId = RigIds.OfHub(link, links.All());
                 if (string.IsNullOrEmpty(rigId)) {
                     var missing = context.WhatIsMissingForRig();
                     if (missing != null) { Hold(link, LinkStatus.NeedsRig, missing, AfterTransient); return; }
                     var saved = await client.UpsertRigAsync(context.DescribeRig(), ct).ConfigureAwait(false);
                     if (!saved.Confirmed) saved = await client.PatchRigAsync(saved.RigId, new RigPatchRequest { Confirmed = true }, ct).ConfigureAwait(false);
                     rigId = saved.RigId;
-                    context.RigId = rigId;
                     log($"Starfront stacking: this telescope is rig {rigId} on {link.HubId}");
                 }
                 link.RigId = rigId;
+                links.Upsert(link);
 
                 var mapping = StackingMapping.Build(context.WheelFilterNames, project.Filters, context.Colour, context.FilterMap, context.Normalizer);
                 if (mapping.AllSkipped) { Hold(link, LinkStatus.NoFilters, mapping.Summary, AfterNoFilters); return; }

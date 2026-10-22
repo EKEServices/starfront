@@ -61,7 +61,7 @@ namespace Starfront.Collab.Services.Stacking {
             Links = new StackingLinks(Path.Combine(settings.DataFolder, "stacking", "links.json"));
             Imaging = new ImagingStateTracker();
             SignIn = new StackingSignIn(settings, () => Api);
-            Joiner = new StackingJoiner(host, settings, Links, () => Api, link => EnsureClients().For(link));
+            Joiner = new StackingJoiner(host, settings, Links, () => Api, link => EnsureClients().For(link), () => EnsureClients().Cloud);
             Joiner.AuthRequired += (_, _) => OnAuthRequired();
             SignIn.Changed += OnSignInChanged;
             Links.Changed += (_, _) => RaiseChanged();
@@ -171,13 +171,13 @@ namespace Starfront.Collab.Services.Stacking {
                     runner.OnProgress = (item, progress) => { Current = (item, progress); RaiseChanged(); };
                     runner.OnItemFinished = OnItemFinished;
                     runner.OnAuthRequired = OnAuthRequired;
-                    intake = new StackingIntake(queue, settings, TimeZoneInfo.Local);
+                    intake = new StackingIntake(queue, settings, TimeZoneInfo.Local, LocalRigKey);
                     intake.Enqueued += _ => runner.Wake();
-                    flats = new StackingFlats(queue, new FlatProjects(this), () => settings.StackingRigId, SystemClock.Instance, TimeZoneInfo.Local,
+                    flats = new StackingFlats(queue, new FlatProjects(this), LocalRigKey, SystemClock.Instance, TimeZoneInfo.Local,
                                               message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
                     intake.Enqueued += flats.OnLightEnqueued;
                     flats.Enqueued += _ => runner.Wake();
-                    library = new StackingLibrary(() => Api, queue, new LibrarySettings(settings), SystemClock.Instance, () => LibraryReachable, TempDirectory,
+                    library = new StackingLibrary(() => Api, queue, new LibrarySettings(settings, LibraryRigId), SystemClock.Instance, () => LibraryReachable, TempDirectory,
                                                   message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
                     library.Queued += runner.Wake;
                     library.Changed += RaiseChanged;
@@ -304,6 +304,9 @@ namespace Starfront.Collab.Services.Stacking {
             var token = cts?.Token ?? CancellationToken.None;
             try {
                 await Joiner.ReconcileAsync(session.Projects, token).ConfigureAwait(false);
+                // The check-in brought fresh grants: hub projects paused for a refused grant go again.
+                var q = queue;
+                if (q != null && HubAuth.ResumeRefreshed(q, Links.ByCollabProject) > 0) runner?.Wake();
                 var lanClients = clients;
                 if (lanClients != null) await lanClients.Lan.CheckAsync(Links.All(), token).ConfigureAwait(false);
             } catch (OperationCanceledException) {
@@ -323,6 +326,13 @@ namespace Starfront.Collab.Services.Stacking {
             RaiseChanged();
         }
 
+        /// <summary>The rig id of the backend that carries rig- and library-scoped calls (decision D001): a hub link's when the default is the hub, else the cloud's. Blank when it has none.</summary>
+        private string LibraryRigId() => RigIds.ForDefaultBackend(settings.StackingDefaultBackend, settings.StackingRigId, Links.All());
+
+        /// <summary>The key lights and flats are grouped under, so a hub-only telescope has one too.</summary>
+        private string LocalRigKey() => RigIds.LocalKey(settings.StackingDefaultBackend, settings.StackingRigId, Links.All());
+
+        /// <summary>Only the cloud sign-in lands here: a hub's refusal never reaches the runner as one (the router makes it a project pause).</summary>
         private void OnAuthRequired() {
             SignIn.MarkAuthRequired();
             RaiseChanged();
@@ -408,7 +418,7 @@ namespace Starfront.Collab.Services.Stacking {
 
         /// <summary>The switches the intake follows; the library needs the rig.</summary>
         private IntakeOptions Options() =>
-            new(settings.StackingUploadFlats, settings.StackingLibraryLive && settings.StackingRigId.Length > 0, settings.StackingIncludeCalibration);
+            new(settings.StackingUploadFlats, settings.StackingLibraryLive && LibraryRigId().Length > 0, settings.StackingIncludeCalibration);
 
         /// <summary>
         /// Once a minute: flats whose wait for lights is over take the
@@ -549,9 +559,11 @@ namespace Starfront.Collab.Services.Stacking {
         private sealed class LibrarySettings : ILibrarySettings {
             private readonly StarfrontSettings settings;
 
-            public LibrarySettings(StarfrontSettings settings) => this.settings = settings;
+            private readonly Func<string> rigId;
 
-            public string RigId => settings.StackingRigId;
+            public LibrarySettings(StarfrontSettings settings, Func<string> rigId) { this.settings = settings; this.rigId = rigId; }
+
+            public string RigId => rigId();
             public string LibraryFolder => settings.StackingLibraryFolder;
             public int LibrarySyncHours => settings.StackingLibrarySyncHours;
             public bool LibraryPreferRaw => settings.StackingLibraryPreferRaw;

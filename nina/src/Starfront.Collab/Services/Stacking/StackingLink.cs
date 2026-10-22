@@ -17,6 +17,8 @@ namespace Starfront.Collab.Services.Stacking {
         public const string NoFilters = "no_filters";
         /// <summary>The join did not go through; the message says why and when it is tried again.</summary>
         public const string Failed = "failed";
+        /// <summary>A hub refused the grant: lights are still queued (held by the project pause) and go once the next check-in brings a new grant.</summary>
+        public const string GrantRefresh = "grant_refresh";
     }
 
     /// <summary>One Starfront collaboration's link to the Rapid Stacker Collab project that stacks its lights.</summary>
@@ -63,7 +65,7 @@ namespace Starfront.Collab.Services.Stacking {
 
         [JsonIgnore] public bool IsHub => string.Equals(Backend, "hub", StringComparison.OrdinalIgnoreCase);
         [JsonIgnore] public bool Active => Status == LinkStatus.Active && CollabProjectId.Length > 0;
-        [JsonIgnore] public bool Feeds => CollabProjectId.Length > 0 && Status is LinkStatus.Active or LinkStatus.Pending;
+        [JsonIgnore] public bool Feeds => CollabProjectId.Length > 0 && Status is LinkStatus.Active or LinkStatus.Pending or LinkStatus.GrantRefresh;
 
         /// <summary>Whether the project takes calibration frames at all.</summary>
         [JsonIgnore] public bool TakesCalibration => !string.Equals(Calibration, "none", StringComparison.OrdinalIgnoreCase);
@@ -84,6 +86,7 @@ namespace Starfront.Collab.Services.Stacking {
         public string Describe() => Status switch {
             LinkStatus.Active => $"Joined {CollabName}",
             LinkStatus.Pending => $"Joined {CollabName}; waiting for its owner to approve",
+            LinkStatus.GrantRefresh => $"Waiting for a new grant from Starfront for {CollabName}; frames are kept and sent when it arrives",
             LinkStatus.TermsOutdated => $"The terms of {CollabName} changed; accept them to carry on",
             LinkStatus.NeedsRig => "Not joined yet: " + Message,
             LinkStatus.NoFilters => $"Not joined: none of this wheel's filters is one {CollabName} wants",

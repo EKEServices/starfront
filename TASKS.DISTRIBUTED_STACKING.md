@@ -396,7 +396,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §6.4, §6.5: the "Hub projects" checklist section; "Local differences: none" with the two upstream candidates; a draft changelog entry (the version number and release are the author's).
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release`
 
-- [ ] T607 — Hub authentication failures stay with the hub; one rig id per backend
+- [x] T607 — Hub authentication failures stay with the hub; one rig id per backend
       **Files:** SF `nina/src/Starfront.Collab/Services/Stacking/{StackingUploader,RoutingApiClient,HubJoiner,StackingLink}.cs`, `nina/src/Starfront.Collab/Settings/StarfrontSettings.cs`, `nina/tests/Starfront.Collab.Tests/`
       **Do:** found in T604. (1) A 401 from a hub during an upload reaches Core's `UploadRunner.OnAuthRequired` and marks the cloud sign-in required, which stops every upload. Make the router or `StackingUploader.OnAuthRequired` tell a hub 401 from a cloud one: a hub 401 clears that link's grant (`GrantTokenStore.Clear()`), pauses only that link's items until the next check-in brings a fresh grant, and never touches the cloud sign-in. Core stays verbatim. (2) D001 (one library per backend): the hub path stores its rig id in the shared `StackingRigId` and overwrites the cloud rig. Keep a rig id per backend (cloud: the existing per-profile setting; each hub: on the link or a per-hub map), and route rig-scoped calls with the matching id.
       **Done when:** a hub 401 mid-upload leaves cloud uploads running and the hub link recovers at the next check-in; cloud and hub rig ids no longer overwrite each other.
