@@ -516,6 +516,15 @@ HUB.cursor = got["seq"]
 status, got = HUB.pull()
 case("...and a second pull from the cursor is empty", status == 200 and got["changes"] == [])
 
+status, got, _ = HUB.api("POST", "/records/batch", {"member": [r["key"].split("/") for r in rows if r["kind"] == "member"],
+                                                   "rig": [r["key"].split("/") for r in rows if r["kind"] == "rig"]})
+case("the hub turns the member and rig rows into full records, with the real display name",
+     status == 200 and [m.get("display_name") for m in got.get("member", [])] == ["Alice"] and not got.get("missing")
+     and [r.get("rig_id") for r in got.get("rig", [])] == [RIG] and "1001" not in json.dumps(got) and ALICE not in json.dumps(got),
+     str(got)[:200])
+status, got, _ = HUB.api("GET", f"/records/member/{PID}/{COLLAB_ALICE}")
+case("...and a single member read says the same", status == 200 and got.get("display_name") == "Alice" and got.get("status") == "active", str(got)[:160])
+
 status, listed = HUB.uploaded()
 frames = listed.get("frames", [])
 rec = frames[0] if frames else {}

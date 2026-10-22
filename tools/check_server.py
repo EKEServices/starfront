@@ -4038,6 +4038,88 @@ notify_module.drain()
 quiet = server_app.store._one("SELECT COUNT(*) AS n FROM stack_notified WHERE project_id = 'prj_nohook'")
 case("a collaboration with no webhook posts nothing and claims nothing", len(POSTS) == 3 and quiet["n"] == 0)
 
+# ------------------------------------------- live stacking: hub records
+# The full member and rig rows a hub reads for the keys in its feed
+# (server/stack/records.py), and the removal that reaches it.
+print("\n-- live stacking: hub records --")
+LEAVER_RIG, LEAVER_ID = enrol("records leaver", 389.0, 9576, 6388, 6.0)
+status, leaver_join = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=LEAVER_RIG)
+LEAVER_GRANT = project_in_listing(LEAVER_RIG, HUBP)["stacking"]["grant"]
+status, got = front("GET", f"/projects/{FD_ID}", token=LEAVER_GRANT)
+terms_now = got["project"]["terms_version"]
+status, got = front("POST", f"/projects/{FD_ID}/join", {"display_name": "Leaver", "accepted_terms_version": terms_now,
+                    "filter_mapping": [{"raw": "Ha 7nm", "canonical": "HA"}], "code": FD_CODE.lower()}, token=LEAVER_GRANT)
+LEAVER_UID = (got.get("membership") or {}).get("user_id", "")
+status, got = front("POST", "/rigs", {"camera": "ASI294MC", "telescope": "RedCat 51", "focal_length_mm": 250,
+                    "pixel_size_um": 4.63, "binning": 1, "bayer_pattern": "RGGB"}, token=LEAVER_GRANT)
+LEAVER_RIGID = (got.get("rig") or {}).get("rig_id", "")
+case("setup: a second member with a rig, joined on the hub's project", bool(LEAVER_UID and LEAVER_RIGID), str(got)[:160])
+
+REC = f"/api/v1/hubs/{BH}/records"
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)
+case("a hub reads a member record: collab id, display name, role, status, mapping, terms, joined_at",
+     status == 200 and got.get("user_id") == LEAVER_UID and got.get("display_name") == "Leaver"
+     and got.get("role") == "contributor" and got.get("status") == "active"
+     and got.get("filter_mapping") == [{"raw": "Ha 7nm", "canonical": "HA"}]
+     and got.get("accepted_terms_version") == terms_now and got.get("joined_at"), f"{status} {got}")
+status, got = call("GET", f"{REC}/member/{FD_ID}/no-such-user", token=BHTOK)
+case("an unknown member is 404 with a plain detail", status == 404 and set(got) == {"detail"}, f"{status} {got}")
+status, got = call("GET", f"{REC}/member/prj_unbound00000000000/{LEAVER_UID}", token=BHTOK)
+case("a project that is not this hub's is 404", status == 404, f"{status} {got}")
+status, got = call("GET", f"/api/v1/hubs/{BHB}/records/member/{FD_ID}/{LEAVER_UID}", token=BHBTOK)
+case("another hub's token reads nothing of this hub's members", status == 404, f"{status} {got}")
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHBTOK)
+case("...and is refused on this hub's path", status == 401, f"{status} {got}")
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}")
+case("no token is 401", status == 401, f"{status}")
+
+status, got = call("GET", f"{REC}/rig/{LEAVER_UID}/{LEAVER_RIGID}", token=BHTOK)
+case("a hub reads a member's rig",
+     status == 200 and got.get("rig_id") == LEAVER_RIGID and got.get("user_id") == LEAVER_UID
+     and got.get("camera") == "ASI294MC" and got.get("osc") is True and got.get("bayer_pattern") == "RGGB", f"{status} {got}")
+status, got = call("GET", f"/api/v1/hubs/{BHB}/records/rig/{LEAVER_UID}/{LEAVER_RIGID}", token=BHBTOK)
+case("another hub cannot read it", status == 404, f"{status} {got}")
+STRANGER = "00000000-0000-4000-8000-000000000001"
+server_app.store._run("INSERT INTO stack_rigs (user_id, rig_id, doc) VALUES (?, 'rig_000000000000', ?)",
+                      STRANGER, json.dumps({"rig_id": "rig_000000000000", "name": "x", "camera": "c", "telescope": "t",
+                                            "focal_length_mm": 1, "pixel_size_um": 1, "binning": 1, "created_at": "2026-01-01T00:00:00.000Z"}))
+status, got = call("GET", f"{REC}/rig/{STRANGER}/rig_000000000000", token=BHTOK)
+case("a rig whose owner is no member of the hub's projects is 404", status == 404, f"{status} {got}")
+
+status, got = call("POST", f"{REC}/batch", {"member": [[FD_ID, LEAVER_UID], [FD_ID, "nope"], ["prj_unbound00000000000", LEAVER_UID]],
+                                            "rig": [[LEAVER_UID, LEAVER_RIGID], [STRANGER, "rig_000000000000"]]}, token=BHTOK)
+case("the batch answers what it can and lists the rest as missing",
+     status == 200 and [m["user_id"] for m in got.get("member", [])] == [LEAVER_UID]
+     and [r["rig_id"] for r in got.get("rig", [])] == [LEAVER_RIGID] and len(got.get("missing", [])) == 3
+     and {"kind": "member", "key": f"{FD_ID}/nope"} in got["missing"], f"{status} {got}")
+status, got = call("POST", f"{REC}/batch", {"member": [[FD_ID, f"u{i}"] for i in range(201)]}, token=BHTOK)
+case("a batch over 200 keys is 400", status == 400 and set(got) == {"detail"}, f"{status} {str(got)[:100]}")
+status, got = call("POST", f"{REC}/batch", {"member": [["only-one"]]}, token=BHTOK)
+case("a malformed batch is 400", status == 400, f"{status}")
+status, got = call("POST", f"{REC}/batch", {"member": []}, token=BHBTOK)
+case("a batch with another hub's token is 401", status == 401, f"{status}")
+
+bodies = json.dumps([call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)[1],
+                     call("GET", f"{REC}/rig/{LEAVER_UID}/{LEAVER_RIGID}", token=BHTOK)[1],
+                     call("POST", f"{REC}/batch", {"member": [[FD_ID, LEAVER_UID]], "rig": [[LEAVER_UID, LEAVER_RIGID]]}, token=BHTOK)[1]])
+case("no Starfront or Discord id appears in any record body",
+     LEAVER_ID not in bodies and not any(sid in bodies for sid in ("1002", JOINED_ID)), "")
+
+before = feed_since(0)["seq"]
+task = (leaver_join.get("task") or {})
+status, _ = call("POST", f"/api/v1/agent/task/{task.get('id')}", {"state": "declined"}, token=LEAVER_RIG)
+rows = [r for r in feed_since(before)["changes"] if r["kind"] == "member"]
+case("a telescope leaving the collaboration appends a member feed row", status == 200
+     and [r["key"] for r in rows] == [f"{FD_ID}/{LEAVER_UID}"], f"{status} {rows}")
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)
+case("...and the record answers status removed, still with the real name",
+     status == 200 and got.get("status") == "removed" and got.get("display_name") == "Leaver" and got.get("removed_at"), f"{status} {got}")
+status, got = call("GET", f"{REC}/rig/{LEAVER_UID}/{LEAVER_RIGID}", token=BHTOK)
+case("...and its rig is no longer the hub's to read", status == 404, f"{status} {got}")
+before = feed_since(0)["seq"]
+status, _ = call("POST", f"/api/v1/agent/task/{task.get('id')}", {"state": "declined"}, token=LEAVER_RIG)
+case("declining again changes nothing", status == 200 and not [r for r in feed_since(before)["changes"] if r["kind"] == "member"])
+
 # ------------------------------------------- live stacking: push
 print("\n-- live stacking: push --")
 import io as _io                                                   # noqa: E402
