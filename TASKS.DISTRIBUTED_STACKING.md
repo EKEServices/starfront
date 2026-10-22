@@ -325,7 +325,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §0.4: register credentials, heartbeat, the change-feed pull into `SqliteStore`, frame fetch with `Range` and ack, push on publish, grant verification, `identities`; a fake Starfront server in the tests.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T416 — `check-contract.mjs`: the Starfront front-door component (RSC)
+- [x] T416 — `check-contract.mjs`: the Starfront front-door component (RSC)
       **Files:** RSC `scripts/lib/starfront.mjs`, `scripts/check-contract.mjs`
       **Do:** §9.1: read `server/stack/*.py` routes and codes from the sibling `../../starfront` checkout and hold them to the hub profile; skipped with a note when the checkout is absent.
       **Verify:** `node scripts/check-contract.mjs`
