@@ -27,7 +27,7 @@ Source plan: `STARFRONT_DISTRIBUTED_STACKING_PLAN.md` (section numbers below ref
 | 1 | T101–T111 | the hub core (RSC) |
 | 2 | T201–T208 | worker changes (RSC) |
 | 3 | T301–T310 | the hub as a standalone backend (RSC) |
-| 4 | T401–T417 | the Starfront server (SF, plus three RSC tasks) |
+| 4 | T401–T418 | the Starfront server (SF, plus three RSC tasks) |
 | 5 | T501–T507 | the Starfront desktop (SF) |
 | 6 | T601–T606 | the N.I.N.A. plugin (SF) |
 | 7 | T701–T705 | local mode, docs, CI, the full night |
@@ -38,32 +38,39 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase D — decisions the author owes (§9.2)
 
-- [ ] D001 — Library frames with two backends: one library per backend (the plan's default) or fed from the user's `/files` darks
+- [x] D001 — Library frames with two backends: one library per backend (the plan's default) or fed from the user's `/files` darks
       **Manual:** decide before T405 and T602. Record the answer as an open point in RSC `docs/api/README.md` (T001 leaves a placeholder).
+      **Decided 2026-10-22:** One library per backend; the plugin's rig-scoped calls go to the backend the rig mostly uses (`StackingDefaultBackend`).
 
-- [ ] D002 — Who may bind a collaboration to a hub: the hub owner only, or coordinators on the hub's `allowedCoordinators` list (the plan)
+- [x] D002 — Who may bind a collaboration to a hub: the hub owner only, or coordinators on the hub's `allowedCoordinators` list (the plan)
       **Manual:** decide before T403.
+      **Decided 2026-10-22:** The hub owner plus the coordinators on the hub's `allowedCoordinators` list may bind a collaboration to it.
 
-- [ ] D003 — Visibility default for hub projects: `unlisted` (the plan) or `public`
+- [x] D003 — Visibility default for hub projects: `unlisted` (the plan) or `public`
       **Manual:** decide before T403.
+      **Decided 2026-10-22:** Hub projects are `unlisted` by default.
 
-- [ ] D004 — What closing or deleting a hub-backed collaboration does (keep masters? return raw to contributors? the 7-day delay?)
+- [x] D004 — What closing or deleting a hub-backed collaboration does (keep masters? return raw to contributors? the 7-day delay?)
       **Manual:** decide before T704.
+      **Decided 2026-10-22:** Deleting files a 7-day restorable delayed deletion on the hub, then purges raw subs and the relay copy; final masters and `status.json` are kept (hub backup and the site's project page) until the owner removes them.
 
-- [ ] D005 — `collab-worker self-update` for headless Mac and Linux volunteers in v1, or re-running the install
+- [x] D005 — `collab-worker self-update` for headless Mac and Linux volunteers in v1, or re-running the install
       **Manual:** decide before T207.
+      **Decided 2026-10-22:** Yes, and on every OS: `collab-worker self-update` on Windows as well as macOS and Linux (task T418).
 
-- [ ] D006 — TLS on the LAN: off by default (the plan) or on with a pinned self-signed certificate from day one
+- [x] D006 — TLS on the LAN: off by default (the plan) or on with a pinned self-signed certificate from day one
       **Manual:** decide before T102.
+      **Decided 2026-10-22:** TLS off by default on the LAN; `--tls` with a pinned self-signed certificate is optional.
 
-- [ ] D007 — The ported pages: relicensed MPL-2.0 inside Starfront, or kept under `server/web/stack/` with their own notice
+- [x] D007 — The ported pages: relicensed MPL-2.0 inside Starfront, or kept under `server/web/stack/` with their own notice
       **Manual:** decide before T408.
+      **Decided 2026-10-22:** The ported pages are relicensed MPL-2.0 inside Starfront, with an attribution header naming their origin.
 
 ## Phase 0 — contract and scaffolding (RSC, §Phase 0)
 
 - [ ] T001 — Contract 1.27.0: the hub profile and open points 109–114
       **Files:** RSC `docs/api/openapi.yaml`, `docs/api/README.md`, `docs/api/hub-profile.json`, `docs/api/queues.md`, `docs/api/s3-layout.md`, `docs/api/status.schema.json`, `backend/lambdas/shared/contract.json`
-      **Do:** §0.A: the hub profile (operations a hub implements and does not); bearer kinds incl. `sfg_`; heartbeat `contract`/`catalogue`/`catalogue_path_ok`/`idle_policy`/`busy` and `min_contract`, 409 `contract_mismatch` (in `ErrorCode`, the plugin's `ApiCodes`); relative part URLs; the catalogue endpoint; "On the hub" in `queues.md` and `s3-layout.md`. Placeholders for D001. `info.version` 1.27.0, additive.
+      **Do:** §0.A: the hub profile (operations a hub implements and does not); bearer kinds incl. `sfg_`; heartbeat `contract`/`catalogue`/`catalogue_path_ok`/`idle_policy`/`busy` and `min_contract`, 409 `contract_mismatch` (in `ErrorCode`, the plugin's `ApiCodes`); relative part URLs; the catalogue endpoint; "On the hub" in `queues.md` and `s3-layout.md`. D001 recorded as an open point (one library per backend). `info.version` 1.27.0, additive.
       **Done when:** a hub can be built against the contract alone.
       **Verify:** `npx --yes @redocly/cli@latest lint docs/api/openapi.yaml && (cd backend && node scripts/gen-contract.js) && git diff --exit-code backend/lambdas/shared/contract.json && node scripts/check-contract.mjs`
 
@@ -179,7 +186,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 - [ ] T207 — `collab-worker service install|uninstall|start|stop|status`
       **Files:** RSC `worker/crates/worker/src/service.rs`, `worker/scripts/launch-agent.sh`, `docs/runbooks/worker-daemon.md`
-      **Do:** §2.5: LaunchAgent as the script writes it; `systemd --user` with `RestartPreventExitStatus=3`; Windows logon Scheduled Task by default, `--as-service` via `windows-service`; exit 3 is "do not restart" everywhere; self-update per D005.
+      **Do:** §2.5: LaunchAgent as the script writes it; `systemd --user` with `RestartPreventExitStatus=3`; Windows logon Scheduled Task by default, `--as-service` via `windows-service`; exit 3 is "do not restart" everywhere; self-update is T418.
       **Verify:** `cd worker && cargo test -p collab-worker --test cli && cargo clippy --workspace --all-targets -- -D warnings`
 
 - [ ] T208 — Two real workers on the home network drain a hub
@@ -319,6 +326,12 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 - [ ] T417 — Server, hub and pages on the home network
       **Manual:** `run_local.py --lan` and `collab-hub run` on the Mac; register the hub; `collab-uploader` to `http://<mac>:8800/stack/api`; the hub pulls, stacks and pushes; `http://<mac>:8800/stack/p/<slug>` renders in a browser on the Windows PC.
+
+- [ ] T418 — `collab-worker self-update` on Windows, macOS and Linux (RSC)
+      **Files:** RSC `worker/crates/worker/src/self_update.rs`, `worker/crates/worker/src/main.rs`, `worker/crates/worker/src/service.rs`, `worker/crates/worker/Cargo.toml`, `worker/crates/worker/tests/`, `docs/runbooks/worker-daemon.md`
+      **Do:** D005: fetch `latest.json` and `latest.json.sig` from the hub's mirror, then the Starfront server; verify the Ed25519 signature against the embedded public key and the asset's SHA-256; refuse a lower or equal version and a contract below the hub's `min_contract`; unpack beside the running binary, swap by rename (on Windows rename the running `.exe` aside first, since it is locked), restart through the installed service or logon task; keep the previous binary for one rollback (`self-update --rollback`). A `--check` mode only reports.
+      **Done when:** a bad signature, a bad hash and a downgrade are refused, and a good update swaps and restarts on all three OSes (Windows by test double for the task scheduler).
+      **Verify:** `cd worker && cargo test -p collab-worker --test self_update && cargo clippy -p collab-worker --all-targets -- -D warnings`
 
 ## Phase 5 — the Starfront desktop (SF, §Phase 5)
 
