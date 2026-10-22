@@ -223,6 +223,7 @@
                         </StackPanel>
                         <TextBlock Margin="0,6,0,0" Opacity="0.8" Text="{Binding SignIn.Status}" TextWrapping="Wrap" Visibility="{Binding SignIn.Status, Converter={StaticResource Starfront_ShowWhenSomething}}" />
                         <TextBlock Margin="0,4,0,0" Opacity="0.7" Text="{Binding SignIn.ExpiryText}" TextWrapping="Wrap" Visibility="{Binding SignIn.ExpiryText, Converter={StaticResource Starfront_ShowWhenSomething}}" />
+                        <TextBlock Margin="0,6,0,0" Opacity="0.7" Text="Hub projects need no Rapid Stacker Collab sign-in." TextWrapping="Wrap" />
 
                         <!--  When and how the uploads run.  -->
                         <TextBlock Margin="0,12,0,4" FontWeight="SemiBold" Text="Uploads" />
@@ -349,7 +350,7 @@
                                 <DataTemplate>
                                     <StackPanel Margin="0,4,0,6">
                                         <TextBlock>
-                                            <Run FontWeight="SemiBold" Text="{Binding Name, Mode=OneWay}" /><Run Text=" → " /><Run Text="{Binding Project, Mode=OneWay}" />
+                                            <Run FontWeight="SemiBold" Text="{Binding Name, Mode=OneWay}" /><Run Text=" → " /><Run Text="{Binding Project, Mode=OneWay}" /><Run Text="{Binding BackendText, Mode=OneWay, StringFormat=' ({0})'}" />
                                         </TextBlock>
                                         <TextBlock Opacity="0.85" Text="{Binding StatusText}" TextWrapping="Wrap" />
                                         <TextBlock Opacity="0.7" Text="{Binding MappingText}" TextWrapping="Wrap" Visibility="{Binding MappingText, Converter={StaticResource Starfront_ShowWhenSomething}}" />

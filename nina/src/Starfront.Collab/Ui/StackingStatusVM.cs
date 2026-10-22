@@ -127,12 +127,14 @@ namespace Starfront.Collab.Ui {
 
         private string HintText() {
             var signIn = stacking.SignIn;
-            if (!settings.StackingSignedIn) return "Sign in to Rapid Stacker Collab under Options > Plugins > Starfront to start sending.";
-            if (signIn.AuthRequired) return "Rapid Stacker Collab no longer accepts this sign-in; sign in again under Options > Plugins > Starfront.";
             var links = stacking.Links.All();
+            // Hub projects need no Rapid Stacker Collab sign-in: it is asked for only when a cloud link needs it, or nothing is linked yet.
+            var needsCloud = links.Any(l => !l.IsHub) || !links.Any(l => l.IsHub && l.Grant.Length > 0);
+            if (!settings.StackingSignedIn && needsCloud) return "Sign in to Rapid Stacker Collab under Options > Plugins > Starfront to start sending.";
+            if (settings.StackingSignedIn && signIn.AuthRequired) return "Rapid Stacker Collab no longer accepts this sign-in; sign in again under Options > Plugins > Starfront.";
             var terms = links.Where(l => l.Status == LinkStatus.TermsOutdated).Select(l => l.StarfrontName).ToList();
             if (terms.Count > 0) return $"The terms of {string.Join(", ", terms)} changed; accept them under Options > Plugins > Starfront.";
-            if (signIn.ExpiringSoon) return signIn.ExpiryText;
+            if (settings.StackingSignedIn && signIn.ExpiringSoon) return signIn.ExpiryText;
             if (links.Count == 0) return "None of your collaborations is linked to a stacking project yet; its coordinator adds the join code.";
             return "";
         }

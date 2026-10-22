@@ -156,9 +156,12 @@ namespace Starfront.Collab.Ui {
         public string Name => link.StarfrontName;
         public string Project => link.CollabName.Length > 0 ? link.CollabName : "not reached yet";
         public string StatusText => link.Describe();
+        /// <summary>Where the project is stacked: "Cloud" (Rapid Stacker Collab) or "Hub: name".</summary>
+        public string BackendText => !link.IsHub ? "Cloud"
+            : "Hub: " + (link.HubName.Length > 0 ? link.HubName : link.HubId.Length > 0 ? link.HubId : "unnamed");
         public string MappingText => link.Mapping.Count == 0 ? ""
             : "Filters: " + string.Join(", ", link.Mapping.Select(kv => kv.Value == StackingMapping.Skip ? $"{kv.Key} not sent" : $"{kv.Key} as {kv.Value}"))
-              + ". Change them on the Rapid Stacker Collab website.";
+              + (link.IsHub ? "." : ". Change them on the Rapid Stacker Collab website.");
         public string RetryText => link.NextAttemptUtc is DateTime when && when > DateTime.UtcNow
             ? $"Tried again at {when.ToLocalTime():HH:mm}, or now with Retry." : "";
 

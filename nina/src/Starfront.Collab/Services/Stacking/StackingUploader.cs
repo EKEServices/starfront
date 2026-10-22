@@ -61,7 +61,7 @@ namespace Starfront.Collab.Services.Stacking {
             Links = new StackingLinks(Path.Combine(settings.DataFolder, "stacking", "links.json"));
             Imaging = new ImagingStateTracker();
             SignIn = new StackingSignIn(settings, () => Api);
-            Joiner = new StackingJoiner(host, settings, Links, () => Api);
+            Joiner = new StackingJoiner(host, settings, Links, () => Api, link => EnsureClients().For(link));
             Joiner.AuthRequired += (_, _) => OnAuthRequired();
             SignIn.Changed += OnSignInChanged;
             Links.Changed += (_, _) => RaiseChanged();
@@ -90,6 +90,12 @@ namespace Starfront.Collab.Services.Stacking {
 
         /// <summary>Why the runner is waiting, when it is.</summary>
         public PolicyDecision Decision => runner?.LastDecision;
+
+        /// <summary>A hub link holds a grant: its project can be talked to with no Rapid Stacker Collab sign-in.</summary>
+        public bool HasHubLink => Links.All().Any(l => l.IsHub && l.Grant.Length > 0);
+
+        /// <summary>Whether rig- and library-scoped calls have somewhere to go: the cloud when signed in, the hub when it is the default backend and a link holds a grant.</summary>
+        private bool LibraryReachable => settings.StackingSignedIn || (settings.StackingDefaultBackend == "hub" && HasHubLink);
 
         public bool AuthRequired => runner?.AuthRequired ?? SignIn.AuthRequired;
 
@@ -171,7 +177,7 @@ namespace Starfront.Collab.Services.Stacking {
                                               message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
                     intake.Enqueued += flats.OnLightEnqueued;
                     flats.Enqueued += _ => runner.Wake();
-                    library = new StackingLibrary(() => Api, queue, new LibrarySettings(settings), SystemClock.Instance, () => settings.StackingSignedIn, TempDirectory,
+                    library = new StackingLibrary(() => Api, queue, new LibrarySettings(settings), SystemClock.Instance, () => LibraryReachable, TempDirectory,
                                                   message => Logger.Info(message), (message, ex) => Logger.Error(message, ex));
                     library.Queued += runner.Wake;
                     library.Changed += RaiseChanged;
@@ -197,7 +203,7 @@ namespace Starfront.Collab.Services.Stacking {
                     return;
                 }
             }
-            Logger.Info("Starfront stacking: on" + (settings.StackingSignedIn ? "" : "; not signed in to Rapid Stacker Collab yet"));
+            Logger.Info("Starfront stacking: on" + (settings.StackingSignedIn || HasHubLink ? "" : "; not signed in to Rapid Stacker Collab yet (hub projects need no sign-in)"));
             _ = ReconcileAsync();
             RaiseChanged();
         }
@@ -461,7 +467,7 @@ namespace Starfront.Collab.Services.Stacking {
             while (!ct.IsCancellationRequested) {
                 try {
                     var waiting = queue?.AwaitingVerdict(1).Count > 0;
-                    if (waiting && settings.StackingSignedIn) {
+                    if (waiting && (settings.StackingSignedIn || HasHubLink)) {
                         var learnt = await verdicts.PollAsync(ct).ConfigureAwait(false);
                         if (learnt > 0) RaiseChanged();
                     }
