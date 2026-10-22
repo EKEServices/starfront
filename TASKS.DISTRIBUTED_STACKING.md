@@ -204,7 +204,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.2: resolve-join-code, project, join, membership, rigs (fingerprint per `contract-examples.json`), `filters/normalize`, frames list/get/withdraw, status, masters, events, `aliases.json`; signed URLs for private projects.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T303 — Admin surface for the desktop
+- [x] T303 — Admin surface for the desktop
       **Files:** RSC `worker/crates/hub/src/routes/admin.rs`, tests
       **Do:** §3.3: admin tokens, fleet, pause, projects with queue depths and disk use, standalone project create and update, hub status, worker revoke.
       **Verify:** `cd worker && cargo test -p collab-hub`
