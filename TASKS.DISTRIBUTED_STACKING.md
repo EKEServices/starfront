@@ -335,7 +335,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 5 — the Starfront desktop (SF, §Phase 5)
 
-- [ ] T501 — Settings sections `hub` and `volunteer`
+- [x] T501 — Settings sections `hub` and `volunteer`
       **Files:** SF `astrocontrol/config.py`
       **Do:** §5.1: both sections in `DEFAULTS` (unknown keys are dropped on save).
       **Verify:** `python3 tools/check_controls.py`
