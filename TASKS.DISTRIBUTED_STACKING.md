@@ -110,7 +110,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §0.2, §1.3: one writer behind a mutex plus readers, WAL, `busy_timeout`, `with_tx` (`BEGIN IMMEDIATE`), `include_str!` migrations recorded in `_migrations`, the schema of §1.3; the README note on `rusqlite` over `sqlx`.
       **Verify:** `cd worker && cargo test -p collab-hub db`
 
-- [ ] T104 — `SqliteQueues`
+- [x] T104 — `SqliteQueues`
       **Files:** RSC `worker/crates/hub/src/queue.rs`, `worker/crates/hub/tests/queue.rs`
       **Do:** §1.6: the `daemon/fake/mod.rs` semantics on SQLite: visibility, receipts, redrive at 5 to `-dlq`, delayed send, attributes, retention; a `Notify` per queue for long polls; the fake's queue tests ported.
       **Verify:** `cd worker && cargo test -p collab-hub --test queue`
