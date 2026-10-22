@@ -391,7 +391,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §6.3: the hub path of `ReconcileAsync`; sign-in required only for cloud links; the options text.
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release && dotnet test tests/Starfront.Collab.Tests`
 
-- [ ] T605 — Checklist, SOURCE.md and change notes
+- [x] T605 — Checklist, SOURCE.md and change notes
       **Files:** SF `nina/MANUAL_CHECKLIST.md`, `nina/src/RapidStackerCollab.Core/SOURCE.md`, `nina/README.md`, `nina/CHANGELOG.md`, `server/nina_plugin/CHANGELOG.md`
       **Do:** §6.4, §6.5: the "Hub projects" checklist section; "Local differences: none" with the two upstream candidates; a draft changelog entry (the version number and release are the author's).
       **Verify:** `cd nina && dotnet build Starfront.sln -c Release`

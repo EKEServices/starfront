@@ -75,6 +75,13 @@ header carries `STARFRNT` (the project) and `SFPANEL`.
    them can be kept in step with it under *Calibration library*. With the
    switch off the plugin connects to nothing new and behaves exactly as before.
 
+   A collaboration whose stacking project is on a Rapid Stacker Collab *hub*
+   needs no sign-in to Rapid Stacker Collab: the check-in carries the
+   telescope's grant for it, and *Linked collaborations* shows the link as
+   `(Hub: name)`. When the hub is on your home network the lights go to it
+   directly; when it does not answer they go through the Starfront server, and
+   a light waiting for a fresh grant is kept until one arrives.
+
 ## For people building it
 
 Windows, the .NET 8 SDK (8.0.100 or later) and N.I.N.A. 3.2. PowerShell 7 is
@@ -136,6 +143,10 @@ public repositories only, and asks for an accountable human maintainer.
 | `Sequencer/` | the *Starfront collaboration* container, its panels, the altitude gate, the once-through strategy |
 | `Ui/` | the options page, the exposure table, the Imaging-tab panel |
 | `Services/Stacking/` | live stacking: the Rapid Stacker Collab sign-in, the link to each collaboration's stacking project and the join, the queue and the uploads, the flat router (`StackingFlats`), the field check (`StackingTargets`), the calibration library's folder sync (`StackingLibrary`), and the switch that turns all of it on and off |
+| `Services/Stacking/RoutingApiClient.cs`, `ClientCache.cs` | sends each call to the cloud or to the hub of its own collaboration, with one cached client per base |
+| `Services/Stacking/HubJoiner.cs`, `HubBackend.cs`, `GrantTokenStore.cs` | hub collaborations: the join from the check-in's grant, one rig id per hub, and the grant kept for each link (a refused grant holds that link only) |
+| `Services/Stacking/LanProbe.cs` | the LAN short-cut to a hub on the home network, falling back to the Starfront server when the hub does not answer |
+| `Services/Stacking/StackingLink.cs` | one link between a collaboration and its stacking project, cloud or hub |
 | `../RapidStackerCollab.Core/` | the upload engine (resumable multipart upload, the SQLite queue, location stripping), copied from Rapid Stacker Collab's own N.I.N.A. plugin; see its `SOURCE.md` |
 
 Everything the plugin owns is in the zip; nothing of N.I.N.A.'s is.

@@ -111,3 +111,57 @@ the top of your copy.
 - [ ] Turn the switch off in the middle of an upload. *Expected:* it stops within a few seconds, N.I.N.A. stays
   responsive, and the upload resumes when the switch is turned back on.
 - [ ] Close N.I.N.A. with live stacking on. *Expected:* it closes as quickly as before.
+
+## F. Hub projects
+
+A hub project is a collaboration whose stacking project lives on a Rapid Stacker Collab hub, not in the cloud. Its
+steps need the hub, so they are run against the home-network topology, not the cloud stack.
+
+Local topology these steps assume:
+
+- **Mac:** the Starfront server, `python server/run_local.py --lan --data ~/starfront-local` (stand-in Discord). Its
+  LAN address is `http://<mac>.local:8800`.
+- **Mac:** `collab-hub run`, registered with that server from the desktop Collab tab. The hub binary is built in the
+  Rapid Stacker Collab repository, not this one. Its LAN address is `http://<mac>.local:8790`.
+- **Windows PC:** N.I.N.A. with the plugin. `ServerUrl` in the plugin's settings file (in the `PluginSettings` folder
+  named in section A) is `http://<mac>.local:8800`.
+
+Before the first box, note the hub's version and the plugin's version at the top of your copy.
+
+- [ ] Bind a collaboration to the hub from the desktop Collab tab (backend *hub*), then open its listing on the Starfront
+  site. *Expected:* the listing shows the hub binding (the hub's name and its address); the server has a stacking
+  project for the collaboration.
+- [ ] With the switch on and no Rapid Stacker Collab sign-in, open Options > Plugins > Starfront. *Expected:* the page
+  says *Hub projects need no Rapid Stacker Collab sign-in.*; the log's `Starfront stacking: on` line has no
+  *not signed in* suffix once a hub link exists; the *Linked collaborations* list shows the hub link as
+  *Collaboration → Project (Hub: name)*.
+- [ ] Wait for a check-in. *Expected:* the log has `Starfront stacking: this telescope is rig <id> on <hub>` and
+  `Starfront stacking: <collaboration> -> <project> (joined, hub): Joined …` (or `already a member`).
+- [ ] With the hub stopped or off the LAN, shoot a few lights of the hub collaboration. *Expected:* each is logged
+  `queued for …`, then `sent …` once the camera is idle; the server's log shows the part PUTs to `/stack/s3/…`; the
+  server's `stack_frames` table has a row for each file with status `uploaded`.
+- [ ] With the hub running on the same LAN (the default: `StackingHubTrustLan` is true in the settings file), shoot a
+  few lights of the hub collaboration. *Expected:* the log has, once, `Starfront stacking: <collaboration> now uploads
+  over the LAN (http://<mac>.local:8790/…)`; the hub's `objects/raw` receives the files; the server's log shows no
+  `/stack/s3/` part PUTs for them.
+- [ ] Wait for the hub to push the verdicts. *Expected:* within one poll of the hub pushing a verdict, the Starfront
+  dock shows it, and the log has `Starfront stacking: <file> <status>`.
+- [ ] Stop the hub while lights are queued for the LAN path. *Expected:* at the next check-in the log has `Starfront
+  stacking: <collaboration> now uploads through the Starfront server` once; the queued frames go to the server and
+  arrive as in the first step.
+- [ ] Remove the telescope from the collaboration on the website. *Expected:* within one check-in no new light for it
+  is queued (the log says `… is not linked to a stacking project`); frames already queued stay in the queue and are
+  not sent.
+- [ ] Make the hub refuse this telescope's grant (rotate the grant secret on the server, then the next check-in
+  carries no valid grant). *Expected:* the log has `Starfront stacking: <collaboration>: the hub refused this
+  telescope's grant; its uploads wait for the next check-in`; the link shows *Waiting for a new grant from Starfront
+  for …; frames are kept and sent when it arrives*; lights shot meanwhile are queued, not dropped; a cloud
+  collaboration on the same night keeps uploading; Rapid Stacker Collab's sign-in is not asked for again.
+- [ ] Restore the grant (the next check-in brings it). *Expected:* the held and new frames are sent without a restart,
+  and the waiting line goes.
+- [ ] Night with one cloud collaboration and one hub collaboration linked. *Expected:* each light goes to the backend
+  of its own collaboration only (the cloud ones to Rapid Stacker Collab, the hub ones to the server or the hub); the
+  log shows a rig id for each backend, and the two ids differ (one library per backend, D001). Restart N.I.N.A.: each
+  rig id is unchanged.
+- [ ] Repeat *The SQLite preload* checks from section B with a hub link present. *Expected:* unchanged: `tasklist /m
+  e_sqlite3.dll` lists NINA.exe once the switch is on, and no SQLite error in the log.
