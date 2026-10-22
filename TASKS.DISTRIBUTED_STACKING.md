@@ -244,7 +244,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
 
 ## Phase 4 — the Starfront server (§Phase 4)
 
-- [ ] T401 — Server schema for hubs and stacking; remove `server/stacks.py`
+- [x] T401 — Server schema for hubs and stacking; remove `server/stacks.py`
       **Files:** SF `server/store.py`, `server/stacks.py` (deleted), `tools/check_livestack.py` (its server cases), `tools/check_server.py`
       **Do:** §4.1: `hubs`, `stack_*` tables and migrations; delete the orphaned router and the check cases that drove it.
       **Verify:** `python3 tools/check_server.py && python3 tools/check_livestack.py`
