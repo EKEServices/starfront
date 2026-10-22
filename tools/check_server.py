@@ -2621,6 +2621,351 @@ else:
     case("...and CANONICAL_FILTERS equals the contract's CanonicalFilter",
          filters_enum == stack_defaults.CANONICAL_FILTERS, str(filters_enum))
 
+# ------------------------------------------- live stacking: front door
+# The hub-backed project's door, in the Collab contract's envelope: grants for
+# auth, projects, membership, rigs, and no 403/404 anywhere under /stack/api.
+print("\n-- live stacking: front door --")
+import subprocess as _sp                                          # noqa: E402
+import uuid as _uuid                                              # noqa: E402
+from server.stack import envelope as stack_envelope               # noqa: E402
+from server.stack import header as stack_header                   # noqa: E402
+from server.stack import rigs as stack_rigs                       # noqa: E402
+
+API = "/stack/api"
+OWNER_GRANT = mine_l["grant"]
+JOINED_GRANT = joined_l["grant"]
+SECOND_ID = second["project"]["id"]
+SECOND_GRANT = project_in_listing(OWNER_RIG, SECOND_ID)["stacking"]["grant"]
+FD = server_app.store.stack_project_of(HUBP)
+FD_ID, FD_SLUG, FD_CODE = FD["project_id"], FD["slug"], FD["join_code"]
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since=0&wait=0", token=BHTOK)
+FEED0 = pulled["seq"]
+
+# What the contract says, when it is at hand.
+rsc = None
+for candidate in (ROOT.parent / "Rust" / "rapid-stacker-collab", ROOT.parent.parent / "Rust" / "rapid-stacker-collab",
+                  ROOT.parent / "rapid-stacker-collab"):
+    if (candidate / "docs" / "api" / "openapi.yaml").exists():
+        rsc = candidate
+        break
+schemas = {}
+if rsc is not None and _yaml is not None:
+    contract_doc = _yaml.safe_load((rsc / "docs" / "api" / "openapi.yaml").read_text(encoding="utf-8"))
+    schemas = contract_doc["components"]["schemas"]
+else:
+    print("SKIP  front door against openapi.yaml: "
+          + ("PyYAML is not installed" if rsc else "no Rapid Stacker Collab beside this repository"))
+
+
+def resolve_ref(node):
+    while isinstance(node, dict) and "$ref" in node:
+        node = schemas[node["$ref"].rsplit("/", 1)[1]]
+    return node
+
+
+def problems(value, node, path="$"):
+    """A small required/type/enum/const/properties/additionalProperties check."""
+    node = resolve_ref(node)
+    found = []
+    if "oneOf" in node:
+        if not any(not problems(value, option, path) for option in node["oneOf"]):
+            found.append(f"{path}: matches none of oneOf")
+        return found
+    kinds = node.get("type")
+    kinds = [kinds] if isinstance(kinds, str) else (kinds or [])
+    pytypes = {"string": str, "integer": int, "number": (int, float), "boolean": bool,
+               "array": list, "object": dict, "null": type(None)}
+    if kinds and not any(isinstance(value, pytypes[k]) and not (k in ("integer", "number") and isinstance(value, bool))
+                         for k in kinds):
+        return [f"{path}: {type(value).__name__} is not {kinds}"]
+    if "const" in node and value != node["const"]:
+        found.append(f"{path}: not {node['const']!r}")
+    if "enum" in node and value not in node["enum"]:
+        found.append(f"{path}: {value!r} not in enum")
+    if isinstance(value, str) and "pattern" in node and not _re.search(node["pattern"], value):
+        found.append(f"{path}: {value!r} fails pattern")
+    if isinstance(value, dict):
+        props = node.get("properties", {})
+        for key in node.get("required", []):
+            if key not in value:
+                found.append(f"{path}.{key}: missing")
+        for key, item in value.items():
+            if key in props:
+                found += problems(item, props[key], f"{path}.{key}")
+            elif node.get("additionalProperties") is False:
+                found.append(f"{path}.{key}: not in the schema")
+    if isinstance(value, list) and "items" in node:
+        for i, item in enumerate(value):
+            found += problems(item, node["items"], f"{path}[{i}]")
+    return found
+
+
+def conforms(name, body):
+    return (not schemas) or not problems(body, {"$ref": f"#/components/schemas/{name}"})
+
+
+def why(name, body):
+    return "; ".join(problems(body, {"$ref": f"#/components/schemas/{name}"}))[:300] if schemas else ""
+
+
+def front(method, path, body=None, token=None):
+    return call(method, API + path, body, token=token)
+
+
+# -- the envelope table and the allow-list against the contract
+if schemas:
+    import re as _re2
+    text = schemas["ErrorCode"]["description"]
+    table = {m.group(1): int(m.group(2)) for m in _re2.finditer(r"- `(\w+)` \((\d+)\)", text)}
+    case("envelope.ERROR_STATUS equals the contract's ErrorCode table",
+         table == stack_envelope.ERROR_STATUS,
+         str({k for k in set(table) | set(stack_envelope.ERROR_STATUS)
+              if table.get(k) != stack_envelope.ERROR_STATUS.get(k)}))
+    case("...and no code of the table is a 403 or 404",
+         not {403, 404} & set(stack_envelope.ERROR_STATUS.values()))
+    initheader = schemas["InitHeader"]["properties"]
+    kind_of = {"string": "str", "number": "num", "integer": "int"}
+    same = set(initheader) == set(stack_header.ALLOWED) and all(
+        stack_header.ALLOWED[k][0] == ("numstr" if isinstance(v["type"], list) else kind_of[v["type"]])
+        for k, v in initheader.items())
+    case("header.ALLOWED equals the contract's InitHeader allow-list", same,
+         str(set(initheader) ^ set(stack_header.ALLOWED)))
+
+# -- header allow-list
+case("an allowed header passes", stack_header.check({"FILTER": "Ha", "EXPTIME": 300.0, "XBINNING": 1,
+                                                    "RA": "05 35 17", "DEC": -5.4}) is not None)
+for card in ("SITELAT", "SITELONG", "SITEELEV", "OBSERVER", "HISTORY"):
+    try:
+        stack_header.check({"FILTER": "Ha", card: "x"})
+        refused = ""
+    except stack_envelope.ApiError as exc:
+        refused = f"{exc.code} {exc.status} {exc.extra['errors'][0]['field']}"
+    case(f"header: {card} is refused with header_rejected", refused == f"header_rejected 400 header.{card}", refused)
+case("header: a location card is never kept from a file's header",
+     stack_header.without_location({"SITELAT": 1, "OBSERVER": "me", "FILTER": "Ha"}) == {"FILTER": "Ha"})
+try:
+    stack_header.check({"EXPTIME": "long"})
+    wrong = ""
+except stack_envelope.ApiError as exc:
+    wrong = exc.code
+case("header: a value of the wrong type is validation_failed", wrong == "validation_failed", wrong)
+
+# -- authentication
+status, got = front("GET", "/rigs")
+case("no credential: 401 not_authenticated in the envelope",
+     status == 401 and got.get("ok") is False and got.get("code") == "not_authenticated", f"{status} {got}")
+tampered = OWNER_GRANT[:-3] + ("AAA" if OWNER_GRANT[-3:] != "AAA" else "BBB")
+status, got = front("GET", f"/projects/{FD_ID}/membership", token=tampered)
+case("a tampered grant: 401 token_invalid", status == 401 and got.get("code") == "token_invalid", f"{status} {got}")
+status, got = front("GET", "/rigs", token="rscu_" + "0" * 64)
+case("a token of another kind: 401 token_invalid", status == 401 and got.get("code") == "token_invalid", f"{status} {got}")
+other_secret = hubs_module.mint_grant({"id": BH, "grant_secret": reg_b["grantSecret"]}, "1002", "Bob", "x", FD_ID)
+status, got = front("GET", "/rigs", token=other_secret)
+case("a grant signed with another hub's secret: 401 token_invalid",
+     status == 401 and got.get("code") == "token_invalid", f"{status} {got}")
+old_grant = hubs_module.mint_grant({"id": BH, "grant_secret": BHSEC}, "1002", "Bob", "x", FD_ID, time.time() - 3 * 86400)
+status, got = front("GET", "/rigs", token=old_grant)
+case("an expired grant: 401 token_invalid", status == 401 and got.get("code") == "token_invalid", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}/membership", token=SECOND_GRANT)
+case("a grant for another project: 401 token_scope",
+     status == 401 and got.get("code") == "token_scope", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", {"display_name": "Zed", "accepted_terms_version": "x"}, token=SECOND_GRANT)
+case("...on a write too", status == 401 and got.get("code") == "token_scope", f"{status} {got}")
+
+# -- the envelope for what is not there
+status, got = front("GET", "/nope")
+case("an unknown path answers the envelope, not 403 or 404",
+     status not in (403, 404) and got.get("ok") is False and got.get("code") in stack_envelope.ERROR_STATUS
+     and status == stack_envelope.ERROR_STATUS[got["code"]], f"{status} {got}")
+for path in ("/auth/me", f"/projects/{FD_ID}/events", f"/projects/{FD_ID}/masters", f"/projects/{FD_ID}/mosaic"):
+    status, got = front("GET", path)
+    case(f"{path.rsplit('/', 1)[-1]} (not built yet) is still the envelope",
+         status not in (403, 404) and got.get("ok") is False and "code" in got, f"{status} {got}")
+status, got = front("DELETE", "/rigs")
+case("a method not allowed is the envelope too", status not in (403, 404, 405) and got.get("ok") is False, f"{status} {got}")
+
+# -- resolve-join-code
+status, got = front("POST", "/projects/resolve-join-code", {"code": FD_CODE.lower().replace("-", " ")}, token=OWNER_GRANT)
+case("a grant resolves the join code, in any case and spacing",
+     status == 200 and got.get("ok") is True and got["project"]["project_id"] == FD_ID
+     and got["terms_version"] and got["already_member"] is False, f"{status} {str(got)[:200]}")
+case("...the response validates against ResolveJoinCodeResponse", conforms("ResolveJoinCodeResponse", got), why("ResolveJoinCodeResponse", got))
+status, got = front("POST", "/projects/resolve-join-code", {"code": "H4RT-92BK-WNPC"}, token=OWNER_GRANT)
+case("an unknown code: 400 invalid_code", status == 400 and got.get("code") == "invalid_code", f"{status} {got}")
+status, got = front("POST", "/projects/resolve-join-code", {}, token=OWNER_GRANT)
+case("a missing code: 400 invalid_request", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+status, got, _ = raw("POST", API + "/projects/resolve-join-code", data=b"{not json",
+                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {OWNER_GRANT}"})
+case("a body that is not JSON: 400 invalid_request", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+
+# -- projects, by id and by slug
+status, by_id = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+status2, by_slug = front("GET", f"/projects/{FD_SLUG}", token=OWNER_GRANT)
+case("the project reads by id and by slug", status == status2 == 200
+     and by_id["project"]["project_id"] == FD_ID == by_slug["project"]["project_id"]
+     and by_id["project"]["slug"] == FD_SLUG, f"{status} {status2}")
+case("...and validates against ProjectResponse", conforms("ProjectResponse", by_id), why("ProjectResponse", by_id))
+case("...with the placeholder grid, the filters and no membership yet",
+     by_id["project"]["grid"]["width_px"] >= 64 and by_id["project"]["filters"] == ["HA", "OIII"]
+     and by_id["project"]["my_membership"] is None and by_id["project"]["owner_name"] == "Bob")
+status, got = front("GET", "/projects/prj_zzzzzzzzzzzzzzzzzzzz", token=OWNER_GRANT)
+case("an unknown project: 400 not_found", status == 400 and got.get("code") == "not_found", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_SLUG}")
+case("an unlisted project reads without a credential", status == 200 and got["project"]["project_id"] == FD_ID, f"{status} {got}")
+
+# -- joining
+body = {"code": "", "display_name": "Bobby", "accepted_terms_version": "2020-01-01",
+        "filter_mapping": [{"raw": "Ha 7nm", "canonical": "HA"}]}
+status, got = front("POST", f"/projects/{FD_ID}/join", body, token=OWNER_GRANT)
+case("joining on stale terms: 409 terms_outdated with the current version",
+     status == 409 and got.get("code") == "terms_outdated" and got.get("terms_version"), f"{status} {got}")
+body["accepted_terms_version"] = by_id["project"]["terms_version"]
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(body, code="WNPC-WNPC-WNPC"), token=OWNER_GRANT)
+case("a non-empty code that is not the project's: 400 invalid_code",
+     status == 400 and got.get("code") == "invalid_code", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(body, filter_mapping=[{"raw": "x", "canonical": "NOPE"}]), token=OWNER_GRANT)
+case("a filter mapping outside the canonical filters: 400 validation_failed",
+     status == 400 and got.get("code") == "validation_failed" and got.get("errors"), f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", {"display_name": "Bobby"}, token=OWNER_GRANT)
+case("a body missing the terms version: 400 invalid_request", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", body, token=OWNER_GRANT)
+member = got.get("membership") or {}
+case("an empty code joins on a grant for the project, active under approval open",
+     status == 200 and member.get("status") == "active" and member.get("role") == "contributor"
+     and member.get("display_name") == "Bobby" and member.get("filter_mapping") == body["filter_mapping"], f"{status} {str(got)[:200]}")
+case("...the response validates against JoinResponse", conforms("JoinResponse", got), why("JoinResponse", got))
+OWNER_UID = member.get("user_id", "")
+case("...the user id is a UUID v4 that is not the Starfront id",
+     _re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", OWNER_UID) is not None
+     and OWNER_UID != "1002")
+case("...recorded in stack_identities, once",
+     (server_app.store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = '1002'") or {}).get("collab_user_id") == OWNER_UID)
+status, got = front("POST", f"/projects/{FD_ID}/join", body, token=OWNER_GRANT)
+case("joining twice: 409 already_member", status == 409 and got.get("code") == "already_member", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(body, display_name="  BOBBY ", code=FD_CODE.lower()), token=JOINED_GRANT)
+case("a second person with the same display name (any case): 409 display_name_taken",
+     status == 409 and got.get("code") == "display_name_taken", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", dict(body, display_name="Joiner", code=FD_CODE.lower()), token=JOINED_GRANT)
+case("...who joins under another name with the real code (lower case)",
+     status == 200 and got["membership"]["display_name"] == "Joiner"
+     and got["membership"]["user_id"] != OWNER_UID, f"{status} {got}")
+JOINER_UID = got["membership"]["user_id"]
+
+# -- membership
+status, got = front("GET", f"/projects/{FD_ID}/membership", token=OWNER_GRANT)
+case("the membership reads back", status == 200 and got["membership"]["user_id"] == OWNER_UID
+     and got["membership"]["usage"]["frames_used"] == 0 and conforms("MembershipResponse", got), f"{status} {why('MembershipResponse', got)}")
+status, got = front("PUT", f"/projects/{FD_ID}/membership", {"display_name": "Robert", "country": "GB",
+                    "allow_owner_raw_download": True,
+                    "filter_mapping": [{"raw": "Oiii", "canonical": "OIII"}, {"raw": "Dark", "canonical": "SKIP"}]}, token=OWNER_GRANT)
+case("...updates (name, country, opt-in, mapping)", status == 200 and got["membership"]["display_name"] == "Robert"
+     and got["membership"]["country"] == "GB" and got["membership"]["allow_owner_raw_download"] is True
+     and len(got["membership"]["filter_mapping"]) == 2 and conforms("MembershipResponse", got), f"{status} {str(got)[:200]}")
+status, got = front("PUT", f"/projects/{FD_ID}/membership", {"display_name": "joiner"}, token=OWNER_GRANT)
+case("...and a name another member has is 409 display_name_taken", status == 409 and got.get("code") == "display_name_taken", f"{status} {got}")
+status, got = front("PUT", f"/projects/{FD_ID}/membership", {"display_name": 5}, token=OWNER_GRANT)
+case("...and a bad body is 400 invalid_request", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("the project now shows the caller's membership and the member count",
+     got["project"]["my_membership"]["display_name"] == "Robert" and got["project"]["counts"]["member_count"] == 2
+     and conforms("ProjectResponse", got), why("ProjectResponse", got))
+NOBODY = hubs_module.mint_grant({"id": BH, "grant_secret": BHSEC}, "9999", "Nobody", "x", FD_ID)
+status, got = front("GET", f"/projects/{FD_ID}/membership", token=NOBODY)
+case("a grant for the project whose holder has not joined: 401 not_member",
+     status == 401 and got.get("code") == "not_member", f"{status} {got}")
+
+# -- a browser session reads, and cannot write
+server_app.store.add_web_token("web-front-door", "1002")
+request = urllib.request.Request(f"{BASE}{API}/projects/{FD_ID}/membership", headers={"Cookie": "starfront_web=web-front-door"})
+with urllib.request.urlopen(request, timeout=10) as response:
+    cookie_read = json.loads(response.read())
+case("the starfront_web cookie reads the same membership", cookie_read["membership"]["user_id"] == OWNER_UID, str(cookie_read)[:200])
+status, got, _ = raw("PUT", API + f"/projects/{FD_ID}/membership", data=b'{"country": "FR"}',
+                     headers={"Content-Type": "application/json", "Cookie": "starfront_web=web-front-door"})
+case("...but a write on the cookie alone is refused in the envelope", status == 401 and got.get("code") == "not_authenticated", f"{status} {got}")
+status, got, _ = raw("GET", API + "/rigs", headers={"Cookie": "starfront_web=unknown"})
+case("...and an unknown session is 401 session_expired", status == 401 and got.get("code") == "session_expired", f"{status} {got}")
+
+# -- rigs
+RIG = {"camera": "ASI2600MM Pro ", "telescope": "RedCat 51", "focal_length_mm": 250.4,
+       "pixel_size_um": 3.76, "binning": 1, "name": "Wide rig"}
+status, got = front("POST", "/rigs", RIG, token=OWNER_GRANT)
+rig = got.get("rig") or {}
+case("a rig is upserted, confirmed, with its pixel scale", status == 200 and rig.get("confirmed") is True
+     and rig.get("osc") is False and rig.get("name") == "Wide rig" and rig.get("pixel_scale_arcsec") == 3.0973
+     and conforms("RigResponse", got), f"{status} {why('RigResponse', got)} {rig}")
+want = stack_rigs.rig_id_of(stack_rigs.fingerprint("asi2600mm pro", "redcat 51", 250, 3.8, 1, False))
+case("...its rig_id is the fingerprint's first 12 hex characters", rig.get("rig_id") == want, f"{rig.get('rig_id')} {want}")
+# The fingerprint against Rapid Stacker Collab's own code, when node and the file are at hand.
+js = rsc / "backend" / "lambdas" / "shared" / "rigs.js" if rsc else None
+node_ok = False
+if js is not None and js.exists():
+    probe = ("const ids=require('" + str(js.parent / "ids.js") + "');"
+             "const src=require('fs').readFileSync('" + str(js) + "','utf8');"
+             "const m={exports:{}};const crypto=require('crypto');"
+             "const fn=new Function('require','module','exports',src.replace(/require\\(\"\\.\\/ddb\"\\)/,'{}'));"
+             "fn(p=>p==='./ids'?ids:require(p),m,m.exports);"
+             "const cases=JSON.parse(process.argv[1]);"
+             "console.log(JSON.stringify(cases.map(c=>m.exports.fingerprint(c))));")
+    vectors = [dict(camera="ASI2600MM Pro ", telescope="RedCat 51", focal_length_mm=250.4, pixel_size_um=3.76, binning=1, osc=False),
+               dict(camera="IMX571", telescope=" Esprit 100", focal_length_mm=550.5, pixel_size_um=3.75, binning=2, osc=True),
+               dict(camera="QHY268C", telescope="X", focal_length_mm=1000, pixel_size_um=2.25, binning=1, osc=True),
+               dict(camera="A", telescope="B", focal_length_mm=0.5, pixel_size_um=4.65, binning=3, osc=False)]
+    try:
+        out = _sp.run(["node", "-e", probe, json.dumps(vectors)], capture_output=True, text=True, timeout=30,
+                      env={**os.environ, "NODE_PATH": str(rsc / "backend" / "node_modules")})
+        theirs = json.loads(out.stdout) if out.returncode == 0 else None
+    except (OSError, ValueError, _sp.TimeoutExpired):
+        theirs = None
+    if theirs is None:
+        print("SKIP  rig fingerprint against rigs.js: it could not be run here")
+    else:
+        mine_fp = [stack_rigs.fingerprint(v["camera"], v["telescope"], v["focal_length_mm"], v["pixel_size_um"],
+                                          v["binning"], v["osc"]) for v in vectors]
+        case("the rig fingerprint equals Rapid Stacker Collab's rigs.js on four vectors", mine_fp == theirs, f"{mine_fp} {theirs}")
+else:
+    print("SKIP  rig fingerprint against rigs.js: no Rapid Stacker Collab beside this repository")
+status, again = front("POST", "/rigs", dict(RIG, camera="asi2600mm pro", name="Renamed"), token=OWNER_GRANT)
+case("the same tuple upserts the same rig (idempotent, case-insensitive), renaming it",
+     again["rig"]["rig_id"] == rig["rig_id"] and again["rig"]["name"] == "Renamed"
+     and again["rig"]["created_at"] == rig["created_at"], str(again)[:200])
+status, got = front("POST", "/rigs", dict(RIG, bayer_pattern="RGGB", width_px=6248, height_px=4176), token=OWNER_GRANT)
+case("a bayer pattern makes it a different, OSC rig", got["rig"]["osc"] is True and got["rig"]["rig_id"] != rig["rig_id"]
+     and got["rig"]["width_px"] == 6248 and conforms("RigResponse", got), f"{status} {why('RigResponse', got)}")
+status, got = front("POST", "/rigs", dict(RIG, binning=0), token=OWNER_GRANT)
+case("a bad rig body is validation_failed", status == 400 and got.get("code") == "validation_failed", f"{status} {got}")
+status, got = front("POST", "/rigs", {"camera": "x"}, token=OWNER_GRANT)
+case("...or invalid_request when a field is missing", status == 400 and got.get("code") == "invalid_request", f"{status} {got}")
+status, got = front("GET", "/rigs", token=OWNER_GRANT)
+case("rigs list, oldest first, validating against RigListResponse",
+     status == 200 and len(got["rigs"]) == 2 and got["rigs"][0]["rig_id"] == rig["rig_id"]
+     and conforms("RigListResponse", got), f"{status} {why('RigListResponse', got)}")
+status, got = front("GET", "/rigs", token=JOINED_GRANT)
+case("...and are the caller's own", status == 200 and got["rigs"] == [])
+status, got = front("PATCH", f"/rigs/{rig['rig_id']}", {"name": "Final", "confirmed": False}, token=OWNER_GRANT)
+case("a rig is patched (name, confirmed)", status == 200 and got["rig"]["name"] == "Final"
+     and got["rig"]["confirmed"] is False and conforms("RigResponse", got), f"{status} {got}")
+status, got = front("PATCH", f"/rigs/{rig['rig_id']}", {"name": "  "}, token=OWNER_GRANT)
+case("...a blank name is validation_failed", status == 400 and got.get("code") == "validation_failed", f"{status} {got}")
+status, got = front("PATCH", "/rigs/rig_000000000000", {"name": "x"}, token=OWNER_GRANT)
+case("...a rig that is not yours is 400 not_found", status == 400 and got.get("code") == "not_found", f"{status} {got}")
+status, got = front("PATCH", f"/rigs/{rig['rig_id']}", {"name": "Hijack"}, token=JOINED_GRANT)
+case("...another person cannot patch it", status == 400 and got.get("code") == "not_found", f"{status} {got}")
+
+# -- the hub hears of it, and never learns a Starfront id
+_, pulled = call("GET", f"/api/v1/hubs/{BH}/pull?since={FEED0}&wait=0", token=BHTOK)
+members = [c["key"] for c in pulled["changes"] if c["kind"] == "member"]
+rigs_seen = [c["key"] for c in pulled["changes"] if c["kind"] == "rig"]
+case("each membership write is a member row in the feed, key project_id/user_id",
+     members.count(f"{FD_ID}/{OWNER_UID}") == 2 and members.count(f"{FD_ID}/{JOINER_UID}") == 1, str(members))
+case("each rig write is a rig row, key user_id/rig_id",
+     rigs_seen.count(f"{OWNER_UID}/{rig['rig_id']}") >= 3 and all(k.split("/")[0] in (OWNER_UID,) for k in rigs_seen), str(rigs_seen))
+everything = json.dumps([by_id, member, cookie_read, pulled]) + json.dumps(
+    [server_app.store._all("SELECT * FROM stack_members"), server_app.store._all("SELECT * FROM stack_rigs")])
+case("no Starfront or Discord id appears in a response, a member row, a rig row or the feed",
+     not any(f'"{sid}"' in everything or f"/{sid}\"" in everything or f'{sid}/' in everything
+             for sid in ("1002", JOINED_ID)), "")
+
 # ------------------------------------------- live stacking: the schema
 print("\n-- live stacking: hub and stacking tables --")
 import sqlite3                                                   # noqa: E402

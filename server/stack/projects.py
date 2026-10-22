@@ -1,0 +1,326 @@
+"""Projects and membership: resolve a join code, read a project, join, and the
+caller's own membership. Bodies and codes are the Collab contract's.
+
+A project here is the `doc` of a `stack_projects` row (server/app.py makes it
+from the Starfront collaboration); a member is a `stack_members` row keyed by
+`(project_id, collab user id)`. Every write appends a `member` row to the
+bound hub's change feed, key `project_id/user_id`, so the hub learns of it.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+from fastapi import APIRouter, Request
+
+from . import defaults
+from .auth import Auth, Caller, json_body, now_iso
+from .envelope import ApiError, ok, validation_failed
+
+#: What a member must have accepted, as the contract's `TermsVersion`.
+TERMS_VERSION = os.environ.get("STARFRONT_STACK_TERMS_VERSION") or "2026-10-13-draft"
+_TERMS = re.compile(r"^\d{4}-\d{2}-\d{2}(-[a-z0-9]+)?$")
+_COUNTRY = re.compile(r"^[A-Z]{2}$")
+_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+
+
+def terms_version() -> str:
+    return os.environ.get("STARFRONT_STACK_TERMS_VERSION") or TERMS_VERSION
+
+
+def normalise_code(text: Any) -> str:
+    """A join code as stored (XXXX-XXXX-XXXX), or '' when it cannot be one."""
+    if not isinstance(text, str):
+        return ""
+    letters = re.sub(r"[\s-]", "", text).upper()
+    if len(letters) != 12 or any(c not in _CODE_ALPHABET for c in letters):
+        return ""
+    return f"{letters[:4]}-{letters[4:8]}-{letters[8:]}"
+
+
+def mapping_of(value: Any) -> list[dict[str, str]]:
+    """A contributor's filter mapping, validated: `[{raw, canonical}]`."""
+    if not isinstance(value, list):
+        raise ApiError("invalid_request", "filter_mapping must be a list.")
+    out, bad = [], []
+    for i, entry in enumerate(value):
+        raw = entry.get("raw") if isinstance(entry, dict) else None
+        canon = entry.get("canonical") if isinstance(entry, dict) else None
+        if not isinstance(raw, str) or not isinstance(canon, str):
+            raise ApiError("invalid_request", "Each filter_mapping entry needs raw and canonical text.")
+        if not 1 <= len(raw) <= 80:
+            bad.append((f"filter_mapping[{i}].raw", "must be 1 to 80 characters"))
+        if canon != "SKIP" and canon not in defaults.CANONICAL_FILTERS:
+            bad.append((f"filter_mapping[{i}].canonical", "not a canonical filter or SKIP"))
+        if set(entry) - {"raw", "canonical"}:
+            bad.append((f"filter_mapping[{i}]", "unknown field"))
+        out.append({"raw": raw, "canonical": canon})
+    if bad:
+        raise validation_failed(*bad)
+    return out
+
+
+class Projects:
+    def __init__(self, store: Any, auth: Auth, router: APIRouter) -> None:
+        self.store = store
+        self.auth = auth
+        self._routes(router)
+
+    # -- shapes ---------------------------------------------------------------
+    def member(self, project_id: str, user_id: str) -> dict[str, Any] | None:
+        row = self.store._one("SELECT * FROM stack_members WHERE project_id = ? AND user_id = ?",
+                              project_id, user_id)
+        if row is not None:
+            row["doc"] = json.loads(row["doc"] or "{}")
+        return row
+
+    def _members(self, project_id: str) -> list[dict[str, Any]]:
+        return [dict(r, doc=json.loads(r["doc"] or "{}")) for r in self.store._all(
+            "SELECT * FROM stack_members WHERE project_id = ?", project_id)]
+
+    def counts(self, row: dict[str, Any]) -> dict[str, Any]:
+        base = dict(row["doc"].get("counts") or {})
+        active = sum(1 for m in self._members(row["project_id"]) if m["doc"].get("status") == "active")
+        out = {"member_count": active, "frames_accepted": int(base.get("frames_accepted", 0)),
+               "integration_s": base.get("integration_s", 0)}
+        if base.get("last_update"):
+            out["last_update"] = base["last_update"]
+        return out
+
+    def membership(self, row: dict[str, Any], member: dict[str, Any]) -> dict[str, Any]:
+        d = member["doc"]
+        quotas = row["doc"].get("quotas") or defaults.QUOTAS
+        used = self.store._one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS b FROM stack_frames WHERE"
+            " project_id = ? AND user_id = ? AND status NOT IN ('withdrawn', 'rejected')",
+            row["project_id"], member["user_id"])
+        said = {s: self.store._one(
+            "SELECT COUNT(*) AS n FROM stack_frames WHERE project_id = ? AND user_id = ?"
+            " AND status = ?", row["project_id"], member["user_id"], s)["n"]
+            for s in ("accepted", "rejected")}
+        out = {
+            "project_id": row["project_id"], "user_id": member["user_id"],
+            "role": d.get("role", "contributor"), "status": d.get("status", "active"),
+            "display_name": d.get("display_name", ""),
+            "country": d.get("country"),
+            "accepted_terms_version": d.get("accepted_terms_version", ""),
+            "accepted_terms_at": d.get("accepted_terms_at", ""),
+            "allow_owner_raw_download": bool(d.get("allow_owner_raw_download", False)),
+            "filter_mapping": list(d.get("filter_mapping") or []),
+            "usage": {"bytes_used": int(used["b"]), "frames_used": int(used["n"]),
+                      "bytes_cap": int(quotas["contributor_max_bytes"]),
+                      "frames_cap": int(quotas["contributor_max_frames"])},
+            "stats": {"frames_accepted": said["accepted"], "frames_rejected": said["rejected"],
+                      "integration_s": d.get("integration_s", 0), "last_frame_at": d.get("last_frame_at")},
+            "joined_at": d.get("joined_at", ""),
+        }
+        return out
+
+    def summary(self, row: dict[str, Any]) -> dict[str, Any]:
+        d = row["doc"]
+        return {"project_id": row["project_id"], "slug": row["slug"], "name": d.get("name", ""),
+                "target_name": d.get("target_name", ""), "status": d.get("status", "open"),
+                "visibility": d.get("visibility", "unlisted"), "owner_name": d.get("owner_name", ""),
+                "palette": d.get("palette", "none"), "filters": list(d.get("filters") or []),
+                "counts": self.counts(row), "combined_preview_url": None,
+                "created_at": d.get("created_at", "")}
+
+    def project(self, row: dict[str, Any], mine: dict[str, Any] | None) -> dict[str, Any]:
+        d = row["doc"]
+        out = {**self.summary(row), "description": d.get("description", ""),
+               "licence": d.get("licence", "members_only"), "grid": d.get("grid"),
+               "mosaic": None, "policy": d.get("policy") or dict(defaults.POLICY),
+               "terms_version": terms_version(), "my_membership": None,
+               "updated_at": d.get("updated_at", d.get("created_at", ""))}
+        out.pop("combined_preview_url")      # a summary field, not a Project one
+        if d.get("rotation_from_first_light"):
+            out["rotation_from_first_light"] = True
+        if mine is not None:
+            out["my_membership"] = self.membership(row, mine)
+            out["quotas"] = d.get("quotas") or dict(defaults.QUOTAS)
+            if mine["doc"].get("role") in ("owner", "maintainer") and row.get("join_code"):
+                out["join_code"] = row["join_code"]
+        return out
+
+    def changed(self, row: dict[str, Any], user_id: str) -> None:
+        if row["hub"]:
+            self.store.append_change(row["hub"], "member", f"{row['project_id']}/{user_id}")
+
+    # -- the routes -------------------------------------------------------------
+    def _routes(self, router: APIRouter) -> None:
+        auth = self.auth
+
+        @router.post("/projects/resolve-join-code")
+        async def resolve(request: Request) -> dict[str, Any]:
+            who = auth.caller(request, write=True)
+            body = await json_body(request)
+            if not isinstance(body.get("code"), str):
+                raise ApiError("invalid_request", "code is required, as text.")
+            if set(body) - {"code"} or len(body["code"]) > 20:
+                raise validation_failed(("code", "at most 20 characters; no other field"))
+            code = normalise_code(body["code"])
+            found = self.store._one("SELECT project_id FROM stack_projects WHERE join_code = ?",
+                                    code) if code else None
+            if found is None:
+                raise ApiError("invalid_code", "That join code is not known.")
+            row = auth.project(found["project_id"])
+            if row["hub"] != who.hub:
+                raise ApiError("invalid_code", "That join code is not known.")
+            d = row["doc"]
+            if d.get("status") == "deleted":
+                raise ApiError("project_deleted", "That project is scheduled for deletion.")
+            mine = self.member(row["project_id"], who.user_id)
+            base = f"{request.url.scheme}://{request.url.netloc}"
+            return ok(project=self.summary(row), grid=d.get("grid"),
+                      policy=d.get("policy") or dict(defaults.POLICY),
+                      terms_version=terms_version(), terms_url=f"{base}/stack/terms",
+                      requires_approval=d.get("approval", "open") != "open",
+                      already_member=bool(mine and mine["doc"].get("status") != "removed"))
+
+        @router.get("/projects/{project}")
+        async def get_project(project: str, request: Request) -> dict[str, Any]:
+            who = auth.caller(request, required=False)
+            row = auth.project(project)
+            if who is not None:
+                auth.scoped(who, row)
+            mine = self.member(row["project_id"], who.user_id) if who else None
+            if mine is not None and mine["doc"].get("status") == "removed":
+                mine = None
+            entitled = who is not None and who.kind == "grant"
+            if row["doc"].get("visibility") == "private" and mine is None and not entitled:
+                raise ApiError("not_found", "No such project.")
+            return ok(project=self.project(row, mine))
+
+        @router.post("/projects/{project}/join")
+        async def join(project: str, request: Request) -> dict[str, Any]:
+            who = auth.caller(request, write=True)
+            row = auth.project(project)
+            auth.scoped(who, row)
+            body = await json_body(request)
+            for key in ("display_name", "accepted_terms_version"):
+                if not isinstance(body.get(key), str):
+                    raise ApiError("invalid_request", f"{key} is required, as text.")
+            if body.get("code") is not None and not isinstance(body["code"], str):
+                raise ApiError("invalid_request", "code must be text.")
+            if "allow_owner_raw_download" in body and not isinstance(
+                    body["allow_owner_raw_download"], bool):
+                raise ApiError("invalid_request", "allow_owner_raw_download must be true or false.")
+            unknown = set(body) - {"code", "display_name", "country", "accepted_terms_version",
+                                   "allow_owner_raw_download", "filter_mapping"}
+            problems = [(k, "unknown field") for k in sorted(unknown)]
+            name = body["display_name"].strip()
+            if not 2 <= len(name) <= 40:
+                problems.append(("display_name", "must be 2 to 40 characters"))
+            if not _TERMS.match(body["accepted_terms_version"]):
+                problems.append(("accepted_terms_version", "not a terms version"))
+            country = body.get("country")
+            if country is not None and not (isinstance(country, str) and _COUNTRY.match(country)):
+                problems.append(("country", "must be two capital letters"))
+            if problems:
+                raise validation_failed(*problems)
+            mapping = mapping_of(body.get("filter_mapping") or [])
+            # The grant names the project, so it is the credential; a code that
+            # is sent has to be the project's own.
+            sent = str(body.get("code") or "").strip()
+            if sent and (not normalise_code(sent) or normalise_code(sent) != row.get("join_code")):
+                raise ApiError("invalid_code", "That join code does not belong to this project.")
+            d = row["doc"]
+            if d.get("status") == "deleted":
+                raise ApiError("project_deleted", "That project is scheduled for deletion.")
+            if d.get("status") != "open":
+                raise ApiError("project_not_open", "That project is not accepting joins.")
+            have = self.member(row["project_id"], who.user_id)
+            if have is not None:
+                raise ApiError("membership_removed" if have["doc"].get("status") == "removed"
+                               else "already_member",
+                               "You were removed from this project." if have["doc"].get("status") == "removed"
+                               else "You are already a member of this project.")
+            if body["accepted_terms_version"] != terms_version():
+                raise ApiError("terms_outdated", "Those are not the current terms.",
+                               terms_version=terms_version())
+            self._unique_name(row["project_id"], name, who.user_id)
+            stamp = now_iso()
+            doc = {"role": "contributor",
+                   "status": "active" if d.get("approval", "open") == "open" else "pending",
+                   "display_name": name, "country": country,
+                   "accepted_terms_version": body["accepted_terms_version"],
+                   "accepted_terms_at": stamp,
+                   "allow_owner_raw_download": bool(body.get("allow_owner_raw_download", False)),
+                   "filter_mapping": mapping, "joined_at": stamp}
+            self.store._run("INSERT INTO stack_members (project_id, user_id, doc) VALUES (?, ?, ?)",
+                            row["project_id"], who.user_id, json.dumps(doc))
+            self.changed(row, who.user_id)
+            return ok(membership=self.membership(row, self.member(row["project_id"], who.user_id)))
+
+        @router.get("/projects/{project}/membership")
+        async def get_membership(project: str, request: Request) -> dict[str, Any]:
+            who = auth.caller(request)
+            row = auth.project(project)
+            auth.scoped(who, row)
+            return ok(membership=self.membership(row, self._own(row, who)))
+
+        @router.put("/projects/{project}/membership")
+        async def put_membership(project: str, request: Request) -> dict[str, Any]:
+            who = auth.caller(request, write=True)
+            row = auth.project(project)
+            auth.scoped(who, row)
+            mine = self._own(row, who)
+            body = await json_body(request)
+            problems = [(k, "unknown field") for k in sorted(
+                set(body) - {"display_name", "country", "allow_owner_raw_download",
+                             "filter_mapping", "accepted_terms_version"})]
+            doc = mine["doc"]
+            if "display_name" in body:
+                if not isinstance(body["display_name"], str):
+                    raise ApiError("invalid_request", "display_name must be text.")
+                if not 2 <= len(body["display_name"].strip()) <= 40:
+                    problems.append(("display_name", "must be 2 to 40 characters"))
+            if "country" in body and body["country"] is not None and not (
+                    isinstance(body["country"], str) and _COUNTRY.match(body["country"])):
+                problems.append(("country", "must be two capital letters or null"))
+            if "allow_owner_raw_download" in body and not isinstance(
+                    body["allow_owner_raw_download"], bool):
+                raise ApiError("invalid_request", "allow_owner_raw_download must be true or false.")
+            if "accepted_terms_version" in body and not (
+                    isinstance(body["accepted_terms_version"], str)
+                    and _TERMS.match(body["accepted_terms_version"])):
+                problems.append(("accepted_terms_version", "not a terms version"))
+            if problems:
+                raise validation_failed(*problems)
+            mapping = mapping_of(body["filter_mapping"]) if "filter_mapping" in body else None
+            if "accepted_terms_version" in body:
+                if body["accepted_terms_version"] != terms_version():
+                    raise ApiError("terms_outdated", "Those are not the current terms.",
+                                   terms_version=terms_version())
+                doc["accepted_terms_version"] = body["accepted_terms_version"]
+                doc["accepted_terms_at"] = now_iso()
+            if "display_name" in body:
+                name = body["display_name"].strip()
+                self._unique_name(row["project_id"], name, who.user_id)
+                doc["display_name"] = name
+            if "country" in body:
+                doc["country"] = body["country"]
+            if "allow_owner_raw_download" in body:
+                doc["allow_owner_raw_download"] = body["allow_owner_raw_download"]
+            if mapping is not None:
+                doc["filter_mapping"] = mapping
+            self.store._run("UPDATE stack_members SET doc = ?, rev = rev + 1 WHERE project_id = ?"
+                            " AND user_id = ?", json.dumps(doc), row["project_id"], who.user_id)
+            self.changed(row, who.user_id)
+            return ok(membership=self.membership(row, self.member(row["project_id"], who.user_id)))
+
+    def _own(self, row: dict[str, Any], who: Caller) -> dict[str, Any]:
+        mine = self.member(row["project_id"], who.user_id)
+        if mine is None or mine["doc"].get("status") == "removed":
+            raise ApiError("not_member", "You are not a member of this project.")
+        return mine
+
+    def _unique_name(self, project_id: str, name: str, user_id: str) -> None:
+        """409 `display_name_taken` when another member has it (any case)."""
+        for other in self._members(project_id):
+            if other["user_id"] != user_id and other["doc"].get("status") != "removed" and \
+                    str(other["doc"].get("display_name", "")).casefold() == name.casefold():
+                raise ApiError("display_name_taken", "Another member already uses that display name.")

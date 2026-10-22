@@ -46,6 +46,7 @@ from server import auth                                          # noqa: E402
 from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
 from server.hubs import Hubs, mint_grant                          # noqa: E402
 from server.stack import defaults as stack_defaults             # noqa: E402
+from server.stack import front as stack_front                   # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -2447,6 +2448,10 @@ files = Files(app, store, FILES_DIR, _person, owns_project, DISCORD.owners,
 # ---------------------------------------------------------------------------
 
 hubs = Hubs(app, store, _person, may_start)
+
+# The front door for hub-backed projects, in the Collab contract's envelope.
+# Its own sub-application so its error handlers cover exactly `/stack/api`.
+app.mount("/stack/api", stack_front.build(store))
 
 
 # ---------------------------------------------------------------------------
