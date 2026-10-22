@@ -9,6 +9,7 @@
 - On the home network a hub is reached directly over its LAN address, and the lights go through the Starfront server whenever it does not answer. The plugin writes one log line each time it switches.
 - A hub that refuses the telescope's grant holds only that hub's lights, which wait for the next check-in. A fresh grant is picked up at that check-in, and the held and new lights are sent without a restart. Cloud uploads keep going, and the cloud sign-in is not asked for again.
 - Each backend has its own rig id: the cloud keeps the rig id it was given, and each hub keeps its own, so one backend's join no longer overwrites another's.
+- Live stacking follows the collaboration. The start form no longer asks for a Rapid Stacker Collab join code: Starfront stacks a new collaboration on its coordinator's hub, or makes and keeps the Rapid Stacker Collab project itself once their Collab account is linked, and the Collab tab in Starfront turns it off or changes it. The join code box shows only when editing an old collaboration that was given a pasted code, which keeps working; the panel and options texts say so.
 
 ## 1.0.0.33
 

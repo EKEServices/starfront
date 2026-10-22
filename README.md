@@ -2152,8 +2152,90 @@ no other live hub project) and keeps the rows.  The **final masters and
 `status.json` are kept**, so the project page still opens, read-only, saying
 "deleted on the date, final results kept", until the owner removes them with
 `DELETE /api/v1/projects/{id}/stack/results` (only once the window is over).
-The desktop has no delete button yet (it can only close); the plugin and
-desktop follow with the end-to-end pass.
+The desktop's Collab tab has a Delete button beside Close on every stacked
+collaboration you started, which says how long it can be restored, and lists
+deleted collaborations with a Restore button until their window ends (they
+are off every other list).
+
+### The stacking project flows down from the collaboration
+
+The author's rule (2026-10-22): **the Starfront collaboration is the only place
+a project is made.**  Everything the stacking engine needs comes from it, every
+edit reaches it, and nobody makes a second project anywhere: not on a hub, not
+on the Collab website, not by pasting a join code.  Task T706 traced each field
+through the merged system and closed the gaps it found.
+
+**On by default.**  A collaboration started without saying where it is stacked
+(the desktop form shows the choice, a plugin's form says nothing) is bound
+automatically: to a hub its owner owns (the one heard from most recently), else
+to the one hub whose owner listed them as a coordinator (D002), else to Rapid
+Stacker Collab when they have linked their Collab account, else it is not
+stacked.  `{"backend": ""}` turns it off.  The desktop's Live stacking fieldset
+shows "Live stacking: on (hub NAME)" and offers off, another hub or the cloud;
+`GET /api/v1/stacking` gives it the hubs, the default, the account link and the
+deleted collaborations.
+
+**One derivation, both backends.**  `_stack_fields` in `server/app.py` turns a
+collaboration into what the engine is told, and both the hub's document
+(`_stack_doc`) and the cloud project use it:
+
+| From the collaboration | Into the stacking project |
+|---|---|
+| name | `name`, `target_name` (the slug is made once and never changes) |
+| notes | `description` (2000 characters) |
+| region | `grid`, a placeholder with `rotation_from_first_light` until the first light frames it; after a frame the grid is the engine's |
+| filters | `filters` (contract names: H -> HA, OSC-RGB -> OSC, OSC-Ha+OIII -> DUO), `palette`; a colour band whose switch is off is left out |
+| requirements | `policy`: colour taken -> `osc_allowed`; calibrated only -> `calibration: required`; shortest sub -> `min_exposure_s`; star size only raises `max_fwhm_arcsec` (to twice the HFR, at most 20); the rest are the contract's defaults |
+| who may watch | `visibility` (unlisted by default, D003) |
+| open or closed | `status`: closed on a hub, `paused` on the cloud (the contract's `closed` cannot reopen) |
+| members | a telescope on the collaboration (or the owner's) is handed the grant or join code; declining its last share marks it `removed` (T419) |
+| deletion | the seven-day deletion above, on a hub or the cloud |
+
+Guiding, the longest sub, the Moon, altitude, Bortle and focal-length limits
+have no field in the contract's policy: the collaboration judges them per
+night before a frame is sent.
+
+**Every edit flows down.**  `PUT /api/v1/projects/{id}` re-derives the document,
+and a hub hears of it through its change feed whenever anything but
+`updated_at` moved (the hub reads the project back from the front door).
+`tools/check_server.py` edits each field in turn and checks the document, the
+feed row and what the hub reads.
+
+**Nothing is edited on the stacking side.**  `/stack/api` has no route that
+creates, edits, deletes or re-keys a project; a member's `membership` PUT
+changes only that member's own row and never its role or status; a hub's push
+changes only the grid it framed.  The hub has no project-creating route either
+(`POST /api/hub/v1/projects` is `not_found`, T303) and takes projects only from
+this server's feed.
+
+**The cloud, through the Collab API** (`server/stack/cloud.py`).  The owner
+links their Rapid Stacker Collab account once, in the desktop's Collab tab:
+an API token with `projects:manage`, which only a signed-in Collab session can
+mint (Dashboard, API tokens; the device flow never grants it).  The server
+checks it with `GET /auth/me` and keeps it per person, sealed with AES-GCM under
+`STARFRONT_CREDENTIAL_KEY` (else the admin token; with neither it is kept as
+typed and the tab says so), never listed and never sent to a telescope.
+Binding a collaboration to the cloud makes the project with `projectsCreate`
+and opens it; every edit is a `projectsUpdate` carrying the whole derived
+policy (a PUT replaces it); the join code is kept with the project and handed
+to the collaboration's telescopes as a pasted one was.  Deleting calls
+`projectsDelete` (`confirm_slug`, delayed); the contract (1.28.0) keeps that
+for a browser session, so with a token the project is paused instead and the
+collaboration says where to finish.  A failed call is recorded on the
+collaboration and retried by the `stack-sweep` thread with back-off; a create
+whose answer was lost is looked up by its slug before it is tried again.
+
+**Old pasted codes.**  A collaboration that was given a pasted join code keeps
+it, read-only: an edit may send it back or clear it, and the desktop offers to
+have the server make a project instead.  A new pasted code is refused with the
+way to link the account.  Join codes are no longer in the open project reads
+(`GET /api/v1/projects`), which had been showing them to anyone.
+
+What T706 leaves for the author: `projectsDelete` and `projectsRestore` accept
+only a browser session, so the server cannot finish a cloud deletion itself
+(a contract change to accept a `projects:manage` token would make the existing
+call succeed); Collab tokens last at most 365 days, after which the
+collaboration shows the failure until the account is linked again.
 
 ### Grants: one secret per hub
 

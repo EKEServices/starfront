@@ -135,7 +135,7 @@ namespace Starfront.Collab.Ui {
             var terms = links.Where(l => l.Status == LinkStatus.TermsOutdated).Select(l => l.StarfrontName).ToList();
             if (terms.Count > 0) return $"The terms of {string.Join(", ", terms)} changed; accept them under Options > Plugins > Starfront.";
             if (settings.StackingSignedIn && signIn.ExpiringSoon) return signIn.ExpiryText;
-            if (links.Count == 0) return "None of your collaborations is linked to a stacking project yet; its coordinator adds the join code.";
+            if (links.Count == 0) return "None of your collaborations is stacked yet. Stacking follows the collaboration: its coordinator turns it on, on a hub or Rapid Stacker Collab, in Starfront's Collab tab.";
             return "";
         }
 

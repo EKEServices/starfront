@@ -73,6 +73,8 @@ PEOPLE = {
                      "member": False, "roles": []},
     "code-carol": {"id": "1004", "username": "carol", "global_name": "Carol",
                    "member": True, "roles": []},
+    "code-dave": {"id": "1005", "username": "dave", "global_name": "Dave",
+                  "member": True, "roles": []},
 }
 
 
@@ -2093,20 +2095,21 @@ case("...and the listing says so, with where to send them",
      listing["filesUrl"])
 
 # ------------------------------------------- live stacking: the join code
-# A collaboration can name the Rapid Stacker Collab project that stacks its
-# lights as they land. The code is a credential: it is stored canonical,
-# refused when it cannot be real, and handed out only to telescopes on the
-# collaboration and to the owner's own.
+# A collaboration used to name the Rapid Stacker Collab project that stacks
+# its lights by a join code pasted from the Collab website. Since T706 the
+# collaboration is the only place a project is made (the author's rule): a new
+# pasted code is refused, and an old collaboration keeps the code it has,
+# read-only. The code is a credential: it is handed out only to telescopes on
+# the collaboration and to the owner's own, and never in a public read.
 print("\n-- live stacking: the join code --")
-status, made = call("POST", "/api/v1/projects", {
+status, answer = call("POST", "/api/v1/projects", {
     "name": "Orion, live-stacked", "region": {"ra": 84.0, "dec": 0.0,
                                                "width": 16.0, "height": 8.0},
     "requirements": {"filters": {"Ha": 3.0}}, "goals": {"Ha": 10.0},
     "stackingJoinCode": " h4rt 92bk-wnpc "}, token=BOB2)
-STACKED = made["project"]["id"]
-case("a project can be started with a stacking join code, stored canonical",
-     status == 200 and made["project"]["payload"]["stackingJoinCode"] == "H4RT-92BK-WNPC",
-     str(made)[:200])
+case("a new collaboration with a pasted join code is refused, and says what to do instead",
+     status == 400 and "no longer taken" in answer.get("detail", "")
+     and "Link your Rapid Stacker Collab account" in answer.get("detail", ""), str(answer)[:200])
 status, answer = call("POST", "/api/v1/projects", {
     "name": "typo", "region": {"ra": 84.0, "dec": 0.0, "width": 16.0, "height": 8.0},
     "stackingJoinCode": "H4RT-92BK-WNP1"}, token=BOB2)
@@ -2116,6 +2119,26 @@ status, answer = call("POST", "/api/v1/projects", {
     "name": "short", "region": {"ra": 84.0, "dec": 0.0, "width": 16.0, "height": 8.0},
     "stackingJoinCode": "H4RT-92BK"}, token=BOB2)
 case("...and so is one that is too short", status == 400)
+# An old collaboration, as one made before T706 is stored: the pasted code in
+# the payload, both ways.
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Orion, live-stacked", "region": {"ra": 84.0, "dec": 0.0,
+                                               "width": 16.0, "height": 8.0},
+    "requirements": {"filters": {"Ha": 3.0}}, "goals": {"Ha": 10.0},
+    "stacking": {"backend": ""}}, token=BOB2)
+STACKED = made["project"]["id"]
+from server import app as server_app_                              # noqa: E402
+_legacy = dict(server_app_.store.project(STACKED)["payload"])
+_legacy.update(stackingJoinCode="H4RT-92BK-WNPC", stacking={"backend": "cloud", "joinCode": "H4RT-92BK-WNPC",
+                                                             "apiBase": "", "hubId": "", "visibility": ""})
+server_app_.store.set_project(STACKED, _legacy)
+case("(setup) an old collaboration carries a pasted code",
+     server_app_._stacking_of(server_app_.store.project(STACKED)["payload"])["joinCode"] == "H4RT-92BK-WNPC")
+_, public_read = call("GET", f"/api/v1/projects/{STACKED}")
+_, public_list = call("GET", "/api/v1/projects")
+case("the code is in no public read: neither the project nor the list carries it (T706)",
+     "H4RT-92BK-WNPC" not in json.dumps(public_read) and "H4RT-92BK-WNPC" not in json.dumps(public_list)
+     and "stacking" in public_read["project"]["payload"], str(public_read["project"]["payload"].get("stacking")))
 
 _, bobs = call("POST", "/api/v1/agents", {"name": "Bob's rig"}, token=BOB2)
 _, browse = call("GET", "/api/v1/agent/projects", token=bobs["token"])
@@ -2143,14 +2166,17 @@ case("a collaboration without one says so", listing["stackingLinked"] is False
 status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"notes": "still stacked"}, token=BOB2)
 case("an edit that leaves the code out leaves it alone",
      status == 200 and changed["project"]["payload"]["stackingJoinCode"] == "H4RT-92BK-WNPC")
-status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "wnpc-h4rt-92bk"}, token=BOB2)
-case("...one that sends a new code replaces it, canonical",
-     status == 200 and changed["project"]["payload"]["stackingJoinCode"] == "WNPC-H4RT-92BK")
+status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "h4rt 92bk wnpc"}, token=BOB2)
+case("...one that sends the same code back (a plugin's Edit form) changes nothing",
+     status == 200 and changed["project"]["payload"]["stackingJoinCode"] == "H4RT-92BK-WNPC")
+status, answer = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "wnpc-h4rt-92bk"}, token=BOB2)
+case("...one that sends a different code is refused: the old link is read-only (T706)",
+     status == 400 and "no longer taken" in answer.get("detail", ""), str(answer)[:160])
 status, _ = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": "nope"}, token=BOB2)
 _, browse = call("GET", "/api/v1/agent/projects", token=STACKER_TOKEN)
 listing = next(p for p in browse["projects"] if p["id"] == STACKED)
 case("...a bad one is refused and the old one stands",
-     status == 400 and listing["stackingJoinCode"] == "WNPC-H4RT-92BK")
+     status == 400 and listing["stackingJoinCode"] == "H4RT-92BK-WNPC")
 status, changed = call("PUT", f"/api/v1/projects/{STACKED}", {"stackingJoinCode": ""}, token=BOB2)
 _, browse = call("GET", "/api/v1/agent/projects", token=STACKER_TOKEN)
 listing = next(p for p in browse["projects"] if p["id"] == STACKED)
@@ -2465,19 +2491,25 @@ def project_in_listing(token, project_id):
     return next(p for p in browse["projects"] if p["id"] == project_id)
 
 
-# Cloud, in the new form: the code is stored both ways.
-status, made = call("POST", "/api/v1/projects", {
+# Cloud, in the new form, with a pasted code: refused since T706 (the server
+# makes the Collab project). An old collaboration's code is kept both ways.
+status, answer = call("POST", "/api/v1/projects", {
     "name": "Cloud stacked", "region": REGION, "requirements": {"filters": {"Ha": 3.0}},
     "stacking": {"backend": "cloud", "joinCode": " h4rt 92bk-wnpc "}}, token=BOBH)
+case("stacking.backend=cloud with a pasted join code is refused (T706)",
+     status == 400 and "no longer taken" in answer.get("detail", ""), str(answer)[:160])
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Cloud stacked", "region": REGION, "requirements": {"filters": {"Ha": 3.0}},
+    "stacking": {"backend": ""}}, token=BOBH)
 CLOUD = made["project"]["id"]
-payload = made["project"]["payload"]
-case("stacking.backend=cloud stores the join code in the block and as stackingJoinCode",
-     status == 200 and payload["stackingJoinCode"] == "H4RT-92BK-WNPC"
-     and payload["stacking"]["backend"] == "cloud"
-     and payload["stacking"]["joinCode"] == "H4RT-92BK-WNPC", str(payload)[:240])
+payload = dict(made["project"]["payload"])
+payload.update(stackingJoinCode="H4RT-92BK-WNPC", stacking={"backend": "cloud", "joinCode": "H4RT-92BK-WNPC",
+                                                             "apiBase": "", "hubId": "", "visibility": ""})
+server_app.store.set_project(CLOUD, payload)
 status, answer = call("POST", "/api/v1/projects", {
     "name": "no code", "region": REGION, "stacking": {"backend": "cloud"}}, token=BOBH)
-case("...a cloud binding without a join code is refused", status == 400, str(answer)[:120])
+case("...the cloud without a linked Collab account is refused, and says to link it",
+     status == 400 and "link" in answer.get("detail", ""), str(answer)[:160])
 status, answer = call("POST", "/api/v1/projects", {
     "name": "bad code", "region": REGION,
     "stacking": {"backend": "cloud", "joinCode": "H4RT-92BK-WNP1"}}, token=BOBH)
@@ -2632,8 +2664,8 @@ server_app.store._run("INSERT INTO stack_frames (frame_id, project_id) VALUES ('
 status, answer = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": ""}}, token=BOBH)
 case("with a frame stacked, unbinding is refused as a conflict", status == 409, f"{status} {answer}")
 status, answer = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {
-    "backend": "cloud", "joinCode": "H4RT-92BK-WNPC"}}, token=BOBH)
-case("...and so is moving it to the cloud", status == 409)
+    "backend": "hub", "hubId": reg_b["hubId"]}}, token=BOBH)
+case("...and so is moving it to another hub", status == 409, f"{status} {answer}")
 status, _ = call("PUT", f"/api/v1/projects/{HUBP}", {"stacking": {"backend": "hub", "hubId": BH},
                                                      "notes": "still here"}, token=BOBH)
 case("...while an edit that keeps the binding goes through", status == 200)
@@ -4471,7 +4503,8 @@ case("a person who did not start the collaboration cannot delete it: 403",
 status, got = call("DELETE", f"/api/v1/projects/{HUBP}")
 case("deleting without signing in is refused", status in (401, 403), str(status))
 _, plain = call("POST", "/api/v1/projects", {"name": "Plain one", "region": REGION,
-                                          "requirements": {"filters": {"Ha": 3.0}}}, token=BOBH)
+                                          "requirements": {"filters": {"Ha": 3.0}},
+                                          "stacking": {"backend": ""}}, token=BOBH)
 status, got = call("DELETE", f"/api/v1/projects/{plain['project']['id']}", token=BOBH)
 case("a collaboration not stacked on a hub is not deleted this way: 400", status == 400, f"{status} {got}")
 
@@ -4585,6 +4618,377 @@ case("...and the project says the results are no longer kept",
      status == 200 and got["project"]["results_kept"] is False, f"{status} {got}")
 status, _, _ = raw_get(f"/stack/public/{FD_ID}/status.json")
 case("...status.json is 404", status == 404, str(status))
+
+
+# ------------------------------------- live stacking: it flows down from the collaboration
+# T706, the author's rule (2026-10-22): the Starfront collaboration is the only
+# place a project is made, and everything the stacking engine needs flows down
+# from it. Stacking is on by default; every edit reaches the stacking project
+# and the hub's feed; nothing about a project can be changed on /stack/api; and
+# a cloud project is made and kept in step by this server through the Collab
+# API (checked against Rapid Stacker Collab's local stack when it is at hand).
+print("\n-- live stacking: it flows down from the collaboration (T706) --")
+_, _, _, polled = sign_in("code-dave")
+DAVE = polled["token"]
+_, _, _, polled = sign_in("code-bob")
+BOBF = polled["token"]
+_, _, _, polled = sign_in("code-carol")
+CAROLF = polled["token"]
+
+
+def binding_of(project_id):
+    return server_app._stacking_of(server_app.store.project(project_id)["payload"])
+
+
+# -- 1. on by default
+status, opts = call("GET", "/api/v1/stacking", token=DAVE)
+case("a person with no hub and no Collab link is told stacking is off by default",
+     status == 200 and opts["default"]["backend"] == "" and opts["hubs"] == []
+     and opts["cloud"]["linked"] is False, str(opts)[:200])
+status, made = call("POST", "/api/v1/projects", {"name": "Dave plain", "region": REGION}, token=DAVE)
+case("...and a collaboration they start is not stacked", status == 200
+     and binding_of(made["project"]["id"])["backend"] == "", str(made)[:160])
+status, opts = call("GET", "/api/v1/stacking", token=BOBF)
+BOB_HUBS = [h["id"] for h in server_app.store.hubs_of("1002")]
+case("a hub owner's default is one of their own hubs, named",
+     status == 200 and opts["default"]["backend"] == "hub" and opts["default"]["hubId"] in BOB_HUBS
+     and opts["default"]["hubName"] and all(h["role"] == "owner" for h in opts["hubs"]), str(opts)[:240])
+BOB_DEFAULT = opts["default"]["hubId"]
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Default Bound", "region": REGION, "requirements": {"filters": {"Ha": 3.0}}}, token=BOBF)
+DEF_P = made["project"]["id"]
+row = server_app.store.stack_project_of(DEF_P) or {}
+case("a collaboration started with nothing said is bound to that hub, with its stacking project made",
+     status == 200 and binding_of(DEF_P)["backend"] == "hub" and binding_of(DEF_P)["hubId"] == BOB_DEFAULT
+     and row.get("hub") == BOB_DEFAULT and row["doc"]["visibility"] == "unlisted", str(binding_of(DEF_P)))
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Plugin form", "region": REGION, "stackingJoinCode": ""}, token=BOBF)
+case("...as is one from a plugin's form (a blank stackingJoinCode)",
+     status == 200 and binding_of(made["project"]["id"])["backend"] == "hub")
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Off on purpose", "region": REGION, "stacking": {"backend": ""}}, token=BOBF)
+case("...while {backend: ''} turns it off", status == 200 and binding_of(made["project"]["id"])["backend"] == ""
+     and server_app.store.stack_project_of(made["project"]["id"]) is None)
+status, opts = call("GET", "/api/v1/stacking", token=CAROLF)
+case("a coordinator the owner listed on one hub sees it (role coordinator) as the default",
+     status == 200 and opts["default"] == {"backend": "hub", "hubId": BH, "hubName": "Bind hub"}
+     and [h["role"] for h in opts["hubs"]] == ["coordinator"], str(opts)[:240])
+status, made = call("POST", "/api/v1/projects", {"name": "Carol default", "region": REGION}, token=CAROLF)
+case("...and a collaboration they start is bound to it",
+     status == 200 and binding_of(made["project"]["id"])["hubId"] == BH)
+
+# -- 2. every field flows down (hub)
+FLOW_REQ = {"filters": {"Ha": 3.0, "OIII": 3.0, "OSC-RGB": None, "OSC-Ha+OIII": None},
+            "acceptColour": True, "acceptOscRgb": True, "acceptOscNarrowband": True,
+            "minExposure": 30, "requireCalibrated": True, "maxHfr": 4.0, "maxGuideRms": 1.0}
+status, made = call("POST", "/api/v1/projects", {
+    "name": "Flow Down", "region": REGION, "notes": "first notes", "requirements": FLOW_REQ,
+    "stacking": {"backend": "hub", "hubId": BH}}, token=BOBF)
+FLOW = made["project"]["id"]
+FLOW_ID = server_app.store.stack_project_of(FLOW)["project_id"]
+
+
+def flow_doc():
+    return server_app.store.stack_project_of(FLOW)["doc"]
+
+
+d = flow_doc()
+case("the requirements become the stacking project's filters: Ha, OIII, a colour camera's OSC and DUO",
+     d["filters"] == ["HA", "OIII", "OSC", "DUO"] and d["palette"] == "HOO", str(d["filters"]))
+case("...and its policy: colour cameras taken, calibrated only, the shortest sub, a star-size cap",
+     d["policy"]["osc_allowed"] is True and d["policy"]["calibration"] == "required"
+     and d["policy"]["min_exposure_s"] == 30 and d["policy"]["max_fwhm_arcsec"] == 8.0
+     and set(d["policy"]) == set(stack_defaults.POLICY), str(d["policy"]))
+case("...the rest of the policy stays the contract's defaults (guiding has no policy field)",
+     all(d["policy"][k] == v for k, v in stack_defaults.POLICY.items()
+         if k not in ("osc_allowed", "calibration", "min_exposure_s", "max_fwhm_arcsec")))
+case("a policy for a collaboration that takes no colour data keeps osc_allowed off and lists no OSC",
+     server_app._stack_fields("x", "", {"requirements": {"filters": {"Ha": 3.0, "OSC-RGB": None},
+                                                         "acceptColour": False}}, {})["policy"]["osc_allowed"] is False
+     and server_app._stack_fields("x", "", {"requirements": {"filters": {"Ha": 3.0, "OSC-RGB": None},
+                                                             "acceptColour": False}}, {})["filters"] == ["HA"])
+case("...nor for one that lists only mono filters (Starfront's own rule: an OSC band must be listed)",
+     server_app._stack_fields("x", "", {"requirements": {"filters": {"Ha": 3.0}}}, {})["policy"]["osc_allowed"] is False)
+case("...and a star-size limit never tightens the contract's FWHM cap",
+     server_app._policy_for({"maxHfr": 1.5}, [])["max_fwhm_arcsec"] == 6
+     and server_app._policy_for({"maxHfr": 30}, [])["max_fwhm_arcsec"] == 20.0)
+FLOW_SEQ = call("GET", f"/api/v1/hubs/{BH}/pull?since=0&wait=0", token=BHTOK)[1]["seq"]
+
+
+def hub_told():
+    global FLOW_SEQ
+    got = call("GET", f"/api/v1/hubs/{BH}/pull?since={FLOW_SEQ}&wait=0", token=BHTOK)[1]
+    FLOW_SEQ = got["seq"]
+    return any(c["kind"] == "project" and c["key"] == FLOW_ID for c in got["changes"])
+
+
+HUB_GRANT = hubs_module.mint_grant(server_app.store.hub(BH), "hub-sync:" + BH, "Hub sync", "", FLOW_ID)
+
+
+def hub_view():
+    """What the hub reads on a `project` row: GET /stack/api/projects/{p} with its own grant."""
+    return front("GET", f"/projects/{FLOW_ID}", token=HUB_GRANT)[1]["project"]
+
+
+EDITS = [
+    ("the name", {"name": "Flow Renamed"}, lambda p: p["name"] == "Flow Renamed" and p["target_name"] == "Flow Renamed"),
+    ("the notes", {"notes": "second notes"}, lambda p: p["description"] == "second notes"),
+    ("the region", {"region": {"ra": 120.0, "dec": 20.0, "width": 4.0, "height": 2.0}},
+     lambda p: p["grid"]["center_ra_deg"] == 120.0 and p["grid"]["center_dec_deg"] == 20.0),
+    ("the filters", {"requirements": {**FLOW_REQ, "filters": {"R": None, "G": None, "B": None}}},
+     lambda p: p["filters"] == ["R", "G", "B"] and p["palette"] == "RGB" and p["policy"]["osc_allowed"] is False),
+    ("the requirements", {"requirements": {"filters": {"Ha": 3.0}, "minExposure": 120}},
+     lambda p: p["policy"]["min_exposure_s"] == 120 and p["policy"]["calibration"] == "preferred"),
+    ("the visibility", {"stacking": {"backend": "hub", "hubId": BH, "visibility": "private"}},
+     lambda p: p["visibility"] == "private"),
+    ("closing it", {"status": "closed"}, lambda p: p["status"] == "closed"),
+    ("reopening it", {"status": "open"}, lambda p: p["status"] == "open"),
+]
+for what, change, seen in EDITS:
+    status, _ = call("PUT", f"/api/v1/projects/{FLOW}", change, token=BOBF)
+    view = hub_view()
+    case(f"editing {what} reaches the stacking project, the hub's feed and what the hub reads",
+         status == 200 and seen(view) and hub_told(), f"{status} {str(view)[:200]}")
+status, _ = call("PUT", f"/api/v1/projects/{FLOW}", {"goals": {"Ha": 20.0}}, token=BOBF)
+case("an edit the stacking project has no field for does not trouble the hub", status == 200 and not hub_told())
+
+# -- 3. /stack/api cannot change a project
+OWNER_FLOW_GRANT = project_in_listing(OWNER_RIG, FLOW)["stacking"]["grant"]
+status, joined = front("POST", f"/projects/{FLOW_ID}/join", {
+    "display_name": "Bob Flow", "accepted_terms_version": "2026-10-13-draft"}, token=OWNER_FLOW_GRANT)
+case("(setup) the owner's telescope joins the stacking project with its grant", status == 200, f"{status} {joined}")
+before = flow_doc()
+ATTEMPTS = [("PUT", f"/projects/{FLOW_ID}", {"name": "Hijacked", "visibility": "public"}),
+            ("PATCH", f"/projects/{FLOW_ID}", {"name": "Hijacked"}),
+            ("DELETE", f"/projects/{FLOW_ID}", None),
+            ("POST", "/projects", {"slug": "second-project", "name": "Second", "filters": ["HA"],
+                                   "owner_display_name": "Bob"}),
+            ("POST", f"/projects/{FLOW_ID}/delete", {"confirm_slug": before["slug"]}),
+            ("POST", f"/projects/{FLOW_ID}/restore", {}),
+            ("POST", f"/projects/{FLOW_ID}/rotate-join-code", {}),
+            ("PUT", f"/projects/{FLOW_ID}/mosaic", {}),
+            ("PUT", f"/projects/{FLOW_ID}/members/{joined['membership']['user_id']}", {"role": "owner"}),
+            ("DELETE", f"/projects/{FLOW_ID}/members/{joined['membership']['user_id']}", None),
+            ("PUT", f"/projects/{FLOW_ID}/filters/mapping", {"filter_mapping": []}),
+            ("POST", f"/projects/{FLOW_ID}/gold", {})]
+refused = []
+for method, path, body in ATTEMPTS:
+    status, got = front(method, path, body, token=OWNER_FLOW_GRANT)
+    if 200 <= status < 300:
+        refused.append(f"{method} {path} -> {status}")
+after = flow_doc()
+case("no /stack/api route creates, edits, deletes or re-keys a project, even for its owner's grant",
+     not refused and {k: v for k, v in after.items() if k != "updated_at"}
+     == {k: v for k, v in before.items() if k != "updated_at"}, "; ".join(refused))
+status, got = front("PUT", f"/projects/{FLOW_ID}/membership", {"role": "owner", "status": "active"},
+                    token=OWNER_FLOW_GRANT)
+case("a member's own membership cannot raise its role or status",
+     status == 400 and got.get("code") == "validation_failed", f"{status} {got}")
+status, got = front("PUT", f"/projects/{FLOW_ID}/membership", {"display_name": "Bob Flowing"},
+                    token=OWNER_FLOW_GRANT)
+others = server_app.store._all("SELECT doc FROM stack_members WHERE project_id = ? AND user_id <> ?",
+                               FLOW_ID, joined["membership"]["user_id"])
+case("...and what it may change touches only its own row",
+     status == 200 and got["membership"]["display_name"] == "Bob Flowing"
+     and all("Bob Flowing" not in r["doc"] for r in others), f"{status} {got}")
+
+# -- 4. the cloud, through the Collab API
+import subprocess as _sp2                                         # noqa: E402
+RSC_DIR = None
+for candidate in ([Path(os.environ["RSC_DIR"])] if os.environ.get("RSC_DIR") else []) + [
+        ROOT.parent / "Rust" / "rapid-stacker-collab", ROOT.parent.parent / "Rust" / "rapid-stacker-collab"]:
+    if (candidate / "backend" / "local" / "server.mjs").is_file():
+        RSC_DIR = candidate
+        break
+STACK_PROC, RSC = None, ""
+if RSC_DIR is not None:
+    import shutil as _shutil
+    if _shutil.which("node"):
+        STACK_PROC = _sp2.Popen(["node", str(RSC_DIR / "backend" / "local" / "server.mjs"), "--port", "0",
+                                 "--quiet", "--exit-on-stdin-close"], stdin=_sp2.PIPE, stdout=_sp2.PIPE,
+                                stderr=_sp2.PIPE, text=True)
+        first = STACK_PROC.stdout.readline()
+        found = _re.search(r"(http://127\.0\.0\.1:\d+)", first or "")
+        if found:
+            RSC = found.group(1)
+        else:
+            reason = (STACK_PROC.stderr.read() or "").strip().splitlines()
+            print("SKIP  the cloud path: Rapid Stacker Collab's local stack did not start ("
+                  + (next((l for l in reason if l.startswith("Error")), reason[-1] if reason else "no output"))[:160]
+                  + "); set RSC_DIR to a checkout with backend/node_modules and no lambdas/*/node_modules")
+            STACK_PROC = None
+    else:
+        print("SKIP  the cloud path: node is not installed")
+else:
+    print("SKIP  the cloud path: no rapid-stacker-collab checkout beside this repository (set RSC_DIR)")
+
+
+def rsc(method, path, body=None, token=None, cookie=None):
+    headers = {"Content-Type": "application/json", "Origin": RSC}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if cookie:
+        headers["Cookie"] = cookie
+    request = urllib.request.Request(RSC + "/api" + path, method=method, headers=headers,
+                                     data=None if body is None else json.dumps(body).encode())
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read() or b"{}"), response.headers
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}"), exc.headers
+
+
+def collab_account(name, email, scopes):
+    rsc("POST", "/auth/register", {"name": name, "email": email, "password": "correct horse battery staple"})
+    mail = json.loads(urllib.request.urlopen(f"{RSC}/_local/mail?to={email}", timeout=10).read())
+    link = next(l for m in mail["messages"] for l in m["links"] if "verify-email" in l)
+    rsc("POST", "/auth/verify-email", {"token": _re.search(r"token=([0-9a-f]{64})", link).group(1)})
+    _, _, headers = rsc("POST", "/auth/login", {"email": email, "password": "correct horse battery staple"})
+    cookie = headers["Set-Cookie"].split(";")[0]
+    return rsc("POST", "/tokens", {"name": "Starfront", "scopes": scopes}, cookie=cookie)[1]["token"]
+
+
+if RSC:
+    CTOKEN = collab_account("Dave", "dave@example.test", ["projects:manage", "projects:read"])
+    READ_ONLY = collab_account("Dave R", "dave.r@example.test", ["projects:read"])
+
+    def remote(project_id):
+        return rsc("GET", f"/projects/{project_id}", token=CTOKEN)[1].get("project") or {}
+
+    def cloud_row(sf):
+        return server_app.CLOUD.row(sf)
+
+    status, got = call("PUT", "/api/v1/stacking/cloud", {"token": "rscu_nope", "apiBase": RSC + "/api"}, token=DAVE)
+    case("cloud link: something that is not a Collab token is refused", status == 400, f"{status} {got}")
+    status, got = call("PUT", "/api/v1/stacking/cloud", {"token": READ_ONLY, "apiBase": RSC + "/api"}, token=DAVE)
+    case("...and so is a token without projects:manage, saying how to make one",
+         status == 400 and "projects:manage" in got.get("detail", ""), f"{status} {got}")
+    status, got = call("PUT", "/api/v1/stacking/cloud", {"token": CTOKEN, "apiBase": RSC + "/api"}, token=DAVE)
+    case("a token with projects:manage links the account (checked with the service)",
+         status == 200 and got["cloud"]["linked"] is True and got["cloud"]["user"] == "Dave"
+         and CTOKEN not in json.dumps(got), f"{status} {got}")
+    stored = server_app.store._one("SELECT token FROM stack_cloud_links WHERE person = '1005'")["token"]
+    case("...kept sealed on the server (the server has a key), never as typed",
+         stored.startswith("v1:") and CTOKEN not in stored and got["cloud"]["sealed"] is True, stored[:12])
+    _, opts = call("GET", "/api/v1/stacking", token=DAVE)
+    case("with no hub, a linked person's default is the cloud", opts["default"]["backend"] == "cloud"
+         and CTOKEN not in json.dumps(opts))
+
+    status, made = call("POST", "/api/v1/projects", {
+        "name": "Cloud Flow", "region": REGION, "notes": "cloud notes",
+        "requirements": {"filters": {"Ha": 3.0, "OIII": 3.0, "OSC-RGB": None}, "minExposure": 60}}, token=DAVE)
+    CF = made["project"]["id"]
+    row = cloud_row(CF)
+    rp = remote(row["project_id"]) if row and row["project_id"] else {}
+    fields = server_app._stack_fields("Cloud Flow", "Dave", server_app.store.project(CF)["payload"],
+                                      binding_of(CF))
+    case("a collaboration started with nothing said is stacked on the cloud: the server made the Collab project",
+         status == 200 and server_app._is_managed(binding_of(CF)) and row["doc"]["state"] == "ok"
+         and row["project_id"].startswith("prj_") and rp.get("status") == "open", str(row)[:300])
+    case("...with exactly the fields a hub project gets: name, notes, filters, palette, visibility, policy",
+         rp.get("name") == "Cloud Flow" and rp.get("description") == "cloud notes"
+         and sorted(rp.get("filters", [])) == ["HA", "OIII", "OSC"] and rp.get("palette") == "HOO"
+         and rp.get("visibility") == "unlisted" and rp.get("policy") == fields["policy"]  # (a set there: sorted)
+         and rp["policy"]["osc_allowed"] is True and rp["policy"]["min_exposure_s"] == 60, str(rp)[:400])
+    case("...framed by the region until the first light (rotation_from_first_light)",
+         rp.get("grid", {}).get("center_ra_deg") == 84.0 and rp.get("rotation_from_first_light") is True)
+    case("...and its join code is kept with it, not in the collaboration's payload",
+         _re.fullmatch(r"[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}", row["join_code"])
+         and row["join_code"] not in json.dumps(server_app.store.project(CF)["payload"]))
+    DAVE_RIG = call("POST", "/api/v1/agents", {"name": "Dave's rig"}, token=DAVE)[1]["token"]
+    mine_c = project_in_listing(DAVE_RIG, CF)
+    other_c = project_in_listing(AGENT_TOKEN, CF)
+    case("the owner's telescope is handed the Collab join code, as a pasted one was; a browsing one is not",
+         mine_c["stackingJoinCode"] == row["join_code"] and mine_c["stackingLinked"] is True
+         and mine_c["stacking"]["managed"] is True and other_c["stackingJoinCode"] == "", str(mine_c["stacking"]))
+
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {
+        "name": "Cloud Renamed", "notes": "edited notes",
+        "region": {"ra": 150.0, "dec": 10.0, "width": 3.0, "height": 2.0},
+        "requirements": {"filters": {"R": None, "G": None, "B": None}, "requireCalibrated": True},
+        "stacking": {"backend": "cloud", "visibility": "private"}}, token=DAVE)
+    rp = remote(cloud_row(CF)["project_id"])
+    case("an edit of the collaboration is a projectsUpdate: name, notes, filters, policy, visibility, grid",
+         status == 200 and rp.get("name") == "Cloud Renamed" and rp.get("description") == "edited notes"
+         and sorted(rp.get("filters", [])) == ["B", "G", "R"] and rp.get("palette") == "RGB" and rp.get("visibility") == "private"
+         and rp["policy"]["calibration"] == "required" and rp["policy"]["osc_allowed"] is False
+         and rp["policy"]["min_exposure_s"] == 5 and rp["grid"]["center_ra_deg"] == 150.0, str(rp)[:400])
+    case("...the policy is sent whole (PUT replaces it): every field is the derived one",
+         rp["policy"] == server_app._stack_fields("x", "", server_app.store.project(CF)["payload"], {})["policy"])
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"status": "closed"}, token=DAVE)
+    case("closing the collaboration pauses the Collab project (its 'closed' cannot reopen)",
+         status == 200 and remote(cloud_row(CF)["project_id"]).get("status") == "paused")
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"status": "open"}, token=DAVE)
+    case("...and reopening it opens it again", remote(cloud_row(CF)["project_id"]).get("status") == "open")
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"stackingJoinCode": cloud_row(CF)["join_code"]}, token=DAVE)
+    case("a plugin's Edit form sending the code back changes nothing", status == 200
+         and server_app._is_managed(binding_of(CF)))
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"stackingJoinCode": "H4RT-92BK-WNPC"}, token=DAVE)
+    case("...a different pasted code is refused", status == 400)
+
+    # A failed call is recorded and retried by the sweep.
+    good_base = RSC + "/api"
+    server_app.store._run("UPDATE stack_cloud_links SET api_base = ? WHERE person = '1005'",
+                          f"http://127.0.0.1:{free_port()}/api")
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"notes": "while it was down"}, token=DAVE)
+    row = cloud_row(CF)
+    status_s, seen_s = call("GET", f"/api/v1/projects/{CF}/stacking", token=DAVE)
+    case("when Collab cannot be reached the edit is saved and the failure recorded on the collaboration",
+         status == 200 and row["doc"]["state"] == "failed" and row["doc"]["attempts"] == 1
+         and row["doc"]["next_at"] > time.time() and "could not be reached" in row["doc"]["error"]
+         and seen_s["cloud"]["state"] == "failed" and seen_s["cloud"]["error"], str(row["doc"])[:200])
+    case("...the sweep does not retry before its back-off", server_app.CLOUD.sweep(time.time()) == 0
+         and cloud_row(CF)["doc"]["attempts"] == 1)
+    server_app.store._run("UPDATE stack_cloud_links SET api_base = ? WHERE person = '1005'", good_base)
+    retried = server_app.CLOUD.sweep(time.time() + 3600)
+    case("...and once it answers again the sweep's retry brings the Collab project in step",
+         retried >= 1 and cloud_row(CF)["doc"]["state"] == "ok"
+         and remote(cloud_row(CF)["project_id"]).get("description") == "while it was down", str(cloud_row(CF)["doc"])[:200])
+
+    # Deleting and restoring.
+    status, got = call("DELETE", f"/api/v1/projects/{CF}", token=DAVE)
+    row = cloud_row(CF)
+    rp = remote(row["project_id"])
+    case("deleting the collaboration files the 7-day deletion here and asks Collab to delete (confirm_slug)",
+         status == 200 and got["deletion"]["status"] == "deleted" and got["deletion"]["delete_after"]
+         and server_app.store.project(CF)["status"] == "closed", f"{status} {got}")
+    case("...the contract keeps projectsDelete for a browser session, so the project is paused and the owner told where",
+         rp.get("status") in ("paused", "deleted") and (rp.get("status") == "deleted" or (
+             row["doc"]["state"] == "needs_owner" and f"/p/{row['slug']}" in row["doc"]["error"])), str(row["doc"])[:300])
+    _, opts = call("GET", "/api/v1/stacking", token=DAVE)
+    case("...the deleted collaboration is listed for its owner, restorable, with the window",
+         any(x["id"] == CF and x["restorable"] and x["backend"] == "cloud" for x in opts["deleted"])
+         and opts["windowDays"] == 7)
+    case("...and its join code is no longer handed out", server_app.CLOUD.join_code(CF) == "")
+    status, got = call("PUT", f"/api/v1/projects/{CF}", {"notes": "x"}, token=DAVE)
+    case("...nor may it be edited while deleted: 409", status == 409)
+    status, got = call("POST", f"/api/v1/projects/{CF}/restore", token=DAVE)
+    case("restoring it reopens the collaboration and the Collab project",
+         status == 200 and server_app.store.project(CF)["status"] == "open"
+         and remote(cloud_row(CF)["project_id"]).get("status") == "open" and cloud_row(CF)["doc"]["state"] == "ok",
+         f"{status} {got}")
+
+    # Unbinding pauses it; binding again reopens the same project.
+    pid_before = cloud_row(CF)["project_id"]
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"stacking": {"backend": ""}}, token=DAVE)
+    case("unbinding pauses the Collab project and stops handing out its code",
+         status == 200 and remote(pid_before).get("status") == "paused"
+         and project_in_listing(DAVE_RIG, CF)["stackingJoinCode"] == "")
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"stacking": {"backend": "cloud"}}, token=DAVE)
+    case("...and binding again reopens the same one",
+         status == 200 and cloud_row(CF)["project_id"] == pid_before and remote(pid_before).get("status") == "open")
+
+    # Unlinking: nothing is lost, the next edit waits for a link.
+    call("DELETE", "/api/v1/stacking/cloud", token=DAVE)
+    status, _ = call("PUT", f"/api/v1/projects/{CF}", {"notes": "unlinked"}, token=DAVE)
+    case("with the account unlinked an edit is saved and the sync waits, recorded",
+         status == 200 and cloud_row(CF)["doc"]["state"] == "failed"
+         and cloud_row(CF)["doc"]["code"] == "not_linked")
+    call("PUT", "/api/v1/stacking/cloud", {"token": CTOKEN, "apiBase": RSC + "/api"}, token=DAVE)
+    case("...and linking again catches up at once", cloud_row(CF)["doc"]["state"] == "ok"
+         and remote(pid_before).get("description") == "unlinked")
+    STACK_PROC.stdin.close()
+    STACK_PROC.wait(10)
 
 print()
 print(f"{sum(results)}/{len(results)} passed")

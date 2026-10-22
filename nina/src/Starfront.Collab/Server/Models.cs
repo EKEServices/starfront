@@ -131,6 +131,8 @@ namespace Starfront.Collab.Server {
         [JsonProperty("collabProjectId")] public string CollabProjectId { get; set; } = "";
         /// <summary>The token that lets this telescope upload to the hub (hub projects only).</summary>
         [JsonProperty("grant")] public string Grant { get; set; } = "";
+        /// <summary>A cloud project the Starfront server made from the collaboration and keeps in step (T706); false for an old pasted join code.</summary>
+        [JsonProperty("managed")] public bool Managed { get; set; }
         /// <summary>The join code of a cloud project; not sent by the server inside the binding, filled in for old servers.</summary>
         [JsonIgnore] public string JoinCode { get; set; } = "";
     }

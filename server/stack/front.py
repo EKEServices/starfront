@@ -25,6 +25,8 @@ from .rigs import Rigs
 
 #: How often the sweep looks for uploads that were abandoned.
 SWEEP_EVERY = 900
+#: How often it looks for Rapid Stacker Collab calls due for another try.
+CLOUD_EVERY = 60
 
 
 def build(store: Any, relay: Path | None = None, public: Path | None = None) -> FastAPI:
@@ -60,7 +62,8 @@ def install(app: FastAPI, sub: FastAPI, *, sweep: bool = True) -> None:
     at `/stack`, or the mount answers first.
 
     The sweep aborts uploads left `uploading` for three days, on a daemon
-    thread (the server has no other background job to hang it on).
+    thread (the server has no other background job to hang it on); every
+    minute it also retries the cloud projects' failed calls (`sub.state.cloud`).
     """
     uploads: Uploads = sub.state.uploads
 
@@ -69,8 +72,20 @@ def install(app: FastAPI, sub: FastAPI, *, sweep: bool = True) -> None:
         return await uploads.put_part(request, upload_id, n)
 
     def loop() -> None:
+        last = time.monotonic()
         while True:
-            time.sleep(SWEEP_EVERY)
+            time.sleep(CLOUD_EVERY)
+            # Rapid Stacker Collab calls that failed are retried as soon as their
+            # back-off allows (server/stack/cloud.py), not once in fifteen minutes.
+            cloud = getattr(sub.state, "cloud", None)
+            if cloud is not None:
+                try:
+                    cloud.sweep()
+                except Exception:   # a sweep must never end the thread
+                    pass
+            if time.monotonic() - last < SWEEP_EVERY:
+                continue
+            last = time.monotonic()
             try:
                 sub.state.frames.sweep()
                 sub.state.library.sweep()
