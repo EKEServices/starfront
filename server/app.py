@@ -51,6 +51,7 @@ from server.stack import front as stack_front                   # noqa: E402
 from server.stack import relay as stack_relay                   # noqa: E402
 from server.stack import records as stack_records               # noqa: E402
 from server.stack import projects as stack_projects             # noqa: E402
+from server.stack import deletion as stack_deletion             # noqa: E402
 from server.store import Store                                   # noqa: E402
 
 app = FastAPI(title="Starfront collaboration server", version="0.1.0")
@@ -1001,7 +1002,7 @@ def _stacking_listing(project: dict[str, Any], binding: dict[str, str],
         return out
     hub = store.hub(binding["hubId"])
     row = store.stack_project_of(project["id"])
-    if hub is None or row is None or row["doc"].get("status") == "closed":
+    if hub is None or row is None or row["doc"].get("status") in ("closed", "deleted"):
         return out
     person_id = str(agent.get("owner_id") or "")
     person = store.user(person_id) if person_id else None
@@ -2011,6 +2012,10 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
     because the requirements travel with the task.
     """
     project = _require_project_owner(who, project_id)
+    gone = store.stack_project_of(project_id)
+    if gone is not None and gone["doc"].get("status") == "deleted":
+        raise HTTPException(status_code=409,
+                            detail="this collaboration is deleted; restore it before changing it")
     payload = dict(project.get("payload") or {})
     if body.region is not None:
         payload["region"] = collab.Region.read(body.region).payload()
@@ -2047,6 +2052,56 @@ def update_project(project_id: str, body: ProjectUpdateRequest,
     updated = store.set_project(project_id, payload, body.status)
     _sync_stack(project_id, name, project.get("coordinator") or "", payload, before, binding)
     return {"project": updated}
+
+
+def _deletion_view(doc: dict[str, Any]) -> dict[str, Any]:
+    return {k: doc.get(k) for k in ("status", "deleted_at", "delete_after", "deleted_by_role",
+                                    "relay_purged_at", "results_removed_at")}
+
+
+@app.delete("/api/v1/projects/{project_id}")
+def delete_project(project_id: str,
+                   who: dict[str, Any] = Depends(person_from)) -> dict[str, Any]:
+    """Delete a hub-backed collaboration (decision D004).
+
+    A restorable, seven-day delayed deletion: the hub is told (a `project` row in
+    its feed) and stops taking frames, joins and uploads on /stack/api answer 409
+    `project_deleted`, and the collaboration leaves everybody's list. After the
+    window the raw frames and the relay copy are purged; the final masters and
+    `status.json` stay until the owner removes them. Owner or server owner.
+    """
+    _require_project_owner(who, project_id)
+    try:
+        doc = stack_deletion.delete(store, project_id, who["id"],
+                                    "admin" if who["admin"] else "owner")
+    except stack_deletion.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    return {"project": project_id, "deletion": _deletion_view(doc)}
+
+
+@app.post("/api/v1/projects/{project_id}/restore")
+def restore_project(project_id: str,
+                    who: dict[str, Any] = Depends(person_from)) -> dict[str, Any]:
+    """Undo a deletion within its seven days; refused with the date after."""
+    _require_project_owner(who, project_id)
+    try:
+        doc = stack_deletion.restore(store, project_id)
+    except stack_deletion.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    return {"project": project_id, "deletion": _deletion_view(doc)}
+
+
+@app.delete("/api/v1/projects/{project_id}/stack/results")
+def remove_stack_results(project_id: str,
+                         who: dict[str, Any] = Depends(person_from)) -> dict[str, Any]:
+    """Remove the results kept after a deletion (`status.json`, masters,
+    previews). Only once the window has passed; the owner or server owner."""
+    _require_project_owner(who, project_id)
+    try:
+        doc = stack_deletion.remove_results(store, project_id, STACK_PUBLIC)
+    except stack_deletion.Refused as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+    return {"project": project_id, "deletion": _deletion_view(doc)}
 
 
 @app.post("/api/v1/projects/{project_id}/redeal")

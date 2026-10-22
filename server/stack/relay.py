@@ -52,6 +52,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from .. import files as files_mod
+from . import deletion
 from ..auth import setting as server_setting
 
 KEEP_DAYS_DEFAULT = 7
@@ -233,7 +234,39 @@ class Relay:
             due_at = iso_epoch(r["due"]) if r["status"] == "withdrawn" else None
             if (r["relayed"] > 0 and now - r["relayed"] >= keep) or (due_at is not None and now >= due_at):
                 gone += self.drop_frame(r["frame_id"])
-        return gone + self.sweep_library(now)
+        return gone + self.sweep_library(now) + self.purge_deleted(now)
+
+    def purge_deleted(self, now: float) -> int:
+        """D004: once a deleted project's 7 days are over, delete the relay bytes
+        that are only its own (its frames; library frames of people who are in no
+        other live hub project). Rows, `status.json` and `masters/` stay."""
+        gone = 0
+        for row in deletion.due_projects(self.store, now):
+            for r in self.store._all("SELECT frame_id FROM stack_frames WHERE project_id = ?"
+                                     " AND path <> ''", row["project_id"]):
+                gone += self.drop_frame(r["frame_id"])
+            for frame_id in deletion.library_only_for(self.store, row):
+                gone += self.drop_library(frame_id)
+            doc = dict(row["doc"])
+            doc["relay_purged_at"] = deletion.stamp(now)
+            self.store.set_stack_project(row["project_id"], row["hub"], doc)
+        return gone
+
+    def drop_library(self, frame_id: str) -> bool:
+        with self.up.lock:
+            row = self.store._one("SELECT * FROM stack_library WHERE frame_id = ?", frame_id)
+            if row is None or not row["path"]:
+                return False
+            removed = True
+            try:
+                self.up.final_file(row["path"]).unlink()
+            except FileNotFoundError:
+                removed = False
+            except OSError:
+                return False
+            self.store._run("UPDATE stack_library SET doc = json_set(doc, '$.relay_deleted', ?),"
+                            " rev = rev + 1 WHERE frame_id = ?", int(time.time()), frame_id)
+            return removed
 
     def sweep_library(self, now: float) -> int:
         keep = keep_seconds()

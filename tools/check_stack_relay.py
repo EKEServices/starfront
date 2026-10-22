@@ -707,6 +707,26 @@ case("...the row and its verdicts remain for the contributor",
 case("the first frame's file (kept 7 days) is untouched by the second's retention",
      any((RELAY / PID).rglob(f"{FID}.fits")))
 
+# ====================================================== 7. deleting it (T704)
+print("\n-- deleting the collaboration --")
+HUB.pull()                                    # drain, so what follows is what deleting added
+status, got = call("DELETE", f"/api/v1/projects/{SFP}", token=BOB)
+case("the owner deletes the collaboration", status == 200 and got["deletion"]["status"] == "deleted", str(got)[:160])
+status, got = HUB.pull()
+case("the hub's pull carries a project row for it", status == 200
+     and [r["key"] for r in got["changes"] if r["kind"] == "project"] == [PID], str(got)[:200])
+status, got = call("GET", f"{API}/projects/{PID}", token=GRANT)
+case("...and reading the project (what the hub does next) shows it deleted with its dates",
+     status == 200 and got["project"]["status"] == "deleted" and got["project"]["delete_after"]
+     and got["project"]["deleted_at"], str(got)[:200])
+status, got = call("POST", f"{API}/projects/{PID}/frames/init", {
+    "sha256": "0" * 64, "size": 4, "filename": "late.fits", "stripped": True,
+    "header": frame_header(1, iso(-10))}, token=GRANT)
+case("a late upload is refused with project_deleted (409)", status == 409 and got.get("code") == "project_deleted", str(got)[:160])
+status, got = call("POST", f"/api/v1/projects/{SFP}/restore", token=BOB)
+case("the owner restores it and the hub is told again", status == 200 and got["deletion"]["status"] == "open"
+     and [r["key"] for r in HUB.pull()[1]["changes"] if r["kind"] == "project"] == [PID], str(got)[:160])
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

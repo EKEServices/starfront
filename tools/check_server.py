@@ -4436,6 +4436,156 @@ case("the same master again is a 200 that rewrites nothing",
      status == 200 and got["written"] is False and (MASTERS / "HA_g000004_xisf.xisf").stat().st_mtime_ns == before,
      f"{status} {got}")
 
+# ------------------------------------------- live stacking: deleting a hub-backed collaboration (T704, D004)
+# Delete files a 7-day restorable deletion: the doc is `deleted`, the hub is told,
+# joins and uploads are 409 project_deleted; restore works inside the window; the
+# sweep after it removes this project's relay bytes (keeping rows, status.json and
+# masters); the owner removes the kept results explicitly.
+print("\n-- live stacking: deleting a hub-backed collaboration --")
+from server.stack import deletion as stack_deletion               # noqa: E402
+
+DEL_PUB = PUBDIR / FD_ID
+DEL_PUB.mkdir(parents=True, exist_ok=True)
+(DEL_PUB / "status.json").write_text(json.dumps({"schema": 1, "kept": True}))
+(DEL_PUB / "masters").mkdir(exist_ok=True)
+(DEL_PUB / "masters" / "kept_master.json").write_text("{}")
+DEL_DATA = fits_bytes(PART + 500, 77)
+DEL_FRAME = upload_frame(DEL_DATA, "to_be_purged.fits")
+DEL_ROWS = server_app.store._one("SELECT COUNT(*) AS n FROM stack_frames WHERE project_id = ?", FD_ID)["n"]
+case("(setup) the relay holds a frame of the project", relay_path(DEL_FRAME).is_file())
+DEL_FEED = feed_since(0)["seq"]
+
+
+def stack_doc():
+    return server_app.store.stack_project(FD_ID)["doc"]
+
+
+def collab_status():
+    return server_app.store.project(HUBP)["status"]
+
+
+was_status, was_collab = stack_doc()["status"], collab_status()
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}", token=CAROL)
+case("a person who did not start the collaboration cannot delete it: 403",
+     status == 403 and stack_doc()["status"] == was_status, f"{status} {got}")
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}")
+case("deleting without signing in is refused", status in (401, 403), str(status))
+_, plain = call("POST", "/api/v1/projects", {"name": "Plain one", "region": REGION,
+                                          "requirements": {"filters": {"Ha": 3.0}}}, token=BOBH)
+status, got = call("DELETE", f"/api/v1/projects/{plain['project']['id']}", token=BOBH)
+case("a collaboration not stacked on a hub is not deleted this way: 400", status == 400, f"{status} {got}")
+
+now = time.time()
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}", token=BOBH)
+d = stack_doc()
+case("the owner deletes it: the stacking doc is deleted with deleted_at, delete_after (+7 days) and deleted_by",
+     status == 200 and d["status"] == "deleted" and d["deleted_by"] and d["deleted_by_role"] == "owner"
+     and abs(stack_deletion.epoch(d["delete_after"]) - (now + 7 * 86400)) < 60
+     and abs(stack_deletion.epoch(d["deleted_at"]) - now) < 60, f"{status} {got} {d}")
+case("...the collaboration itself is closed, so it leaves everybody's list", collab_status() == "closed")
+changes = [c for c in feed_since(DEL_FEED)["changes"] if c["kind"] == "project" and c["key"] == FD_ID]
+case("...and a project row is in the hub's feed", len(changes) == 1, str(changes))
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}", token=BOBH)
+case("deleting it again: 409", status == 409, f"{status} {got}")
+status, got = call("PUT", f"/api/v1/projects/{HUBP}", {"notes": "x"}, token=BOBH)
+case("a deleted collaboration cannot be edited: 409", status == 409, f"{status} {got}")
+
+status, got = init_for(fits_bytes(5000, 78))
+case("an upload to the deleted project is 409 project_deleted",
+     status == 409 and got.get("code") == "project_deleted", f"{status} {got}")
+status, got = front("POST", f"/projects/{FD_ID}/join", {"display_name": "Late Comer", "accepted_terms_version": "2026-10-13-draft"},
+                    token=OWNER_GRANT)
+case("a join is 409 project_deleted", status == 409 and got.get("code") == "project_deleted", f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("a member still reads it: status deleted with delete_after and deleted_at, results kept",
+     status == 200 and got["project"]["status"] == "deleted" and got["project"].get("delete_after") == d["delete_after"]
+     and got["project"].get("deleted_at") and got["project"].get("results_kept") is True, f"{status} {got}")
+
+status, got = call("POST", f"/api/v1/projects/{HUBP}/restore", token=CAROL)
+case("restoring is the owner's: 403 for someone else", status == 403, f"{status} {got}")
+before_restore = feed_since(0)["seq"]
+status, got = call("POST", f"/api/v1/projects/{HUBP}/restore", token=BOBH)
+d = stack_doc()
+case("the owner restores it within the window: back to what it was, nothing of the deletion left",
+     status == 200 and d["status"] == was_status and collab_status() == was_collab
+     and not any(k in d for k in ("deleted_at", "delete_after", "deleted_by", "status_before_delete")), f"{status} {got} {d}")
+case("...with another project row in the hub's feed",
+     [c for c in feed_since(before_restore)["changes"] if c["kind"] == "project" and c["key"] == FD_ID] != [])
+status, got = init_for(fits_bytes(5000, 79))
+case("...and uploads work again", status == 200, f"{status} {got}")
+status, got = call("POST", f"/api/v1/projects/{HUBP}/restore", token=BOBH)
+case("restoring what is not deleted: 409", status == 409, f"{status} {got}")
+
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}", token=BOBH)
+status_w, got_w = call("DELETE", f"/api/v1/projects/{HUBP}/stack/results", token=BOBH)
+case("the kept results cannot be removed inside the window: 409", status_w == 409
+     and (DEL_PUB / "status.json").is_file(), f"{status_w} {got_w}")
+status_s = server_app.STACK_RELAY.sweep()
+case("the sweep inside the window removes nothing of the project",
+     relay_path(DEL_FRAME).is_file() and not stack_doc().get("relay_purged_at"), str(status_s))
+
+# Past the window: the sweep purges the relay bytes.
+d = stack_doc()
+d["delete_after"] = stack_deletion.stamp(time.time() - 60)
+server_app.store.set_stack_project(FD_ID, server_app.store.stack_project(FD_ID)["hub"], d)
+status, got = call("POST", f"/api/v1/projects/{HUBP}/restore", token=BOBH)
+case("after the window a restore is refused with a clear message",
+     status == 409 and "window ended" in got.get("detail", "") and d["delete_after"][:10] in got["detail"], f"{status} {got}")
+DEL_ROWS = server_app.store._one("SELECT COUNT(*) AS n FROM stack_frames WHERE project_id = ?", FD_ID)["n"]
+DATA_DL = fits_bytes(6000, 81)
+status, got = lib_init(DATA_DL, "dark_purge.fits")
+DEL_LIB = got["frame_id"]
+etag = put_part(got["upload"]["part_urls"][0]["url"], DATA_DL)[1]["ETag"]
+front("POST", f"{LIB}/frames/{DEL_LIB}/complete", {"etags": [{"part_number": 1, "etag": etag}]}, token=OWNER_GRANT)
+LIB_FILES = [RELAY / server_app.store._one("SELECT path FROM stack_library WHERE frame_id = ?", DEL_LIB)["path"]]
+case("(setup) the owner has a library frame on the relay", LIB_FILES[0].is_file())
+OTHER_LIVE = server_app.store._all(
+    "SELECT m.project_id FROM stack_members m JOIN stack_projects p ON p.project_id = m.project_id"
+    " WHERE m.user_id = ? AND m.project_id <> ? AND p.hub <> ''", OWNER_UID, FD_ID)
+case("a library frame of someone still in another live hub project is not this project's alone (when they are)",
+     not OTHER_LIVE or DEL_LIB not in stack_deletion.library_only_for(
+         server_app.store, server_app.store.stack_project(FD_ID)), str(OTHER_LIVE))
+for o in OTHER_LIVE:
+    server_app.store._run("UPDATE stack_members SET doc = json_set(doc, '$.status', 'removed')"
+                          " WHERE project_id = ? AND user_id = ?", o["project_id"], OWNER_UID)
+case("...and it is once they are in no other", DEL_LIB in stack_deletion.library_only_for(
+    server_app.store, server_app.store.stack_project(FD_ID)))
+LIB_ROWS = server_app.store._one("SELECT COUNT(*) AS n FROM stack_library")["n"]
+FRAME_FILES = [relay_path(r["frame_id"]) for r in server_app.store._all(
+    "SELECT frame_id FROM stack_frames WHERE project_id = ? AND path <> ''", FD_ID)]
+case("(setup) there are relay files to purge", DEL_FRAME in [r["frame_id"] for r in server_app.store._all(
+    "SELECT frame_id FROM stack_frames WHERE project_id = ?", FD_ID)] and any(p.is_file() for p in FRAME_FILES))
+server_app.STACK_RELAY.sweep()
+case("the sweep after the window deletes the project's relay bytes, and the library frames only it owned",
+     not any(p.is_file() for p in FRAME_FILES + LIB_FILES), str([str(p) for p in FRAME_FILES if p.is_file()]))
+case("...keeps every frame row (marked relay_deleted)",
+     server_app.store._one("SELECT COUNT(*) AS n FROM stack_frames WHERE project_id = ?", FD_ID)["n"] == DEL_ROWS
+     and json.loads(server_app.store._one("SELECT doc FROM stack_frames WHERE frame_id = ?", DEL_FRAME)["doc"]).get("relay_deleted")
+     and all(server_app.store._one("SELECT 1 AS x FROM stack_library WHERE path = ?", p.relative_to(RELAY).as_posix()) for p in LIB_FILES))
+case("...and the library rows", server_app.store._one("SELECT COUNT(*) AS n FROM stack_library")["n"] == LIB_ROWS)
+case("...keeps status.json and masters/ (D004)",
+     (DEL_PUB / "status.json").is_file() and (DEL_PUB / "masters" / "kept_master.json").is_file())
+case("...and records that the relay was purged", bool(stack_doc().get("relay_purged_at")))
+status, _, body = raw_get(f"/stack/public/{FD_ID}/status.json")
+case("...so the project page's status.json is still served", status == 200 and b"kept" in body, str(status))
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("...and the project still reads, as deleted with its results kept",
+     status == 200 and got["project"]["status"] == "deleted" and got["project"]["results_kept"] is True)
+server_app.STACK_RELAY.sweep()
+case("a second sweep is quiet", server_app.STACK_RELAY.purge_deleted(time.time()) == 0)
+
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}/stack/results", token=CAROL)
+case("a person who is not the owner cannot remove the kept results: 403",
+     status == 403 and (DEL_PUB / "status.json").is_file(), f"{status} {got}")
+status, got = call("DELETE", f"/api/v1/projects/{HUBP}/stack/results", token=BOBH)
+case("the owner removes the kept results: the public folder is gone",
+     status == 200 and not DEL_PUB.exists() and stack_doc().get("results_removed_at"), f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}", token=OWNER_GRANT)
+case("...and the project says the results are no longer kept",
+     status == 200 and got["project"]["results_kept"] is False, f"{status} {got}")
+status, _, _ = raw_get(f"/stack/public/{FD_ID}/status.json")
+case("...status.json is 404", status == 404, str(status))
+
 print()
 print(f"{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
