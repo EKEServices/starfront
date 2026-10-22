@@ -209,7 +209,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.3: admin tokens, fleet, pause, projects with queue depths and disk use, standalone project create and update, hub status, worker revoke.
       **Verify:** `cd worker && cargo test -p collab-hub`
 
-- [ ] T304 — Public artefacts and the publish signal
+- [x] T304 — Public artefacts and the publish signal
       **Files:** RSC `worker/crates/hub/src/routes/public.rs`, `worker/crates/hub/src/objects.rs`
       **Do:** §3.4: `/public/{project_id}/…` with `s3-layout.md` cache headers and content types, `..` refused; a `status.json` write queues a push (consumed in T415).
       **Verify:** `cd worker && cargo test -p collab-hub`
