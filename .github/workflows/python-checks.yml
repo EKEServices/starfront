@@ -47,7 +47,6 @@ jobs:
           allowed_reason() {
             case "$1" in
               check_coordinator) echo "four colour-camera cases fail since before live stacking was added (see CLAUDE.md)" ;;
-              check_livestack) echo "the server does not mount the stack router (server/stacks.py) and reports no liveStacking flag" ;;
               check_night_rollover) echo "depends on the machine's timezone: 9/17 under UTC, 15/17 under America/New_York" ;;
               check_reference) echo "two reference-angle cases fail on the base commit; not yet diagnosed" ;;
               *) return 1 ;;
