@@ -1,6 +1,9 @@
 # Core
 fastapi>=0.110
 uvicorn[standard]>=0.27
+# Form parsing (Starlette's request.form()): the hub's multipart push to the
+# server needs it, and neither fastapi nor uvicorn[standard] brings it.
+python-multipart>=0.0.18
 numpy>=1.24
 
 # The application window (Edge WebView2 on Windows).  Only needed for the
