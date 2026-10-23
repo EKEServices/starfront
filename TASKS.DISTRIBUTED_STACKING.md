@@ -147,7 +147,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §1.7: `/api/worker/*` over the T109 functions (heartbeat answers `min_contract`, `server_time`, 409 below); `/hub/v1/store/{op}` (the closed list only), `/hub/v1/objects/{key}` (Range, HEAD, streamed PUT, listing; `raw/` refused), `/hub/v1/queue/{op}`; `rscw_` tokens and `collab-hub token`.
       **Verify:** `cd worker && cargo test -p collab-hub --test worker_routes`
 
-- [ ] T111 — `collab-hub import` and the hub variant of `daemon_e2e` (ignored until T203)
+- [x] T111 — `collab-hub import` and the hub variant of `daemon_e2e` (ignored until T203)
       **Files:** RSC `worker/crates/hub/src/main.rs`, `worker/crates/hub/src/import.rs`, `worker/crates/worker/tests/daemon_e2e.rs`
       **Do:** import a `simulate --synthetic --out DIR` tree (records and objects); `collab_hub::app::serve(cfg)` returning the bound address; the `--hub` scenario written and `#[ignore]`d.
       **Verify:** `cd worker && cargo test -p collab-hub && cargo clippy --workspace --all-targets -- -D warnings`
