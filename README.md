@@ -2056,8 +2056,9 @@ A collaboration's frames can be stacked on a machine in your own house instead
 of on the cloud stack.  The collaboration server stays what it already is, a
 durable mailbox that the telescopes upload to; a **hub** on the home network
 pulls the frames down, deals them to workers, and pushes the stacks back up for
-the progress pages.  What follows is why it is built that way, what is built,
-and what is still planned.  Where a piece is not written yet, it is said so.
+the progress pages.  What follows is why it is built that way and what is
+built; the last list names what is still open.  The operator's guide to the hub
+is `docs/runbooks/starfront-hub.md` in the Rapid Stacker Collab repository.
 
 ### The hub
 
@@ -2080,8 +2081,23 @@ start does not spin the processor.  On a Mac the hub is kept awake with
 `caffeinate` for as long as it runs, because a sleeping hub is a hub that
 disappears from its workers in the middle of a stack.
 
-The desktop's supervisor is built.  The hub's own routes, store and background
-tasks are not written yet; the supervisor's tests run against a fake hub.
+The hub itself is built (`worker/crates/hub` in Rapid Stacker Collab): the
+contract's routes over SQLite and a local object store, the queues, the
+background tasks (sweep, gold scheduler, dead-letter drain, retention, the
+free-space floor), the catalogue service and the link to this server.  It runs
+beside the cloud stack, not in place of it: a collaboration is stacked on a hub
+or on Rapid Stacker Collab's cloud, and both backends stay supported.
+
+**How to see it work on one Mac.**  `python3 tools/local_night.py` starts the
+local server (`run_local.py --lan`), a registered hub and one enrolled worker
+under one data folder, binds a throw-away collaboration to the hub, and prints
+the URLs and what the Windows PC needs (the worker enrol command and the plugin's
+server address).  `--synthetic` also uploads synthetic frames through the front
+door as a telescope would, and `--exit-when-stacked` waits for the first live
+preview, tears everything down and exits 0.  The topology it builds is the real
+one: telescope or plugin -> this server's `/stack/api` (or straight to the hub
+on the LAN) -> the hub -> workers, and the hub pushes previews back to this
+server's progress pages.
 
 ### One copy of the catalogue, read by everybody
 
@@ -2272,8 +2288,9 @@ Calibration (decision **D001**): each backend keeps its own calibration
 library.  A telescope's darks, bias and flats for a hub live apart from its
 cloud library, so an outage on one side cannot change which darks the other
 side's stacks use.  A rig-scoped call goes to the backend the rig mostly uses,
-the plugin's default backend.  Keeping a rig id per backend, so the two do not
-overwrite each other, is not done yet.
+the plugin's default backend.  The rig id is kept per backend so the two do not
+overwrite each other (T607): the cloud uses the telescope profile's own, and a hub
+link has its own, shared by the links to the same hub.
 
 ### Volunteers
 
@@ -2297,7 +2314,8 @@ with "no release signing key configured".  That is the intended state: the key
 does not exist yet, and an unsigned worker is not run.  The hub's own binary
 goes through the same checks, from the server's `download/collab-hub/`.
 
-**The Windows worker is a logon task, not a service** (planned, T207).  It runs
+**The Windows worker is a logon task, not a service** (`collab-worker service
+install`, T207).  It runs
 in the volunteer's own session, so it can read the mapped drive that the catalogue
 folder is on, with the credentials that mapping already uses.  A Windows service
 runs as another account, which normally cannot see the user's mapped drives, and
@@ -2310,9 +2328,10 @@ cap.  The sequencer holds a busy file for exactly as long as a night is being
 imaged, and clears it on every way a night can end, including an exception.  It
 is not held while a loop waits for dusk, so a sequence armed in the afternoon
 does not idle the volunteers all day.  The worker reads the busy file and the
-work window and does not take jobs while they say no (planned, T206).  Pausing
-while N.I.N.A. is open has a setting, but nothing applies it yet, because the
-worker has no key for it.
+work window and does not take jobs while they say no (T206); a job already in
+hand is finished, and the heartbeat says why the worker is busy.  Pausing while
+N.I.N.A. is open is the worker's `pause_while_nina` key, which the desktop
+writes with the other settings.
 
 **What a volunteer's machine sees.**  Other people's frames, and only as far as
 the frame itself allows.
@@ -2324,11 +2343,12 @@ the frame itself allows.
   location in it.
 - **Scratch only while the job runs.**  A frame is in the worker's scratch folder
   while it is being stacked, and is collected afterwards.  The scratch folder has
-  a cap; the planned default is half of the free space up to 200 GB, and an
-  enrol on a disk with under 20 GB free is refused (planned, T204).
+  a cap; `collab-worker enrol` proposes half of the free space up to 200 GB, and
+  refuses (before it spends the code) when that is under 20 GB.
 
-**Power** (planned).  A sleeping volunteer simply misses messages, which the
-hub's sweep is meant to resend.
+**Power.**  A sleeping volunteer simply misses messages; they become visible to
+another worker, and the hub's sweep (every five minutes) resends what a crash or
+a lost send left behind.
 
 ### Transport and licences
 
@@ -2344,41 +2364,65 @@ every file that names the origin.  The vendored OpenSeadragon keeps its own
 BSD-3-Clause licence, listed in `server/web/stack/NOTICE.txt`.  The hub and the
 worker stay in the Rapid Stacker Collab repository and are not MPL.
 
-**Deleting a hub-backed collaboration** (decision **D004**, planned, T704).
-Deleting files a restorable deletion on the hub that lasts seven days.  After
-that, the raw subs and the server's relay copy are purged.  The final masters and
+**Deleting a hub-backed collaboration** (decision **D004**, built: see the
+section above).  Deleting files a restorable deletion on the hub that lasts
+seven days.  After that, the raw subs and the server's relay copy are purged.  The final masters and
 `status.json` are kept, for the hub's backup and the project page, until the owner
 removes them.  A week is long enough to undo a mistake, and the masters are what
 the collaboration produced.
 
 ### What is built, and what is not
 
-Built and merged:
+Built and merged (the final state of the distributed-stacking plan, T001 to
+T706, except where the last list says otherwise):
 
-- the desktop's hub supervisor (`astrocontrol/hub.py`) and volunteer installer
-  (`astrocontrol/volunteer.py`), with the signature check;
-- on the server, hub registration, heartbeat, the change feed and grants
-  (`server/hubs.py`), the project binding and the listing's `stacking` block, the
-  front door's envelope, grant checks, projects, membership and rigs
-  (`server/stack/`), and the progress pages with their CSP (`server/web/stack/`);
-- in the plugin, the routing client, the LAN short-cut, and joining a hub project
-  without a Collab sign-in.
+- **The hub**, in Rapid Stacker Collab (`worker/crates/hub`, `collab-hub`):
+  `check`, `run`, `token`, `enrol-code`, `backup` and `simulate`; the contract's
+  worker and contributor routes over SQLite and a local object store; the queues;
+  the catalogue service (each project's cone search once); the background tasks;
+  worker enrolment and the fleet view; and the link to this server (heartbeat,
+  change feed, frame relay, verdicts and previews pushed back, streamed masters).
+  Projects reach it only from this server's feed.
+- **The worker**: hub mode in `collab-worker` (it reproduces the simulator's
+  stacks bit for bit over a hub), `enrol`, `service install` as a logon task or
+  unit, the busy-file, work-window and N.I.N.A. gates, the contract handshake
+  (exit 3 on a mismatch), and `self-update` against a signed manifest.
+- **The desktop** (`astrocontrol/hub.py`, `astrocontrol/volunteer.py`): the hub
+  supervisor and its install, registration, enrol codes and fleet in the Collab
+  tab; the volunteer installer with the signature check; the Live stacking
+  fieldset; Delete and Restore.
+- **This server**: hub registration, heartbeat, the change feed and grants
+  (`server/hubs.py`); the front door at `/stack/api` (projects, join, frames,
+  calibration library, status, events, masters, mosaic, "my projects"); the
+  frame relay and acknowledgements, record reads for members and rigs, push
+  ingestion including streamed masters (`server/stack/`); the progress pages and
+  dashboard (`server/web/stack/`); the stacking project derived from the
+  collaboration, the cloud link through the Collab API, and the seven-day
+  deletion.  `server/README.md` lists the routes.
+- **The plugin**: the routing client (hub or cloud by project), the LAN
+  short-cut, joining a hub project without a Collab sign-in, and a hub's 401
+  clearing only its own link's grant.
+- **Checks**: `tools/check_hub.py`, `check_volunteer.py`, `check_stack_relay.py`
+  (the whole server loop against a fake hub), `check_csp.py` and the server
+  checks run in CI (`.github/workflows/python-checks.yml`); `tools/local_night.py`
+  brings the real programs up together.
 
-Planned, and not yet in the code:
+Still open:
 
-- the hub's own routes, SQLite store, queues and background tasks, in Rapid
-  Stacker Collab (T102 to T111, T301 to T310), including the catalogue service
-  that runs each project's cone search once (T306);
-- the Collab tab's hub wizard and Volunteer section (T505);
-- the worker's hub adapters, `enrol`, `service install` as a logon task, the
-  pause and work-window rules, and the version handshake (T201 to T208);
-- the frame relay and the library endpoints on the server (T405, T406), push
-  ingestion and `/stack/public` (T407), and the "My projects" dashboard (T409);
-- signed release archives (T411). Until a release key exists, installs are
-  refused, as described above;
-- `collab-worker self-update` on Windows, macOS and Linux (decision **D005**,
-  T418), and a hub 401 that clears only its own link's grant (T607);
-- the deletion described above (T704).
+- **Signing keys.**  The release key does not exist yet: the placeholders in
+  `volunteer.py` and in the worker's `self_update.rs` refuse every install and
+  update until the author generates the key and pastes its public half into both.
+  The hub's binary goes through the same check.
+- **A real night.**  Nothing here has been run from N.I.N.A. on the Windows PC
+  against a real hub, and two real workers have not drained a hub on the home
+  network (T208, T705).  `tools/local_night.py` is the way to start.
+- **Real catalogue data through a standalone hub** (T310) and the hub checklist
+  in N.I.N.A. (T606) are not done.
+- **TLS** on the hub is not built (decision D006): plain HTTP on a trusted LAN.
+- **Collab's `projectsDelete` and `projectsRestore`** accept only a browser
+  session, so a cloud-backed collaboration is paused instead of deleted.
+- A deletion's purge on the hub follows `delete_after` by up to a day, because
+  the retention loop runs daily.
 
 ## Layout
 
@@ -2428,6 +2472,8 @@ tools/                     checks, run as python tools/check_<name>.py
   check_hub.py             the hub supervisor, against a fake collab-hub
   check_volunteer.py       the installer, against a fake signed manifest
   check_csp.py             the progress pages carry no inline script or style
+  check_stack_relay.py     the server's whole hub loop, against a fake hub
+  local_night.py           the server, a hub and a worker together, on this Mac
 ```
 
 Three design decisions worth knowing about:
