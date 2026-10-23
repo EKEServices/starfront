@@ -268,7 +268,9 @@ class Uploads:
         part.parent.mkdir(parents=True, exist_ok=True)
         md5 = hashlib.md5(usedforsecurity=False)
         written = 0
-        fd = os.open(part, os.O_RDWR | os.O_CREAT, 0o600)
+        # O_BINARY: Windows opens a bare descriptor in text mode and turns every 0x0A
+        # into 0x0D 0x0A, so the file outgrows the part (absent elsewhere).
+        fd = os.open(part, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
         try:
             os.lseek(fd, (n - 1) * PART_SIZE, os.SEEK_SET)
             async for chunk in request.stream():

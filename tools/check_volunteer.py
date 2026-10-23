@@ -29,6 +29,7 @@ import io
 import json
 import os
 import random
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -51,6 +52,34 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey 
 
 from astrocontrol import ed25519_verify, volunteer                           # noqa: E402
 from astrocontrol.config import Config                                        # noqa: E402
+
+
+class _WindowsFakes:
+    """Windows cannot execute a script with a shebang (WinError 193), so there the
+    fakes are handed to the interpreter. `volunteer` sees this in place of `subprocess`;
+    everything but the fakes' own argv goes through untouched."""
+
+    def __init__(self):
+        self._real = subprocess
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    @staticmethod
+    def _argv(args):
+        if os.name == "nt" and isinstance(args, (list, tuple)) and args \
+                and Path(str(args[0])).name in {"collab-worker"}:
+            return [sys.executable, *map(str, args)]
+        return args
+
+    def run(self, args, *a, **kw):
+        return self._real.run(self._argv(args), *a, **kw)
+
+    def Popen(self, args, *a, **kw):
+        return self._real.Popen(self._argv(args), *a, **kw)
+
+
+volunteer.subprocess = _WindowsFakes()
 
 results = []
 
