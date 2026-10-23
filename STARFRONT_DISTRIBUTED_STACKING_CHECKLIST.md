@@ -34,6 +34,14 @@ Write the versions here before you start:
 ## 0.1 Code and binaries on the Mac
 
 - [ ] Pull both repositories: `git -C SF pull` and `git -C RSC pull`.
+- [ ] Install Starfront's Python requirements into the Python you run it with (on this Mac, Anaconda's `python3` lacked
+  `python-multipart`, without which the hub's results are refused and no preview ever appears):
+
+  ```bash
+  cd SF && python3 -m pip install -r requirements.txt
+  ```
+
+  `local_night.py` and `server/run_local.py` now refuse to start without it and print this command.
 - [ ] Build the three programs (needs your rapid-stacker access; `local_night.py` also does this unless given `--no-build`):
 
   ```bash

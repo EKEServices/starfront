@@ -192,6 +192,17 @@ def refuse(message: str) -> None:
     sys.exit(2)
 
 
+
+def missing_requirements() -> list[str]:
+    """The server's requirements this Python lacks. python-multipart above all:
+    without it the hub's results push is refused (400 "not multipart") and no
+    preview ever reaches the pages, which otherwise shows only as a stack that
+    never appears."""
+    import importlib.util
+    wanted = {"fastapi": "fastapi", "uvicorn": "uvicorn", "python_multipart": "python-multipart"}
+    return [pip for mod, pip in wanted.items() if importlib.util.find_spec(mod) is None]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Starfront collaboration server, locally, with a stand-in Discord")
@@ -203,6 +214,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lan", action="store_true",
                         help="listen on the network (0.0.0.0) for another PC to reach")
     args = parser.parse_args(argv)
+    missing = missing_requirements()
+    if missing:
+        refuse(f"this Python ({sys.executable}) lacks {', '.join(missing)}: "
+               f"run {sys.executable} -m pip install -r requirements.txt")
 
     owner = args.name.strip().lstrip("@").lower()
     if not _NAME.match(owner):

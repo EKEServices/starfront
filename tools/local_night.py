@@ -390,6 +390,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="a Discord webhook URL for the collaboration (gold published, member joined); "
                              "the desktop has no field for it yet")
     args = parser.parse_args(argv)
+    from server.run_local import missing_requirements
+    missing = missing_requirements()
+    if missing:
+        parser.error(f"this Python ({sys.executable}) lacks {', '.join(missing)}, which the server needs: "
+                     f"run {sys.executable} -m pip install -r requirements.txt")
     region = (84.0, 0.0, 1.0, 1.0)
     if args.region:
         try:
