@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -89,6 +90,36 @@ def get(url, data=None):
         return exc.code, exc.headers.get("Location", ""), exc.read().decode()
 
 
+class Launched(subprocess.Popen):
+    """The launcher, with its output read as it is written.
+
+    Nothing read the pipe until the server was stopped, which is fine while the
+    log fits the pipe (64 KB on Linux and macOS) and a hang once it does not: a
+    Windows pipe holds about 4 KB, the server blocked writing an access-log line
+    and the next request timed out. A reader thread keeps the pipe empty.
+    """
+
+    def __init__(self, args, **kw):
+        super().__init__(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
+        self._lines: list[str] = []
+        self._reader = threading.Thread(target=lambda: self._lines.extend(self.stdout), daemon=True)
+        self._reader.start()
+
+    def output(self) -> str:
+        self._reader.join(timeout=2)
+        return "".join(self._lines)
+
+    def stop(self) -> str:
+        self.terminate()
+        try:
+            self.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.kill()
+            self.wait()
+        self._reader.join(timeout=10)
+        return "".join(self._lines)
+
+
 def launcher_env():
     env = dict(os.environ)
     # Keep the program's own data folder out of it, as every check does.
@@ -145,9 +176,8 @@ case("an owner name Discord could not have is refused", done.returncode != 0)
 PORT = free_port()
 BASE = f"http://127.0.0.1:{PORT}"
 DATA = Path(tempfile.mkdtemp()) / "local"
-server = subprocess.Popen([sys.executable, str(LAUNCHER), "--port", str(PORT), "--data", str(DATA)],
-                          env=launcher_env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                          text=True)
+server = Launched([sys.executable, str(LAUNCHER), "--port", str(PORT), "--data", str(DATA)],
+                  env=launcher_env())
 try:
     for _ in range(150):
         try:
@@ -158,7 +188,7 @@ try:
                 break
             time.sleep(0.2)
     if not case("the launcher starts and serves", server.poll() is None):
-        print(server.stdout.read())
+        print(server.stop())
         sys.exit(1)
 
     status = json.loads(get(f"{BASE}/api/v1/auth")[2])
@@ -248,12 +278,7 @@ try:
     status, _, _ = get(f"{BASE}/_local/discord/users/@me")
     case("who-am-I needs a token the stand-in issued", status == 401)
 finally:
-    server.terminate()
-    try:
-        out, _ = server.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        server.kill()
-        out, _ = server.communicate()
+    out = server.stop()
 
 case("the banner names the stand-in and its owner",
      "Stand-in Discord" in out and "@ncedelliott owns this server" in out)
@@ -265,10 +290,9 @@ case("the shell's real Discord settings were not used",
 # ------------------------------------------------------------- --lan
 LAN_PORT = free_port()
 LAN_DATA = Path(tempfile.mkdtemp()) / "lan"
-lan = subprocess.Popen([sys.executable, str(LAUNCHER), "--lan", "--port", str(LAN_PORT),
-                        "--data", str(LAN_DATA)],
-                       env=launcher_env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       text=True)
+lan = Launched([sys.executable, str(LAUNCHER), "--lan", "--port", str(LAN_PORT),
+                "--data", str(LAN_DATA)],
+               env=launcher_env())
 try:
     local = f"http://127.0.0.1:{LAN_PORT}"
     for _ in range(150):
@@ -280,7 +304,7 @@ try:
                 break
             time.sleep(0.2)
     if not case("--lan starts and serves", lan.poll() is None):
-        print(lan.stdout.read())
+        print(lan.stop())
         sys.exit(1)
 
     ip = lan_ip()
@@ -303,12 +327,7 @@ try:
     case("--lan: the stand-in's sign-in page is at the LAN address too",
          authorize.startswith(f"{lan_base}/_local/discord/oauth2/authorize?"), authorize[:80])
 finally:
-    lan.terminate()
-    try:
-        lan_out, _ = lan.communicate(timeout=10)
-    except subprocess.TimeoutExpired:
-        lan.kill()
-        lan_out, _ = lan.communicate()
+    lan_out = lan.stop()
 
 case("--lan binds every interface (0.0.0.0), and says so",
      f"listening http://0.0.0.0:{LAN_PORT}" in lan_out)

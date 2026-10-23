@@ -25,6 +25,7 @@ import json
 import os
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -42,6 +43,34 @@ os.environ["ASTRO_DATA_DIR"] = str(WORK / "data")
 from astrocontrol import hub                                     # noqa: E402
 from astrocontrol.collabadmin import CollabError                 # noqa: E402
 from astrocontrol.config import Config                           # noqa: E402
+
+
+class _WindowsFakes:
+    """Windows cannot execute a script with a shebang (WinError 193), so there the
+    fakes are handed to the interpreter. `hub` sees this in place of `subprocess`;
+    everything but the fakes' own argv goes through untouched."""
+
+    def __init__(self):
+        self._real = subprocess
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    @staticmethod
+    def _argv(args):
+        if os.name == "nt" and isinstance(args, (list, tuple)) and args \
+                and Path(str(args[0])).name in {"collab-hub", "caffeinate"}:
+            return [sys.executable, *map(str, args)]
+        return args
+
+    def run(self, args, *a, **kw):
+        return self._real.run(self._argv(args), *a, **kw)
+
+    def Popen(self, args, *a, **kw):
+        return self._real.Popen(self._argv(args), *a, **kw)
+
+
+hub.subprocess = _WindowsFakes()
 
 results = []
 
