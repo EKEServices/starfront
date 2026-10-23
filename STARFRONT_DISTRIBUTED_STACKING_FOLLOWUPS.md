@@ -10,23 +10,20 @@ set out step by step in `STARFRONT_DISTRIBUTED_STACKING_CHECKLIST.pdf` beside th
 
 | Repository | Branch and commit | CI on that commit |
 |---|---|---|
-| Starfront | `main` `5a6b5ce` | Python checks pass on Ubuntu and Windows (first green run since the workflow was added) |
-| Rapid Stacker Collab | `master` `419b599` | backend-ci and contract-ci pass; **worker-ci was still running when this was written** (its Windows job takes about 1 h 40 min; it passed on the same code in pull request #22) |
+| Starfront | `main` (this document's commit) | Python checks pass on Ubuntu and Windows (green since `5a6b5ce`, the first green run since the workflow was added) |
+| Rapid Stacker Collab | `master` `96e7157` | every workflow passes: worker-ci (all three OSes and both hub end-to-end jobs), backend-ci, contract-ci, local-e2e, plugin-ci, site-ci |
+
+Collab's contract is now **1.29.0** (one additive change, below). A hub refuses workers older than its own contract, which only
+matters once worker builds are released: release the hub and workers together.
 
 Nothing was deployed, released or signed. No AWS resource was touched.
 
 # Do first this morning
 
-1. **Check Collab's worker-ci on master.** Actions, worker-ci, the run for `419b599`. If it is red, the failing job's log is the
-   place to start; the same code passed every job on PR #22.
-2. **Install Starfront's Python requirements on the Mac.** Your Anaconda `python3` lacks `python-multipart`; without it the local
-   server refuses every result the hub sends back. `local_night.py` now stops at once and says so.
-
-   ```bash
-   cd ~/Develop/EKEServices/Astro/starfront && python3 -m pip install -r requirements.txt
-   ```
-
-3. **Start the checklist** (`STARFRONT_DISTRIBUTED_STACKING_CHECKLIST.pdf`), Part 0 then Part 1.
+1. ~~Install Starfront's Python requirements on the Mac.~~ Done (you ran the pip install). Every Starfront check was re-run
+   under your `python3` afterwards and passes, apart from the known cases in the checklist's "known gaps".
+2. **Start the checklist** (`STARFRONT_DISTRIBUTED_STACKING_CHECKLIST.pdf`), Part 0 then Part 1. Part 2 (`local_night.py`) has
+   already been run once with real frames, below, so expect the same result.
 
 # Decisions for you
 
@@ -41,6 +38,25 @@ Each is small. My recommendation comes first in each row.
 | 5 | **Deleting a cloud-bound collaboration** | Collab's project delete and restore routes accept only a signed-in web session, so Starfront can only *pause* the cloud project. | Either accept pausing, or add a token-scoped owner delete to Collab's API (a contract change, then an AWS deploy, which is yours). Accepting is the cheaper choice until a real cloud collaboration needs deleting. |
 | 6 | **Purge timing for deleted hub projects** | The purge follows the seven-day window by up to a day, because retention runs daily. Documented in the hub runbook. | Accept it; it errs on the side of keeping data. |
 | 7 | **T310's wording** | It says "standalone hub", but projects now only come from Starfront (your direction). The checklist runs it through the local server. | Let me reword the task to match. |
+
+# The real-frame run
+
+`local_night.py` was run against eight of your Elephant's Trunk Ha lights (UC131, ASI2600MM Duo, 300 s) with the real XPSD
+folder: local server, hub and one Mac worker, frames uploaded with `collab-uploader`.
+
+- **All 8 accepted**, 2 400 s of integration, `status.json` and the previews pushed to the server and shown on
+  `/stack/p/<slug>`.
+- **One real bug: the first frame waited about 10 minutes.** The first light fixes the grid's rotation, which moves the grid
+  from revision 0 to 1. A prepare that had started on revision 0 asked the hub for that revision's catalogue, got the same
+  "not found" answer as for a missing catalogue, built the old grid's catalogue locally, failed, and its message waited for the
+  hub's 5-minute sweep to resend it. AWS has the same race.
+- **Fixed** (Collab pull request #23, merged as `96e7157`, contract 1.29.0): the hub's "not found" now carries the current
+  `grid_rev`; the worker re-reads the project and asks again within the same delivery, keeps one catalogue file per grid, and
+  the engine reports a grid change before a frame is claimed rather than failing. Re-run on the same lights: the same race
+  happened and was handled, the first frame was solved 11 s after upload, and all eight were accumulated within 16 s.
+  Regression tests fail on the old code.
+- Side effects to know: each worker re-fetches a project's catalogue once (the cache file name changed), and old per-grid
+  catalogue files are not pruned from a worker's scratch (a grid moves rarely, so only a few build up).
 
 # What was found and fixed overnight
 
@@ -61,6 +77,12 @@ You may want to know about these before you test. The first would have broken th
     volunteers is unchanged.
 - **`local_night.py` could not take real frames.** It now always joins its telescope, saves the 24-hour grant, prints the
   uploader commands, and takes `--region` and `--discord-webhook`. It also refuses to start without the server's requirements.
+- **The uploader needs `projects` before `upload`.** It refuses an upload with "You have not joined a project yet" until
+  `collab-uploader projects` has run once; `local_night.py`'s banner now prints the three commands in order.
+- **`check_coordinator.py` had been crashing**, hidden by CI's allow-list, because it still expected a pasted join code to be
+  stored. It now checks that the code is refused (400, "no longer taken") and never sent back on edit.
+- **A timing flake in Collab's worker tests** (`hub_ports`, a delayed queue message) failed master's Ubuntu job once; its
+  stopwatch now starts before the send.
 - **A worker race** (from the T308 run): after a restart two jobs shared one temporary catalogue file and one stalled for
   30 minutes. Fixed by a unique temporary name.
 
@@ -78,10 +100,12 @@ None of these is needed for the home-network tests.
 
 # Housekeeping
 
-- **Unversioned files changed:** the suite guides `Astro/Rust/CLAUDE.md` and `AGENTS.md` now say contract 1.28.0 and describe the
+- **Unversioned files changed:** the suite guides `Astro/Rust/CLAUDE.md` and `AGENTS.md` now say contract 1.29.0 and describe the
   hub. `Astro/Running-the-servers-locally.md` points to the new runbook and `local_night.py`.
 - **Your main Collab checkout** still holds a built Lambda tree from the last deploy, so the local-stack tests fail there. Run them
   in a worktree, or run `backend/scripts/clean.sh` when no deploy is pending.
 - **Branches:** every task branch is merged. Starfront's `upstream` remote has a `cursor/collab-live-stack-23be` branch that this
   work did not create or touch.
+- **Contract mentions in Starfront prose:** `README.md` and `server/stack/cloud.py` say "the contract (1.28.0)" about the delete
+  routes. Still true of 1.29.0, so left alone.
 - **Progress page:** https://claude.ai/artifact/WJummaRZgi5Z3v6asiT9MX (refreshed when anything lands).
