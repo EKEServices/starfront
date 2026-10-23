@@ -397,17 +397,21 @@ case("it can start a project", bool(project.get("id")))
 case("and the project comes back with its region",
      admin.project(project["id"])["project"]["payload"]["region"]["dec"] == 60.0)
 
-# The Collab form's join code for live stacking travels with the project,
-# canonical, and an edit that leaves it out leaves it alone.
-stacked = admin.add_project(
-    "Check stacked", region={"ra": 90.0, "dec": 60.0, "width": 8.0, "height": 2.0},
-    stacking_join_code="h4rt 92bk wnpc")["project"]
-case("a project can carry a stacking join code, stored canonical",
-     stacked["payload"].get("stackingJoinCode") == "H4RT-92BK-WNPC",
-     str(stacked["payload"].get("stackingJoinCode")))
-admin.update_project(stacked["id"], {"notes": "edited"})
-case("...and an edit that does not send it leaves it alone",
-     admin.project(stacked["id"])["project"]["payload"].get("stackingJoinCode") == "H4RT-92BK-WNPC")
+# Since T706 the server makes the stacking project from the collaboration
+# itself, so a pasted Rapid Stacker Collab join code is refused rather than
+# stored (this check used to store one, and crashed on the refusal, which hid
+# every case after it behind the CI allow-list).
+try:
+    admin.add_project(
+        "Check stacked", region={"ra": 90.0, "dec": 60.0, "width": 8.0, "height": 2.0},
+        stacking_join_code="h4rt 92bk wnpc")
+    case("a pasted stacking join code is refused", False)
+except CollabError as exc:
+    case("a pasted stacking join code is refused",
+         exc.status == 400 and "no longer taken" in str(exc), str(exc)[:80])
+admin.update_project(project["id"], {"notes": "edited"})
+case("...and an edit that does not send one stores none",
+     not admin.project(project["id"])["project"]["payload"].get("stackingJoinCode"))
 
 # --------------------------------------------------------- the two tokens
 print("\n-- the two credentials --")
