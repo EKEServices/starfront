@@ -101,7 +101,7 @@ None of these is needed for the home-network tests.
 # Housekeeping
 
 - **Unversioned files changed:** the suite guides `Astro/Rust/CLAUDE.md` and `AGENTS.md` now say contract 1.29.0 and describe the
-  hub. `Astro/Running-the-servers-locally.md` points to the new runbook and `local_night.py`.
+  hub. `Running-the-servers-locally.md` points to the new runbook and `local_night.py`; it now lives in this repository beside its PDF, and the Astro-level copy is gone.
 - **Your main Collab checkout** still holds a built Lambda tree from the last deploy, so the local-stack tests fail there. Run them
   in a worktree, or run `backend/scripts/clean.sh` when no deploy is pending.
 - **Branches:** every task branch is merged. Starfront's `upstream` remote has a `cursor/collab-live-stack-23be` branch that this
