@@ -287,6 +287,102 @@ Nothing else on this server is involved: the frames go from the telescope
 straight to Rapid Stacker Collab, and the ledger and reports are as before.
 `tools/check_server.py` has the cases.
 
+## Live stacking: hubs and the front door
+
+A collaboration can be stacked on a **hub**: a `collab-hub` program on someone's
+home network (Rapid Stacker Collab repository, `worker/crates/hub`). This server
+is then the durable mailbox and the public face; the hub does the stacking. The
+design is `STARFRONT_DISTRIBUTED_STACKING_PLAN.md`; the operator's guide is
+`docs/runbooks/starfront-hub.md` in Rapid Stacker Collab; the desktop's README
+section "Live stacking at home" explains the decisions. `STARFRONT_PUBLIC_URL`
+must be set to the address telescopes and hubs reach (`run_local.py --lan` sets
+it to the LAN address).
+
+### The hub API: `/api/v1/hubs/*` (`server/hubs.py`, `server/stack/`)
+
+Owner calls use a signed-in person or the admin token; hub calls use the hub's
+own token (`sfh_`, only its SHA-256 is kept).
+
+| Route | Who | What |
+|---|---|---|
+| `POST /api/v1/hubs` `{name, lanUrl?}` | a person who may start collaborations | registers a hub; returns `hubId`, `hubToken`, `grantSecret` once |
+| `GET /api/v1/hubs`, `DELETE /api/v1/hubs/{id}`, `PUT .../coordinators` | the hub's owner | list, revoke, set the coordinators allowed to bind to it (decision D002) |
+| `POST .../heartbeat` | the hub | its status document; its `workers` entry feeds the dashboard's "stacked by" |
+| `GET .../pull?since=N&wait=0..20` | the hub | long-polls the change feed: `{changes:[{seq, kind, key, at}], seq}`, at most 500 a call. Kinds: `project`, `member`, `rig`, `frame`, `library` |
+| `GET .../frames?state=uploaded&limit=N` (add `kind=library` for the calibration library), `GET .../frames/{id}/bytes`, `POST .../frames/{id}/ack` | the hub | the relay: list what is waiting, fetch with `Range` (206), acknowledge with the SHA-256 (409 on a mismatch, idempotent). A frame the relay no longer holds is 404 |
+| `GET .../records/member/{project}/{user}`, `GET .../records/rig/{user}/{rig}`, `POST .../records/batch` | the hub | full member and rig records for the feed's keys (at most 200 a batch); a removed member keeps the real name and carries `removed_at`, `removed_by`, `frames_disposition` |
+| `POST .../push` | the hub | multipart: a JSON `records` part (frame verdicts, projects' grids, stream stats, events) plus file parts `{project}/{path}` and `deepzoom.tar`. Everything is validated before anything is written; it is idempotent (stale verdicts, lower `grid_rev` or `gold_seq` are ignored); a new gold run triggers the Discord notice; over `STARFRONT_STACK_HUB_BUDGET_GB` (50) is 429 |
+| `PUT .../push/{project}/masters/{name}` | the hub | a final master (`.xisf`, `.fits`, `.fz`) streamed to disk: `Content-Length` required (411), `X-Content-SHA256` required (422 on mismatch), the same name, size and hash again is a 200 `{"written": false}`. Masters are members-only |
+
+Errors on the relay and push routes are plain `{"detail": ...}`, not the Collab
+envelope. A hub never sees a frame, project or master that belongs to another
+hub (404 or 409).
+
+### The front door: `/stack/api`
+
+A sub-application (`server/stack/front.py`) that speaks Rapid Stacker Collab's
+contributor API, so the N.I.N.A. plugin's upload engine and `collab-uploader` use
+it unchanged. Every answer, including an unknown path or a bad body, is the Collab
+envelope `{ok, code, message}` and never 403 or 404.
+
+- **Auth**: `Authorization: Bearer sfg_...`, the grant the agent listing hands a
+  telescope (valid a day, names one person, telescope and project); a bad grant
+  is 401 `token_invalid`, a grant for another project or hub 401 `token_scope`.
+  A cookie from the browser sign-in is read-only (writes are 401
+  `not_authenticated`). Joining needs no code when the grant names the project.
+- **Routes**: `GET /auth/me`; `GET /projects` (`?scope=mine` for the dashboard,
+  each with `stacked_by`), `POST /projects/resolve-join-code`, `GET /projects/{p}`
+  (includes `deleted_at`, `delete_after`, `results_kept`), `POST .../join`,
+  `GET|PUT .../membership`; `GET|POST /rigs`, `PATCH /rigs/{id}`; frames
+  `POST /projects/{p}/frames/init`, `.../{id}/complete`, `.../{id}/withdraw`,
+  `GET .../frames` (`?mine=1`) and `.../{id}`; the calibration library
+  `GET /rigs/{id}/library` and `POST .../library/frames/init|complete|withdraw`;
+  results `GET /projects/{p}/status|events|mosaic|masters` and
+  `.../masters/{name}` (members only).
+- **Uploads**: `init` returns **absolute** part URLs (`{public url}/stack/s3/{upload_id}/{n}`);
+  the 64-hex upload id in the URL is the credential, valid an hour. Parts are
+  stored in the relay (`STARFRONT_DATA/stack/relay`) with a quoted-MD5 `ETag`.
+  The `stack-sweep` thread aborts uploads left `uploading` for three days and
+  retries due cloud calls. Below the free-space floor `init` answers 429
+  `quota_exceeded`. A `private` project's status and previews are never put in
+  the public tree.
+- **Retention**: a relayed frame is deleted `STARFRONT_STACK_RELAY_KEEP_DAYS`
+  (7; 0 = at once) after the hub acknowledged it; a withdrawn one at its
+  `raw_delete_after`.
+- No route creates, edits, deletes or re-keys a project: the Starfront
+  collaboration is the only place one is made, and the stacking project (and a
+  cloud project, through `server/stack/cloud.py`) is derived from it.
+
+### Pages
+
+Read-only progress pages (see "Driving it"): `/stack/p/{slug}`, `.../filter/{F}`,
+`.../combined`, the cookie dashboard `/stack/dashboard` (also `/stack/`), and the
+hub's pushed files at `/stack/public/{project}/...`. Masters are not under
+`/public`; they are served through `/stack/api/projects/{p}/masters/{name}` to
+members.
+
+### Deleting, and the cloud link
+
+`DELETE /api/v1/projects/{id}` on a hub-backed collaboration (its owner or the
+server owner) files a seven-day deletion: the stacking project becomes `deleted`
+with `deleted_at`, `delete_after` and `deleted_by`, the collaboration is closed,
+joins and uploads answer 409 `project_deleted`, and the hub hears of it through
+the feed. `POST /api/v1/projects/{id}/restore` undoes it until `delete_after`.
+After the window the sweep deletes the relay bytes and keeps the rows, the
+final masters and `status.json`; `DELETE /api/v1/projects/{id}/stack/results`
+(owner, after the window) removes what is left under `public/{project}/`.
+
+A collaboration can instead be stacked on Rapid Stacker Collab's cloud (T706):
+the owner links a Collab API token with `projects:manage` once
+(`GET /api/v1/stacking` shows the account link, the hubs and the default), the
+server creates and updates the Collab project from the collaboration, and keeps
+the token sealed with AES-GCM under `STARFRONT_CREDENTIAL_KEY` (else the admin
+token). A failed call is recorded on the collaboration and retried with
+back-off. Collab's delete and restore need a browser session, so a cloud
+project is paused instead. `tools/check_server.py` and
+`tools/check_stack_relay.py` have the cases; `tools/local_night.py` runs the
+real programs together.
+
 ## What is deliberately not here yet
 
 - **A drawn depth map.** The depth map exists at the resolution of each rig's
@@ -301,7 +397,7 @@ in `server/web/stack/` (ported from Rapid Stacker Collab, MPL-2.0, see its
 `NOTICE.txt`), read what a hub has pushed to `STARFRONT_DATA/stack/public/<project
 id>/` through `GET /stack/public/...`, and run under a strict Content-Security-Policy
 (`script-src 'self'`, no inline script or handler; `tools/check_csp.py` checks it).
-A cookie dashboard ("My projects") joins them next. The rest of the server
+The cookie dashboard ("My projects") is `/stack/dashboard`. The rest of the server
 (`/download`, `/files`, `/sky`) is unchanged and outside that policy.
 
 What is still **not** here is any page that can write or administer. The
