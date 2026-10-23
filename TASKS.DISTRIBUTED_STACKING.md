@@ -229,7 +229,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §3.7, §0.C: a seeded hub on a free loopback port printing `{url, admin_token, enrol_code}`; the contract check drives every profile operation and validates answers; missing profile routes become an error.
       **Verify:** `node scripts/check-contract.mjs`
 
-- [ ] T308 — `scripts/hub-e2e.sh`, `e2e-check`, the uploader's hub test and the CI job
+- [x] T308 — `scripts/hub-e2e.sh`, `e2e-check`, the uploader's hub test and the CI job
       **Files:** RSC `scripts/hub-e2e.sh`, `worker/crates/hub/src/e2e_check.rs`, `worker/crates/uploader/tests/e2e_hub.rs`, `.github/workflows/worker-ci.yml`
       **Do:** §3.7: hub, one or two daemons, `collab-uploader` through the real multipart path, compare with `simulate` bit for bit, browser smoke when Chrome exists; output under `~/Library/Caches/collab-hub-e2e/`; a `hub-e2e` CI job (ubuntu, macos).
       **Verify:** `bash scripts/hub-e2e.sh --only all`
