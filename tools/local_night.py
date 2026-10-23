@@ -548,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"--api-base {server_public}/stack/api --config-dir {data / 'uploader' / 'real'}")
             say("")
             say("  Real frames from this Mac, as the telescope 'Local scope' (grant valid 24 h):")
+            say(f"    {up} projects")
             say(f"    {up} rig confirm --from <one light> --yes")
             say(f"    {up} upload <folder> --project {pid} --include-calibration --now")
         say("")

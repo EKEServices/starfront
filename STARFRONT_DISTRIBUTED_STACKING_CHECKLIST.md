@@ -152,12 +152,13 @@ Every manual task uses this. Leave it running in its own terminal.
 
 - [ ] On the PC, open `http://<mac>.local:8800/stack/p/<slug>` from the banner. *Expected:* the project page renders; it is empty
   until frames arrive.
-- [ ] Upload a few real lights from the Mac through the server's front door, using the two uploader lines from the banner:
+- [ ] Upload a few real lights from the Mac through the server's front door, using the three uploader lines from the banner
+  (`projects` first: it refreshes the uploader's list of joined projects):
 
   ```bash
   COLLAB_TOKEN=$(cat ~/starfront-local/telescope-grant) collab-uploader \
-      --api-base http://<mac>.local:8800/stack/api --config-dir ~/starfront-local/uploader/real \
-      rig confirm --from /path/to/one/light.fits --yes
+      --api-base http://<mac>.local:8800/stack/api --config-dir ~/starfront-local/uploader/real projects
+  COLLAB_TOKEN=... collab-uploader ... rig confirm --from /path/to/one/light.fits --yes
   COLLAB_TOKEN=... collab-uploader ... upload /path/to/folder --project prj_… --include-calibration --now
   ```
 
