@@ -382,7 +382,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exit-when-stacked", action="store_true",
                         help="wait for a published live preview, tear down, exit 0")
     parser.add_argument("--timeout", type=float, default=1500, help="seconds to wait for the stack (default 1500)")
+    parser.add_argument("--region", default="",
+                        help="the collaboration's sky region for real frames, RA,DEC[,WIDTH,HEIGHT] in degrees "
+                             "(default 84,0,1,1; ignored with --synthetic). Real frames solve only against "
+                             "the catalogue cone of this region, so set it to your target")
+    parser.add_argument("--discord-webhook", default="",
+                        help="a Discord webhook URL for the collaboration (gold published, member joined); "
+                             "the desktop has no field for it yet")
     args = parser.parse_args(argv)
+    region = (84.0, 0.0, 1.0, 1.0)
+    if args.region:
+        try:
+            parts = [float(x) for x in args.region.split(",")]
+            if len(parts) not in (2, 4):
+                raise ValueError
+        except ValueError:
+            parser.error("--region is RA,DEC or RA,DEC,WIDTH,HEIGHT in degrees")
+        region = tuple(parts) if len(parts) == 4 else (parts[0], parts[1], 1.0, 1.0)
     if args.exit_when_stacked and not args.synthetic:
         parser.error("--exit-when-stacked needs --synthetic (nothing else makes frames)")
 
@@ -437,11 +453,12 @@ def main(argv: list[str] | None = None) -> int:
                  fleet, 60)
 
         # 3. a throw-away collaboration bound to the hub
-        ra, dec = (SYNTH_RA, SYNTH_DEC) if args.synthetic else (84.0, 0.0)
+        ra, dec, width, height = (SYNTH_RA, SYNTH_DEC, 1.0, 1.0) if args.synthetic else region
         status, made = http("POST", f"{server_local}/api/v1/projects", {
-            "name": "Local night", "region": {"ra": ra, "dec": dec, "width": 1.0, "height": 1.0},
+            "name": "Local night", "region": {"ra": ra, "dec": dec, "width": width, "height": height},
             "requirements": {"filters": {"L": 1.0, "Ha": 1.0}},
-            "stacking": {"backend": "hub", "hubId": reg["hubId"]}}, token=owner)
+            "stacking": {"backend": "hub", "hubId": reg["hubId"]},
+            **({"discordWebhookUrl": args.discord_webhook} if args.discord_webhook else {})}, token=owner)
         if status != 200:
             fail(f"binding a collaboration to the hub failed: {status} {made}")
         sf_project = made["project"]["id"]
@@ -463,17 +480,23 @@ def main(argv: list[str] | None = None) -> int:
         front = f"{server_local}/stack/api"
         _, proj = http("GET", f"{front}/projects/{pid}", token=grant)
         slug = (proj.get("project") or {}).get("slug", "") if isinstance(proj, dict) else ""
-        if args.synthetic:
-            # The telescope joins as a member (the grant names the project, so no
-            # code); the three synthetic contributors share its one membership, so
-            # their filter names are mapped here, once.
-            _, got = http("GET", f"{front}/projects/{pid}", token=grant)
-            version = (got.get("project") or {}).get("terms_version", "") if isinstance(got, dict) else ""
-            status, joined = http("POST", f"{front}/projects/{pid}/join", {
-                "display_name": "Local scope", "accepted_terms_version": version,
-                "filter_mapping": [{"raw": "Narrowband A", "canonical": "OIII"}]}, token=grant)
-            if status != 200:
-                fail(f"joining the stacking project as the telescope failed: {status} {joined}")
+        # The telescope joins as a member (the grant names the project, so no
+        # code). With --synthetic, the three synthetic contributors share its one
+        # membership, so their filter names are mapped here, once; real frames
+        # uploaded with collab-uploader (the command is printed below) use the
+        # same membership with no mapping.
+        _, got = http("GET", f"{front}/projects/{pid}", token=grant)
+        version = (got.get("project") or {}).get("terms_version", "") if isinstance(got, dict) else ""
+        mapping = [{"raw": "Narrowband A", "canonical": "OIII"}] if args.synthetic else []
+        status, joined = http("POST", f"{front}/projects/{pid}/join", {
+            "display_name": "Local scope", "accepted_terms_version": version,
+            "filter_mapping": mapping}, token=grant)
+        if status != 200:
+            fail(f"joining the stacking project as the telescope failed: {status} {joined}")
+        # The grant, for uploading real frames by hand (it lasts 24 h): owner-only.
+        grant_file = data / "telescope-grant"
+        grant_file.write_text(grant + "\n")
+        grant_file.chmod(0o600)
 
         # 4. a local worker
         code = run_out([bins["collab-hub"], "enrol-code", "--config", config, "--note", "Windows PC"])
@@ -515,6 +538,13 @@ def main(argv: list[str] | None = None) -> int:
         say("  Starfront desktop (local mode): collab.serverUrl = " + server_public)
         say(f"  (the enrol code is single-use and works for 1 h; mint more with: "
             f"{bins['collab-hub']} enrol-code --config {config})")
+        if not args.synthetic:
+            up = (f"COLLAB_TOKEN=$(cat {grant_file}) {bins['collab-uploader']} "
+                  f"--api-base {server_public}/stack/api --config-dir {data / 'uploader' / 'real'}")
+            say("")
+            say("  Real frames from this Mac, as the telescope 'Local scope' (grant valid 24 h):")
+            say(f"    {up} rig confirm --from <one light> --yes")
+            say(f"    {up} upload <folder> --project {pid} --include-calibration --now")
         say("")
 
         # 5. synthetic frames
