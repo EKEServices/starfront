@@ -454,7 +454,7 @@ The same facts are on a private web page, **Distributed Stacking Progress** (htt
       **Do:** §7.2: start the local server, hub and a worker on the Mac; register the hub; bind a throw-away collaboration; print the URLs and an enrol code for the Windows PC; tail the logs; `--synthetic` feeds `collab-uploader` frames; `--exit-when-stacked` exits 0 once a live preview is published (the gate).
       **Verify:** `python3 tools/local_night.py --synthetic --exit-when-stacked`
 
-- [ ] T702 — Documentation across both repositories
+- [x] T702 — Documentation across both repositories
       **Files:** RSC `docs/runbooks/starfront-hub.md`, `CLAUDE.md`, `AGENTS.md`, `RAPID_STACKER_COLLAB_PLAN.md` (§2 and §7 pointers); SF `README.md` (CRLF), `server/README.md`
       **Do:** §7.2, §7.3: the final runbook and topology; coexistence with the AWS stack; the Starfront health route's `stackContract`. The loose `Astro/Running-the-servers-locally.md` gains a pointer to the runbook (it is unversioned).
       **Verify:** `node scripts/check-contract.mjs`
