@@ -10,11 +10,11 @@ How to run the two systems live stacking touches on this Mac, with no cloud acco
 | Rapid Stacker Collab backend and website | One Node process: the real Lambda code over in-memory stand-ins for AWS, plus the static website | `http://127.0.0.1:8787` |
 | Rapid Stacker Collab worker (optional) | The Rust daemon that does the stacking | none; it talks to the stack above |
 
-Two things need care. Signing in to the Starfront server normally goes through Discord. And both servers listen on this Mac only, so N.I.N.A. on the Windows PC needs a way in.
+Two things need care. Signing in to the Starfront server normally goes through Discord. And both servers listen on this Mac only by default, so N.I.N.A. on the Windows PC needs a way in.
 
 ## 1. The Starfront collaboration server
 
-The Python on this Mac that has the server's packages (FastAPI, uvicorn) is `/usr/local/bin/python3`. The default `python3` lacks them. Start the server with its local launcher:
+The server's packages (FastAPI, uvicorn) are in both the default `python3` on this Mac (`/opt/anaconda3`) and `/usr/local/bin/python3`; Homebrew's `/opt/homebrew/bin/python3` has none of them. Start the server with its local launcher:
 
 ```bash
 cd ~/Develop/EKEServices/Astro/starfront
@@ -31,7 +31,7 @@ The N.I.N.A. plugin and the Starfront program sign in only through Discord, and 
 - **Any other name typed there** signs in as an ordinary member, which is how to see what somebody else's telescope sees.
 - **The same name is the same person every run**, so its collaborations are still there after a restart.
 
-The stand-in signs in anyone who asks, so the launcher only ever listens on this Mac (there is no `--host`). It also refuses a folder holding a `discord.env` and the folder a real server uses by default, and it ignores any Discord settings exported in the shell. The page is served by the server itself, under `/_local/discord`, so the tunnel in section 3 needs nothing extra.
+The stand-in signs in anyone who asks, so by default the launcher listens on this Mac only (it has no `--host`). Since 2026-10-22, `--lan` makes it listen on the whole network (0.0.0.0) and hand out this Mac's LAN address, so the Windows PC can reach it directly without the tunnel; anyone on that network can then sign in as anyone, and `--lan` is refused unless `--data` is a folder of its own. The launcher also refuses a folder holding a `discord.env` and the folder a real server uses by default, and it ignores any Discord settings exported in the shell. The page is served by the server itself, under `/_local/discord`, so the tunnel in section 3 needs nothing extra.
 
 **A real Discord application instead.** To test against Discord itself, start the ordinary server with `STARFRONT_DATA=~/starfront-local /usr/local/bin/python3 server/run.py`, create an application in the Discord developer portal, register the redirect `http://127.0.0.1:8800/auth/discord/callback`, and put a `discord.env` in `~/starfront-local`:
 
@@ -89,7 +89,7 @@ Building the worker needs access to the private `rapid-stacker` repository (with
 
 ## 3. Reaching both from N.I.N.A. on the Windows PC
 
-The Collab stack listens on 127.0.0.1 only, by design and with no option to change it. The Starfront server is the same unless started with `--host 0.0.0.0`. The clean answer for both is an SSH tunnel from the Windows PC:
+The Collab stack listens on 127.0.0.1 only, by design and with no option to change it. The Starfront server is the same unless started with `--host 0.0.0.0` (`server/run.py`) or `--lan` (`server/run_local.py`, section 1). The clean answer for both is an SSH tunnel from the Windows PC:
 
 1. On the Mac, turn on Remote Login: System Settings > General > Sharing.
 2. On Windows, which has an SSH client built in, keep this running in a PowerShell window:
