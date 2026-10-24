@@ -22,7 +22,7 @@ These steps need root or administrator rights, so Terraform does not do them.
    sudo bash bootstrap-linux.sh --nas DXP8800PLUS-76B2.lan --share XPSD --nas-user <nas user>
    ```
    - It installs sshd, rsync, python, curl and cifs-utils.
-   - It opens TCP 22, 8800 and 8790 to `192.168.1.0/24` only, in ufw.
+   - It opens TCP 22, 8800 and 8790 to `192.168.1.0/24` and the network's IPv6 prefix only, in ufw. The IPv6 rules matter: the router's DNS also gives the server's IPv6 addresses, clients try those first, and a blocked one costs every request a timeout.
    - It enables linger, so the units run while you are logged out.
    - It mounts the share read-only at `/mnt/xpsd`.
 

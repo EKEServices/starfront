@@ -1,6 +1,7 @@
 # Runs ON the Windows PC (copied there and started over SSH by worker-up.sh),
 # after the binary is in %USERPROFILE%\starfront-lab\bin\collab-worker.exe.
-# Code "-" means already enrolled: the token is kept, only settings change.
+# Code "keep" means already enrolled: the token is kept, only settings change.
+# (Not "-" as on POSIX: powershell -File exits 5, silently, on a bare "-".)
 #
 # The worker is installed as the logon Scheduled Task (collab-worker's
 # default), which runs as this user and so reaches the NAS share with the
@@ -23,7 +24,7 @@ $scratch = Join-Path $lab "scratch"
 $noXpsd = Join-Path $lab "no-xpsd"
 
 New-Item -ItemType Directory -Force $scratch, $noXpsd | Out-Null
-if ($Code -ne "-") {
+if ($Code -ne "keep") {
     # enrol checks the configuration it writes: the catalogue settings are given
     # in the environment so it checks what this worker will run with (a hub with
     # no catalogue, in synthetic mode, hands out no xpsd_dir).
@@ -67,6 +68,9 @@ if ($Mode -eq "synthetic") {
 }
 Set-TomlKeys (Join-Path $dir "collab-worker.toml") $keys
 
+# Windows PowerShell 5.1 turns a native command's stderr into an error, which
+# "Stop" makes fatal; uninstall complains when nothing is installed yet.
+$ErrorActionPreference = "Continue"
 & $bin service uninstall --dir $dir *> $null
 & $bin service install --dir $dir
 if ($LASTEXITCODE -ne 0) { throw "collab-worker service install failed ($LASTEXITCODE)" }

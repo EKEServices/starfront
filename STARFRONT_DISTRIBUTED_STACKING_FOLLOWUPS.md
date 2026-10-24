@@ -68,6 +68,17 @@ You may want to know about these before you test. The first would have broken th
   plugin's LAN short-cut, `collab-uploader` against a hub) was "not an active member of this project". Grants now carry the
   collab user id (`server/stack/auth.py` `collab_identity`); grants minted before the fix still work at the front door until
   they expire. Checked by `check_server.py` and by `tools/lab_setup.py smoke --via hub`.
+- **Found 2026-10-24, on the real machines: on Windows, stopping the worker leaves it running. Open, in Collab.** The logon
+  task runs `collab-worker service-run`, which starts `collab-worker run` as a child. `service stop` and `service uninstall`
+  end the task with `schtasks /End`, which kills `service-run` only; Windows does not end the child with it, so the worker
+  keeps running, and a re-install starts a second one beside it. The fix belongs in Collab's `crates/worker/src/service.rs`
+  (put the child in a job object that is killed when the job closes). Until then the lab's scripts also end any process
+  started from the lab's `collab-worker.exe`.
+- **Found 2026-10-24, on the real machines: every request to `omarchy.lan` took about two minutes.** The router's DNS gives
+  the server's IPv6 addresses as well as its IPv4 ones, clients try IPv6 first, and ufw silently dropped IPv6 because
+  `bootstrap-linux.sh` opened the ports to `192.168.1.0/24` only. Python's `urllib` tries each address in turn with no
+  fallback race, so each connection waited out three IPv6 timeouts. The script now opens the ports to the LAN's IPv6 prefix
+  too. The same would have slowed N.I.N.A. and the desktop on Windows, which also prefers IPv6.
 
 - **The Starfront server refused every hub push.** `python-multipart` was in neither `requirements.txt` nor
   `server/deploy/install.sh`, so `request.form()` failed and the server answered 400. No verdict, preview or master could ever

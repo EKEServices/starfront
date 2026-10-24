@@ -4,9 +4,10 @@ locals {
   bin       = abspath("${path.module}/bin")
   key       = pathexpand(var.ssh_key)
 
-  server_ip  = data.external.discover.result.server
-  windows_ip = lookup(data.external.discover.result, "windows", "")
-  server_ssh = "${var.server_user}@${local.server_ip}"
+  # Every connection and trigger uses the names, never the addresses discover
+  # resolves: a machine on both wired and Wi-Fi answers with both, in either
+  # order, and a trigger keyed on one would replace the server on every apply.
+  server_ssh = "${var.server_user}@${var.server_host}"
 
   server_url = "http://${var.server_host}:${var.server_port}"
   hub_url    = "http://${var.server_host}:${var.hub_port}"
@@ -52,7 +53,7 @@ data "external" "source" {
 resource "terraform_data" "server" {
   triggers_replace = {
     source = data.external.source.result.hash
-    host   = local.server_ip
+    host   = var.server_host
     port   = var.server_port
     public = var.server_host
   }
@@ -93,7 +94,7 @@ resource "terraform_data" "hub" {
   depends_on = [terraform_data.server]
 
   triggers_replace = {
-    host    = local.server_ip
+    host    = var.server_host
     binary  = fileexists(local.hub_bin) ? filesha256(local.hub_bin) : "missing"
     mode    = var.catalogue_mode
     xpsd    = jsonencode(local.xpsd)
@@ -161,7 +162,7 @@ resource "terraform_data" "worker" {
   input = {
     id      = each.key
     os      = each.value.os
-    target  = each.value.os == "linux" ? local.server_ssh : each.value.os == "windows" ? "${var.windows_user}@${local.windows_ip}" : ""
+    target  = each.value.os == "linux" ? local.server_ssh : each.value.os == "windows" ? "${var.windows_user}@${var.windows_host}" : ""
     key     = local.key
     scripts = local.scripts
   }

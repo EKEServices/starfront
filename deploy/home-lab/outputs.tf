@@ -1,5 +1,5 @@
 output "machines" {
-  description = "What discover.sh found."
+  description = "What discover.py found (each name's address now; informational only)."
   value       = data.external.discover.result
 }
 

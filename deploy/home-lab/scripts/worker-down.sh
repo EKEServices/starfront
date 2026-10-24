@@ -12,6 +12,7 @@ case "$LAB_OS" in
   linux)
     remote "$LAB_TARGET" '[ -x starfront-lab/bin/collab-worker ] && starfront-lab/bin/collab-worker service uninstall --dir starfront-lab/worker; true' ;;
   windows)
-    remote "$LAB_TARGET" 'if (Test-Path starfront-lab\bin\collab-worker.exe) { & starfront-lab\bin\collab-worker.exe service uninstall --dir starfront-lab\worker }; exit 0' ;;
+    # Uninstalling ends service-run but not its `run` child, so that goes too.
+    remote "$LAB_TARGET" 'if (Test-Path starfront-lab\bin\collab-worker.exe) { & starfront-lab\bin\collab-worker.exe service uninstall --dir starfront-lab\worker; Get-Process collab-worker -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Resolve-Path starfront-lab\bin\collab-worker.exe).Path } | Stop-Process -Force }; exit 0' ;;
 esac
 say "worker $LAB_ID: service removed (its config and token are kept)"

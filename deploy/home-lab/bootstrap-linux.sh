@@ -9,8 +9,9 @@
 # It:
 #   1. installs openssh, rsync, python, curl and cifs-utils, and starts sshd;
 #   2. opens TCP 22 (SSH, for Terraform), 8800 (Starfront server) and 8790
-#      (collab-hub) to the home subnet only, in ufw (Omarchy denies all incoming
-#      by default); nothing is forwarded on the router, the hub only calls out;
+#      (collab-hub) to the home subnet and its IPv6 prefix only, in ufw (Omarchy
+#      denies all incoming by default); nothing is forwarded on the router, the
+#      hub only calls out;
 #   3. lets your user's systemd services run while you are logged out (linger);
 #   4. mounts the NAS's XPSD share read-only at /mnt/xpsd on first use (fstab,
 #      x-systemd.automount), with its password in a root-only file.
@@ -26,7 +27,7 @@ while [ $# -gt 0 ]; do
     --share) share="$2"; shift 2 ;;
     --nas-user) nas_user="$2"; shift 2 ;;
     --no-nas) with_nas=0; shift ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -38,10 +39,20 @@ echo "== packages and sshd"
 pacman -S --needed --noconfirm openssh rsync python curl cifs-utils
 systemctl enable --now sshd
 
-echo "== firewall: 22, 8800, 8790 from $subnet only"
+echo "== firewall: 22, 8800, 8790 from $subnet and the LAN's IPv6 prefix only"
 if command -v ufw >/dev/null; then
   for port in 22 8800 8790; do
     ufw allow from "$subnet" to any port "$port" proto tcp comment "starfront lab"
+  done
+  # The LAN's IPv6 prefixes too. The router's DNS answers omarchy.lan with IPv6
+  # addresses as well, and most clients try those first; ufw drops what it does
+  # not allow, so each connection would wait out an IPv6 timeout before falling
+  # back to IPv4. These are the /64s the router advertises on this machine's
+  # links; run the script again if the ISP changes the prefix.
+  for prefix in $(ip -6 route show proto ra | awk '$1 ~ /::\/64$/ {print $1}' | sort -u); do
+    for port in 22 8800 8790; do
+      ufw allow from "$prefix" to any port "$port" proto tcp comment "starfront lab"
+    done
   done
   ufw status numbered
 else
@@ -53,6 +64,7 @@ loginctl enable-linger "$user"
 
 if [ "$with_nas" = 1 ]; then
   echo "== the catalogue share //$nas/$share at /mnt/xpsd (read-only)"
+  getent hosts "$nas" >/dev/null || { echo "$nas does not resolve; check the NAS name (--nas), or pass --no-nas" >&2; exit 1; }
   [ -n "$nas_user" ] || read -r -p "NAS user that can read $share: " nas_user
   read -r -s -p "password for $nas_user on $nas: " nas_pass; echo
   install -d -m 700 /etc/starfront-lab
