@@ -14,6 +14,10 @@ Windows PC, N.I.N.A. and your own frames. This checklist runs those six tasks in
 - **Names used below.** `<mac>` is the Mac's local host name (`scutil --get LocalHostName`), so the Mac is `<mac>.local` on the LAN.
   `SF` is the Starfront checkout (`~/Develop/EKEServices/Astro/starfront`) and `RSC` the Rapid Stacker Collab checkout
   (`~/Develop/EKEServices/Astro/Rust/rapid-stacker-collab`).
+- **Three machines (2026-10-24).** `deploy/home-lab/README.md` does Part 0's network set-up and Part 2 with Terraform on your
+  network: the Linux machine (`omarchy.lan`) runs the server and the hub, and the Mac, the Linux machine and the Windows PC each
+  run a worker, with the catalogue on the NAS. In that layout read `<mac>.local` below as `omarchy.lan` wherever it names the
+  server or the hub; the Windows steps are unchanged.
 - **When a task passes,** tick its box in `SF/TASKS.DISTRIBUTED_STACKING.md` and push, or tell Claude, which ticks it and refreshes
   the progress page.
 - **When a step fails,** keep the logs (`~/starfront-local/logs/`, the hub's and workers' logs) and note the step. Nothing here touches

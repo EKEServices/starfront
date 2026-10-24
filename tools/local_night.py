@@ -47,9 +47,7 @@ real server's data folder. The standard library only.
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import shutil
 import signal
 import socket
@@ -58,34 +56,26 @@ import sys
 import threading
 import time
 import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools"))
+
+# The set-up steps are shared with the multi-machine lab (deploy/home-lab/), so
+# the two cannot drift: they live in lab_setup.py.
+from lab_setup import (OWNER, SYNTH_DEC, SYNTH_RA, bind_collaboration, fail, http, preview_published,  # noqa: E402
+                       register_hub, run_out, say, set_toml_keys, sign_in_as, toml_str, upload_synthetic,
+                       write_hub_files, xpsd_paths_for)
 
 DEFAULT_RSC = ROOT.parent / "Rust" / "rapid-stacker-collab"
 # The default above is relative to the main checkout (Astro/starfront); a
 # worktree sits one level deeper, so fall back to the well-known location.
 FALLBACK_RSC = Path.home() / "Develop" / "EKEServices" / "Astro" / "Rust" / "rapid-stacker-collab"
 
-OWNER = "ncedelliott"
 BINARIES = ("collab-hub", "collab-worker", "collab-uploader")
 
-#: The synthetic scenario's field (collab-worker synth-frames), in degrees.
-SYNTH_RA, SYNTH_DEC = 85.25, -2.46
-
 _passed = True
-
-
-def say(text: str = "") -> None:
-    print(text, flush=True)
-
-
-def fail(text: str) -> None:
-    print(f"local_night: {text}", file=sys.stderr, flush=True)
-    raise SystemExit(1)
 
 
 # ------------------------------------------------------------------ processes
@@ -155,46 +145,6 @@ def tail(logs: Path, names: list[str], stop: threading.Event) -> None:
         stop.wait(0.5)
 
 
-# ----------------------------------------------------------------------- HTTP
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def http(method: str, url: str, body=None, token: str = "", timeout: float = 60):
-    """One request; returns (status, parsed JSON or bytes). Never raises on a
-    status, only on a connection that cannot be made."""
-    head = {}
-    data = None
-    if body is not None:
-        data = json.dumps(body).encode()
-        head["Content-Type"] = "application/json"
-    if token:
-        head["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, data=data, method=method, headers=head)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            status, payload, kind = response.status, response.read(), response.headers.get("Content-Type", "")
-    except urllib.error.HTTPError as exc:
-        status, payload, kind = exc.code, exc.read(), exc.headers.get("Content-Type", "")
-    if "json" in kind:
-        try:
-            return status, json.loads(payload.decode() or "{}")
-        except ValueError:
-            pass
-    return status, payload
-
-
-def hop(url: str) -> str:
-    """Fetch a URL without following redirects; returns its Location."""
-    opener = urllib.request.build_opener(_NoRedirect())
-    try:
-        opener.open(urllib.request.Request(url), timeout=15)
-    except urllib.error.HTTPError as exc:
-        return exc.headers.get("Location", "")
-    return ""
-
-
 def wait_for(what: str, probe, fleet: Fleet, timeout: float, every: float = 0.5):
     """Call probe() until it returns something truthy; fail if a program dies."""
     end = time.time() + timeout
@@ -212,32 +162,7 @@ def wait_for(what: str, probe, fleet: Fleet, timeout: float, every: float = 0.5)
     fail(f"timed out after {int(timeout)} s waiting for {what}")
 
 
-def sign_in_as(base: str, name: str) -> str:
-    """The device-code sign-in through the stand-in Discord, as `name`;
-    returns the program token (what the desktop and the agent keep)."""
-    status, begun = http("POST", f"{base}/api/v1/auth/login")
-    if status != 200:
-        fail(f"sign-in could not start: {status} {begun}")
-    to_discord = hop(begun["url"])
-    if "/oauth2/authorize" not in to_discord:
-        fail(f"sign-in did not lead to the stand-in Discord: {to_discord!r}")
-    approve = to_discord.replace("/oauth2/authorize", "/oauth2/approve")
-    approve += ("&" if "?" in approve else "?") + urllib.parse.urlencode({"name": name})
-    back = hop(approve)
-    if not back:
-        fail("the stand-in Discord did not send the browser back")
-    urllib.request.urlopen(back, timeout=15).read()
-    status, polled = http("GET", f"{base}/api/v1/auth/poll?code={begun['code']}")
-    if status != 200 or not isinstance(polled, dict) or not polled.get("token"):
-        fail(f"sign-in did not complete: {status} {polled}")
-    return polled["token"]
-
-
 # --------------------------------------------------------------------- set up
-def toml_str(value) -> str:
-    return json.dumps(str(value))
-
-
 def find_rsc(arg: str | None) -> Path:
     for candidate in ([Path(arg)] if arg else [DEFAULT_RSC, FALLBACK_RSC]):
         if (candidate / "worker" / "Cargo.toml").exists():
@@ -275,97 +200,6 @@ def refuse_real_data(data: Path) -> None:
 def port_free(port: int) -> bool:
     with socket.socket() as probe:
         return probe.connect_ex(("127.0.0.1", port)) != 0
-
-
-def write_hub_files(hub_dir: Path, *, hub_id: str, hub_token: str, grant_secret: str, server_local: str,
-                    bind_port: int, public: str, xpsd: Path | None, host: str) -> Path:
-    hub_dir.mkdir(parents=True, exist_ok=True)
-    lines = [f"bind = {toml_str(f'0.0.0.0:{bind_port}')}",
-             f"public_url = {toml_str(public)}",
-             f"data_root = {toml_str(hub_dir / 'data')}"]
-    if xpsd is not None:
-        lines.append(f"xpsd_dir = {toml_str(xpsd)}")
-        lines += ["", "[xpsd_paths]", f"macos = {toml_str(xpsd)}",
-                  f"windows = {toml_str(chr(92) * 2 + host + chr(92) + 'XPSD')}"]
-    lines += ["", "[starfront]", f"url = {toml_str(server_local)}", f"hub_id = {toml_str(hub_id)}"]
-    config = hub_dir / "collab-hub.toml"
-    config.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    creds = hub_dir / "hub-credentials.toml"
-    fd = os.open(creds, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(f"hub_id = {toml_str(hub_id)}\n"
-                     f"hub_token = {toml_str(hub_token)}\ngrant_secret = {toml_str(grant_secret)}\n")
-    os.chmod(creds, 0o600)
-    (hub_dir / "data").mkdir(exist_ok=True)
-    return config
-
-
-def set_toml_keys(path: Path, keys: dict[str, str]) -> None:
-    """Replace or add top-level keys of a flat TOML file (the worker's)."""
-    kept = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        name = line.split("=", 1)[0].strip()
-        if name not in keys:
-            kept.append(line)
-    # Top-level keys must come before any [table].
-    first_table = next((i for i, l in enumerate(kept) if l.lstrip().startswith("[")), len(kept))
-    added = [f"{k} = {v}" for k, v in keys.items()]
-    path.write_text("\n".join(kept[:first_table] + added + kept[first_table:]) + "\n", encoding="utf-8")
-
-
-def run_out(argv: list[str], **kw) -> str:
-    done = subprocess.run([str(a) for a in argv], capture_output=True, text=True, **kw)
-    if done.returncode != 0:
-        fail(f"{' '.join(str(a) for a in argv[:3])} failed ({done.returncode}): {done.stderr.strip()[-400:]}")
-    return done.stdout.strip()
-
-
-# ------------------------------------------------------------------ synthetic
-def upload_synthetic(bins: dict[str, Path], frames: Path, data: Path, api_base: str, grant: str,
-                     pid: str, log: Path) -> None:
-    """Upload each synthetic contributor's folder with collab-uploader, through
-    the front door, signed in with the telescope's grant (COLLAB_TOKEN)."""
-    manifest = json.loads((frames / "manifest.json").read_text())
-    env = dict(os.environ, COLLAB_TOKEN=grant)
-    for who in manifest["contributors"]:
-        folder = frames / who["slug"]
-        conf = data / "uploader" / who["slug"]
-        conf.mkdir(parents=True, exist_ok=True)
-        base = [bins["collab-uploader"], "--api-base", api_base, "--config-dir", conf]
-        lights = sorted(folder.glob("light_*.fits"))
-        if not lights:
-            continue
-        steps = [
-            base + ["projects"],
-            base + ["rig", "confirm", "--from", lights[0], "--yes"],
-            base + ["upload", folder, "--project", pid, "--include-calibration", "--now"],
-        ]
-        for step in steps:
-            say(f"  uploader[{who['slug']}] {' '.join(str(a) for a in step[len(base):len(base) + 2] if not str(a).startswith('/'))}")
-            done = subprocess.run([str(a) for a in step], env=env, capture_output=True, text=True)
-            with open(log, "a") as handle:
-                handle.write(f"$ {' '.join(str(a) for a in step)}\n{done.stdout}{done.stderr}\n")
-            # Exit 2 is "finished, some files failed": the synthetic set carries bad
-            # files on purpose (a truncated one, an off-field one), so it is fine.
-            if done.returncode not in (0, 2) or (done.returncode == 2 and step[len(base)] != "upload"):
-                fail(f"collab-uploader {step[len(base)]} for {who['slug']} failed ({done.returncode}); see {log}\n"
-                     + (done.stderr or done.stdout)[-600:])
-            if step[len(base)] == "upload":
-                say("    " + (done.stdout.strip().splitlines() or [""])[-1])
-
-
-def preview_published(public: Path) -> str:
-    """What the hub's push has put in the public tree: '' until status.json
-    parses AND a stream's live preview (<stream>/live/latest.png) is there."""
-    status = public / "status.json"
-    if not status.exists():
-        return ""
-    try:
-        json.loads(status.read_text())
-    except ValueError:
-        return ""
-    images = sorted(public.glob("*/live/latest.png"))
-    return str(images[0].relative_to(public)) if images else ""
 
 
 # ------------------------------------------------------------------------ main
@@ -442,62 +276,33 @@ def main(argv: list[str] | None = None) -> int:
 
         # 2. the owner signs in and registers a hub
         owner = sign_in_as(server_local, args.name)
-        status, reg = http("POST", f"{server_local}/api/v1/hubs",
-                           {"name": "Local hub", "lanUrl": hub_public}, token=owner)
-        if status != 200 or not reg.get("hubToken"):
-            fail(f"registering the hub failed: {status} {reg}")
+        reg = register_hub(server_local, owner, "Local hub", hub_public)
         xpsd = Path.home() / "Astronomy" / "XPSD"
         use_xpsd = xpsd if (xpsd.is_dir() and not args.synthetic) else None
         hub_dir = data / "hub"
+        # The Windows PC reaches this Mac's folder as the XPSD share, by the
+        # whole address (an IP cut at its first dot named no host at all).
         config = write_hub_files(hub_dir, hub_id=reg["hubId"], hub_token=reg["hubToken"],
                                  grant_secret=reg["grantSecret"], server_local=server_local,
-                                 bind_port=args.hub_port, public=hub_public, xpsd=use_xpsd, host=host.split(".")[0])
+                                 bind_port=args.hub_port, public=hub_public, xpsd=use_xpsd,
+                                 xpsd_paths=xpsd_paths_for(use_xpsd, host) if use_xpsd else None)
         say(f"starting collab-hub on port {args.hub_port} ({'XPSD ' + str(xpsd) if use_xpsd else 'no XPSD folder'})...")
         fleet.start("hub", [bins["collab-hub"], "run", "--config", config])
         wait_for("the hub's health", lambda: http("GET", f"{hub_local}/api/hub/v1/health", timeout=3)[0] == 200,
                  fleet, 60)
 
-        # 3. a throw-away collaboration bound to the hub
-        ra, dec, width, height = (SYNTH_RA, SYNTH_DEC, 1.0, 1.0) if args.synthetic else region
-        status, made = http("POST", f"{server_local}/api/v1/projects", {
-            "name": "Local night", "region": {"ra": ra, "dec": dec, "width": width, "height": height},
-            "requirements": {"filters": {"L": 1.0, "Ha": 1.0}},
-            "stacking": {"backend": "hub", "hubId": reg["hubId"]},
-            **({"discordWebhookUrl": args.discord_webhook} if args.discord_webhook else {})}, token=owner)
-        if status != 200:
-            fail(f"binding a collaboration to the hub failed: {status} {made}")
-        sf_project = made["project"]["id"]
-        # A telescope owned by the owner, to get the grant a telescope would hold.
-        _, enrolled = http("POST", f"{server_local}/api/v1/agents", {"name": "Local scope"}, token=owner)
-        scope = enrolled["token"]
-        http("POST", f"{server_local}/api/v1/agent/hello", {"protocol": 1, "profile": {
-            "name": "Local scope", "focalLength": 389.0, "pixelSize": 3.76, "sensorWidth": 9576,
-            "sensorHeight": 6388, "binning": 1, "filters": {"Ha": 1.0}, "hoursPerNight": 6.0,
-            "scale": 206.265 * 3.76 / 389.0,
-            "field": [206.265 * 3.76 / 389.0 * 9576 / 3600.0, 206.265 * 3.76 / 389.0 * 6388 / 3600.0]}},
-            token=scope)
-        http("POST", f"{server_local}/api/v1/agent/projects/{sf_project}/join", {}, token=scope)
-        _, browse = http("GET", f"{server_local}/api/v1/agent/projects", token=scope)
-        block = next((p for p in browse["projects"] if p["id"] == sf_project), {}).get("stacking") or {}
-        grant, pid = block.get("grant", ""), block.get("collabProjectId", "")
-        if not grant or not pid:
-            fail(f"the agent listing has no stacking grant for the project: {block}")
-        front = f"{server_local}/stack/api"
-        _, proj = http("GET", f"{front}/projects/{pid}", token=grant)
-        slug = (proj.get("project") or {}).get("slug", "") if isinstance(proj, dict) else ""
-        # The telescope joins as a member (the grant names the project, so no
-        # code). With --synthetic, the three synthetic contributors share its one
-        # membership, so their filter names are mapped here, once; real frames
-        # uploaded with collab-uploader (the command is printed below) use the
-        # same membership with no mapping.
-        _, got = http("GET", f"{front}/projects/{pid}", token=grant)
-        version = (got.get("project") or {}).get("terms_version", "") if isinstance(got, dict) else ""
-        mapping = [{"raw": "Narrowband A", "canonical": "OIII"}] if args.synthetic else []
-        status, joined = http("POST", f"{front}/projects/{pid}/join", {
-            "display_name": "Local scope", "accepted_terms_version": version,
-            "filter_mapping": mapping}, token=grant)
-        if status != 200:
-            fail(f"joining the stacking project as the telescope failed: {status} {joined}")
+        # 3. a throw-away collaboration bound to the hub, and a telescope that has
+        # joined it as a member. With --synthetic, the three synthetic contributors
+        # share its one membership, so their filter names are mapped here, once;
+        # real frames uploaded with collab-uploader (the command is printed below)
+        # use the same membership with no mapping.
+        bound = bind_collaboration(
+            server_local, owner, reg["hubId"], name="Local night", scope_name="Local scope",
+            region=(SYNTH_RA, SYNTH_DEC, 1.0, 1.0) if args.synthetic else region,
+            filter_mapping=[{"raw": "Narrowband A", "canonical": "OIII"}] if args.synthetic else [],
+            discord_webhook=args.discord_webhook)
+        sf_project, pid, slug, grant = (bound["collaboration"], bound["stackingProject"],
+                                        bound["slug"], bound["grant"])
         # The grant, for uploading real frames by hand (it lasts 24 h): owner-only.
         grant_file = data / "telescope-grant"
         grant_file.write_text(grant + "\n")
@@ -561,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
             say("generating synthetic frames (collab-worker synth-frames)...")
             run_out([bins["collab-worker"], "synth-frames", "--out", frames])
             say(f"uploading through the front door {server_public}/stack/api ...")
-            upload_synthetic(bins, frames, data, f"{server_public}/stack/api", grant, pid,
+            upload_synthetic(bins["collab-uploader"], frames, data, f"{server_public}/stack/api", grant, pid,
                              logs / "uploader.log")
             say("uploaded. Waiting for the hub to relay, the worker to stack, and the hub to push a live preview...")
 

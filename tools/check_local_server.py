@@ -335,6 +335,32 @@ case("--lan prints a loud warning that anyone on the network can sign in as anyo
      "WARNING" in lan_out and "can sign in as ANYONE" in lan_out)
 case("--lan prints the LAN URL for the other PC",
      f"http://{lan_host}:{LAN_PORT}" in lan_out)
+# --public-host: the name handed out instead of the first LAN address (a
+# machine with two adapters, or no DHCP reservation, changes address).
+NAMED_PORT = free_port()
+named = Launched([sys.executable, str(LAUNCHER), "--lan", "--public-host", "lab-server.example",
+                  "--port", str(NAMED_PORT), "--data", str(Path(tempfile.mkdtemp()) / "named")],
+                 env=launcher_env())
+try:
+    named_local = f"http://127.0.0.1:{NAMED_PORT}"
+    for _ in range(150):
+        try:
+            urllib.request.urlopen(f"{named_local}/api/v1/health", timeout=1).read()
+            break
+        except Exception:
+            if named.poll() is not None:
+                break
+            time.sleep(0.2)
+    named_status = json.loads(get(f"{named_local}/api/v1/auth")[2]) if named.poll() is None else {}
+    case("--public-host is handed out as the public address",
+         named_status.get("publicUrl") == f"http://lab-server.example:{NAMED_PORT}", str(named_status)[:120])
+finally:
+    named.stop()
+refused = subprocess.run([sys.executable, str(LAUNCHER), "--public-host", "lab-server.example",
+                          "--data", str(Path(tempfile.mkdtemp()) / "nolan")],
+                         capture_output=True, text=True, env=launcher_env(), timeout=60)
+case("--public-host without --lan is refused", refused.returncode != 0 and "--lan" in refused.stderr)
+
 case("without --lan there is no warning and the bind stays loopback",
      "WARNING" not in out and f"listening http://127.0.0.1:{PORT}" in out)
 

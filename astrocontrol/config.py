@@ -707,6 +707,11 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "configDir": "",           # blank means the default under the data root
         "dataRoot": "",            # where the hub keeps its database and files
         "catalogueDir": "",        # the star catalogue the hub hands out
+        # The same catalogue as each other OS's workers reach it (a share), e.g.
+        # \\nas\XPSD for Windows; blank means that OS's workers are told none.
+        "catalogueMacos": "",
+        "catalogueWindows": "",
+        "catalogueLinux": "",
         "bind": "0.0.0.0:8790",    # address and port the hub listens on
         "publicUrl": "",           # the address other machines reach it at
         "adminToken": "",          # the hub's own administration token

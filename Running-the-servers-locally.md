@@ -1,4 +1,4 @@
-> **Current way (2026-10-22):** the whole live-stacking system now comes up with `tools/local_night.py` in the Starfront repo (server, hub, worker), and the hub is operated with Rapid Stacker Collab's `docs/runbooks/starfront-hub.md`. What follows is the older, manual route.
+> **Current way (2026-10-22):** the whole live-stacking system now comes up with `tools/local_night.py` in the Starfront repo (server, hub, worker), and the hub is operated with Rapid Stacker Collab's `docs/runbooks/starfront-hub.md`. **Across three machines (2026-10-24):** `deploy/home-lab/README.md` puts the server and the hub on the Linux machine and a worker on each computer, with Terraform. What follows is the older, manual route.
 
 # Running the servers and website locally
 
