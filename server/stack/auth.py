@@ -28,6 +28,20 @@ from typing import Any, Callable
 from fastapi import APIRouter, Request
 
 from ..hubs import _unb64, verify_grant
+
+
+def collab_identity(store: Any, sf_id: str, name: str = "") -> str:
+    """The collab user id of a Starfront id (a Discord snowflake, or a
+    telescope's id when it has no owner), minting one on first sight. A grant's
+    `sub` is this id, as is every member, rig and frame the hub can read."""
+    row = store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?", sf_id)
+    if row is not None:
+        return row["collab_user_id"]
+    made = str(uuid.uuid4())
+    store._run("INSERT OR IGNORE INTO stack_identities (user_id, collab_user_id,"
+               " display_name) VALUES (?, ?, ?)", sf_id, made, name[:80])
+    return store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?",
+                      sf_id)["collab_user_id"]
 from ..files import COOKIE
 from .envelope import ApiError, ok, validation_failed  # noqa: F401  (re-exported for routes)
 
@@ -80,7 +94,12 @@ class Auth:
         if header.lower().startswith("bearer ") and header[7:].strip():
             claims = self.grant(header[7:].strip())
             sub = str(claims["sub"])
-            return Caller(self.identity(sub, str(claims.get("name") or "")), "grant",
+            # A grant names its holder by collab user id, which is what the hub
+            # reads too. A grant minted before that carried the Starfront id; it
+            # is mapped as before until it expires (a day).
+            known = self.store._one("SELECT 1 AS x FROM stack_identities WHERE collab_user_id = ?", sub)
+            user_id = sub if known is not None else self.identity(sub, str(claims.get("name") or ""))
+            return Caller(user_id, "grant",
                           hub=str(claims["hub"]), project=str(claims.get("project") or ""),
                           name=str(claims.get("name") or ""))
         cookie = request.cookies.get(COOKIE, "")
@@ -111,14 +130,7 @@ class Auth:
     # -- the hub-side identity ---------------------------------------------
     def identity(self, sf_id: str, name: str = "") -> str:
         """The collab user id of a Starfront id, minting one on first sight."""
-        row = self.store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?", sf_id)
-        if row is not None:
-            return row["collab_user_id"]
-        made = str(uuid.uuid4())
-        self.store._run("INSERT OR IGNORE INTO stack_identities (user_id, collab_user_id,"
-                        " display_name) VALUES (?, ?, ?)", sf_id, made, name[:80])
-        return self.store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?",
-                               sf_id)["collab_user_id"]
+        return collab_identity(self.store, sf_id, name)
 
     # -- projects ----------------------------------------------------------
     def project(self, ref: str) -> dict[str, Any]:

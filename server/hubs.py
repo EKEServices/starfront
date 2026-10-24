@@ -23,7 +23,9 @@ Two secrets are made at registration and shown once:
 Grant format: `sfg_` + base64url(JSON) + `.` + base64url(HMAC-SHA256(key, the
 base64url JSON text)), where the key is the 32 bytes the grant secret decodes
 to. The JSON is `{"v":1,"hub","sub","name","agent","project","iat","exp"}`
-with `exp = iat + 86400`. Stdlib only.
+with `exp = iat + 86400`. `sub` is the holder's collab user id
+(server/stack/auth.py `collab_identity`), never the Starfront id: the hub keys
+members by it. Stdlib only.
 """
 
 from __future__ import annotations

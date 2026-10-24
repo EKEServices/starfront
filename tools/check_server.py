@@ -2630,14 +2630,29 @@ case("the owner's telescope is told the stacking project's visibility, for the E
      mine_l["visibility"] == "unlisted", str(mine_l))
 case("...as is a joined telescope, as it is handed the grant", joined_l["visibility"] == "unlisted", str(joined_l))
 case("...a browsing telescope is not (no grant, no visibility)", third_l["visibility"] == "", str(third_l))
+def collab_id_of(sf_id):
+    row = server_app.store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?", sf_id)
+    return row["collab_user_id"] if row else None
+
+
 claims = hubs_module.verify_grant(mine_l["grant"], BHSEC)
 case("the owner's grant verifies with the hub's secret and names the project and the person",
      claims and claims["hub"] == BH and claims["project"] == wanted_id
-     and claims["sub"] == "1002" and claims["name"] == "Bob", str(claims))
+     and claims["sub"] == collab_id_of("1002") and claims["name"] == "Bob", str(claims))
+# The hub keys members by collab user id and has no way to map a Starfront id,
+# so a grant that named Bob's Discord id was "not a member" straight to the hub.
+case("...by collab user id, never the Starfront id the hub cannot map",
+     claims and claims["sub"] not in ("1002", "") and len(claims["sub"]) == 36, str(claims))
 claims = hubs_module.verify_grant(joined_l["grant"], BHSEC)
 case("...a joined one names its telescope and the project",
      claims and claims["agent"] == JOINED_ID and claims["project"] == wanted_id
-     and claims["sub"] == JOINED_ID, str(claims))
+     and claims["sub"] == collab_id_of(JOINED_ID), str(claims))
+old_style = hubs_module.mint_grant(server_app.store.hub(BH), "1002", "Bob", OWNER_RIG, wanted_id)
+_, as_new = call("GET", "/stack/api/auth/me", token=mine_l["grant"])
+_, as_old = call("GET", "/stack/api/auth/me", token=old_style)
+case("a grant minted before (Starfront id in sub) is still the same person at the front door",
+     (as_new.get("user") or {}).get("user_id") == (as_old.get("user") or {}).get("user_id") == collab_id_of("1002"),
+     f"{as_new} {as_old}")
 case("...and neither verifies under another hub's secret",
      hubs_module.verify_grant(mine_l["grant"], reg_b["grantSecret"]) is None
      and hubs_module.verify_grant(joined_l["grant"], reg_b["grantSecret"]) is None)
