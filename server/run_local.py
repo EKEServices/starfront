@@ -20,6 +20,8 @@ sees.
     --lan           listen on the whole network (0.0.0.0), so another PC on the
                     same home network, such as the Windows PC running Starfront,
                     can reach the server directly
+    --public-host H with --lan, the name other PCs use (e.g. omarchy.lan), instead
+                    of this machine's first LAN address
 
 The stand-in is served by the server itself, under /_local/discord, so there
 is one address to reach. By default that is this machine only (127.0.0.1); an
@@ -213,7 +215,15 @@ def main(argv: list[str] | None = None) -> None:
                         help="data folder (default ~/starfront-local)")
     parser.add_argument("--lan", action="store_true",
                         help="listen on the network (0.0.0.0) for another PC to reach")
+    parser.add_argument("--public-host", default="",
+                        help="with --lan, the name other PCs reach this machine by (e.g. omarchy.lan) "
+                             "instead of its first LAN address, which can change on a machine with "
+                             "two network adapters or no DHCP reservation")
     args = parser.parse_args(argv)
+    if args.public_host and not args.lan:
+        parser.error("--public-host needs --lan")
+    if args.public_host and not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", args.public_host):
+        parser.error("--public-host is a host name or address, e.g. omarchy.lan")
     missing = missing_requirements()
     if missing:
         refuse(f"this Python ({sys.executable}) lacks {', '.join(missing)}: "
@@ -248,8 +258,8 @@ def main(argv: list[str] | None = None) -> None:
     public = base
     lan_ips = lan_addresses() if args.lan else []
     if args.lan:
-        public = f"http://{lan_ips[0]}:{args.port}" if lan_ips \
-            else f"http://{local_name()}:{args.port}"
+        host = args.public_host or (lan_ips[0] if lan_ips else local_name())
+        public = f"http://{host}:{args.port}"
     secret = secrets.token_urlsafe(24)
     # Whatever the shell had, under either name, gives way: a real client
     # secret or guild must not be mixed with the stand-in.
@@ -281,6 +291,8 @@ def main(argv: list[str] | None = None) -> None:
         print("  Stop the server (Ctrl+C) when the test is over.")
         print("=" * 72)
         print("Reach it from another PC on this network at:")
+        if args.public_host:
+            print(f"  http://{args.public_host}:{args.port}   (what sign-in links use)")
         for ip in lan_ips:
             print(f"  http://{ip}:{args.port}")
         print(f"  http://{local_name()}:{args.port}")

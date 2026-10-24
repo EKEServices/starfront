@@ -245,6 +245,20 @@ case("the TOML carries bind, public_url, data_root and xpsd_dir from the setting
      and doc.get("xpsd_dir") == str(catalogue), json.dumps(doc))
 here_os = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
 case("[xpsd_paths] names this machine's OS", doc.get("xpsd_paths") == {here_os: str(catalogue)})
+# A mixed network: workers on the other OSes reach the folder through a share,
+# and enrolment hands each the path for its OS (RSC hub routes/admin.rs).
+shares = {"macos": "/Volumes/XPSD", "windows": "\\\\nas\\XPSD", "linux": "/mnt/xpsd"}
+config.update("hub", {"catalogueMacos": shares["macos"], "catalogueWindows": shares["windows"],
+                      "catalogueLinux": shares["linux"]})
+mixed = tomllib.loads(sup.render_toml()).get("xpsd_paths")
+case("[xpsd_paths] carries a path for every OS that has one", mixed == shares, json.dumps(mixed))
+config.update("hub", {"catalogueMacos": "", "catalogueWindows": "", "catalogueLinux": ""})
+config.update("hub", {"catalogueWindows": shares["windows"]})
+partial = tomllib.loads(sup.render_toml()).get("xpsd_paths")
+case("this machine's OS falls back to the hub's own folder when its share path is blank",
+     partial == {here_os: str(catalogue), "windows": shares["windows"]} if here_os != "windows"
+     else partial == {"windows": shares["windows"]}, json.dumps(partial))
+config.update("hub", {"catalogueWindows": ""})
 case("an unregistered hub has no [starfront] table and TLS is not configured",
      "starfront" not in doc and "tls" not in doc)
 case("the hub's data folder was created", hub_data.is_dir())

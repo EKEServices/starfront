@@ -185,8 +185,15 @@ class HubSupervisor:
         catalogue = str(self._setting("catalogueDir") or "").strip()
         if catalogue:
             lines.append(f"xpsd_dir = {_toml_str(catalogue)}")
-            key = {"darwin": "macos", "win32": "windows"}.get(_platform(), "linux")
-            lines += ["", "[xpsd_paths]", f"{key} = {_toml_str(catalogue)}"]
+            # Enrolment hands each worker the path for its own OS. A worker on
+            # another OS reaches the folder through a share, so its path is a
+            # setting of its own; this machine's OS uses the hub's own folder.
+            here = {"darwin": "macos", "win32": "windows"}.get(_platform(), "linux")
+            paths = {"macos": str(self._setting("catalogueMacos") or "").strip(),
+                     "windows": str(self._setting("catalogueWindows") or "").strip(),
+                     "linux": str(self._setting("catalogueLinux") or "").strip()}
+            paths[here] = paths[here] or catalogue
+            lines += ["", "[xpsd_paths]"] + [f"{key} = {_toml_str(path)}" for key, path in paths.items() if path]
         hub_id = str(self._setting("registeredId") or "").strip()
         if hub_id:
             lines += ["", "[starfront]", f"url = {_toml_str(self.server_url())}",

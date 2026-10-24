@@ -47,6 +47,7 @@ from server import notify                                        # noqa: E402
 from server.files import COOKIE, COOKIE_SECONDS, Files           # noqa: E402
 from server.hubs import Hubs, mint_grant                          # noqa: E402
 from server.stack import defaults as stack_defaults             # noqa: E402
+from server.stack.auth import collab_identity                   # noqa: E402
 from server.stack import front as stack_front                   # noqa: E402
 from server.stack import relay as stack_relay                   # noqa: E402
 from server.stack import records as stack_records               # noqa: E402
@@ -1211,9 +1212,12 @@ def _stacking_listing(project: dict[str, Any], binding: dict[str, str],
     if entitled:
         # With the grant, because the Edit form of the owner's program shows it.
         out["visibility"] = str(row["doc"].get("visibility") or "unlisted")
-        out["grant"] = mint_grant(hub, person_id or str(agent["id"]),
-                                  (person or {}).get("name") or agent.get("owner") or agent["name"],
-                                  agent["id"], row["project_id"])
+        # The grant names its holder by collab user id: the hub keys members,
+        # rigs and frames by it and never sees a Starfront id, so a grant that
+        # named the Starfront id was "not a member" on the LAN short-cut.
+        name = (person or {}).get("name") or agent.get("owner") or agent["name"]
+        out["grant"] = mint_grant(hub, collab_identity(store, person_id or str(agent["id"]), name),
+                                  name, agent["id"], row["project_id"])
     return out
 
 

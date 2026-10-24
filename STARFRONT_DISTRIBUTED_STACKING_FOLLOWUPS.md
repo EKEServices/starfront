@@ -62,6 +62,13 @@ folder: local server, hub and one Mac worker, frames uploaded with `collab-uploa
 
 You may want to know about these before you test. The first would have broken the deployed server.
 
+- **Found 2026-10-24, while building the three-machine lab: the LAN short-cut refused every telescope.** The server signed
+  grants with the telescope owner's Starfront id in `sub`, while the hub keys members by collab user id and has no way to map
+  one to the other. Uploads through the server's front door worked (it maps the id), but anything sent straight to the hub (the
+  plugin's LAN short-cut, `collab-uploader` against a hub) was "not an active member of this project". Grants now carry the
+  collab user id (`server/stack/auth.py` `collab_identity`); grants minted before the fix still work at the front door until
+  they expire. Checked by `check_server.py` and by `tools/lab_setup.py smoke --via hub`.
+
 - **The Starfront server refused every hub push.** `python-multipart` was in neither `requirements.txt` nor
   `server/deploy/install.sh`, so `request.form()` failed and the server answered 400. No verdict, preview or master could ever
   reach the pages. Fixed in `28ac374`; **the next server deploy installs it** (install.sh's pip line now includes it).
