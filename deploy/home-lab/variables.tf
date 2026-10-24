@@ -1,5 +1,5 @@
 variable "server_host" {
-  description = "The Linux machine that runs the Starfront server and the hub (a name the eero's DNS answers)."
+  description = "The Linux machine that runs the Starfront server and the hub (a name the router's DNS answers)."
   type        = string
   default     = "omarchy.lan"
 }

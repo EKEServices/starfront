@@ -15,7 +15,7 @@ Terraform here is only the inventory, the order of the steps, change detection a
 
 These steps need root or administrator rights, so Terraform does not do them.
 
-1. In the eero app, reserve addresses for the server host, the Windows PC and the Mac's wired adapter. The scripts use the `.lan` names, but the names follow the leases.
+1. On the main router, reserve addresses for the server host, the Windows PC and the NAS, by each one's built-in network card. On the author's network that is the GFiber router (https://192.168.1.1), not the eero: the eero is a second router behind it with its own 192.168.4.x Wi-Fi network, so it refuses 192.168.1.x reservations. The scripts use the `.lan` names, but the names follow the leases.
 2. **On the Mac:** run `ssh-keygen -t ed25519` if `~/.ssh/id_ed25519` does not exist yet.
 3. **On the Linux server host**, at its own keyboard:
    ```bash

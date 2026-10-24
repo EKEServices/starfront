@@ -3,7 +3,7 @@
 
 Reads {"server": name, "windows": name, "nas": name, "ssh": "server,windows"}
 on stdin and prints {"server": ip, "windows": ip, "nas": ip}. Each name is
-resolved the way this Mac resolves it (the eero router's DNS answers the .lan
+resolved the way this Mac resolves it (the main router's DNS answers the .lan
 names); each machine named in "ssh" must accept a TCP connection on port 22,
 which is what bootstrap-linux.sh and bootstrap-windows.ps1 open. Anything
 missing ends the run with a message saying what to do, before Terraform
