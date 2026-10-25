@@ -1,12 +1,13 @@
 # Home-network test lab
 
-This folder sets up live stacking across the machines on a home network: the Starfront server, a Rapid Stacker Collab hub and workers, with N.I.N.A. on the Windows PC. `terraform apply` brings it up from the Mac, and `terraform destroy` takes it down. It is for local testing only. The server runs with the stand-in Discord (`server/run_local.py --lan`), so anyone on the network can sign in as anyone, the owner included.
+This folder sets up live stacking across the machines on a home network: the Starfront server, a Rapid Stacker Collab hub and workers, with N.I.N.A. on the Windows PC or on a rig of its own. `terraform apply` brings it up from the Mac, and `terraform destroy` takes it down. It is for local testing only. The server runs with the stand-in Discord (`server/run_local.py --lan`), so anyone on the network can sign in as anyone, the owner included.
 
 | Machine | What runs there |
 |---|---|
 | **Linux server host** (`omarchy.lan`) | the Starfront server on port 8800 and `collab-hub` on 8790, both as `systemd --user` units; a worker |
 | **This Mac** | Terraform; a worker (a LaunchAgent); `collab-uploader` for the smoke test and real uploads |
 | **Windows PC** (`Eds9950X.lan`) | N.I.N.A. with the Starfront plugin, the Starfront desktop, and a worker that runs as a logon task and pauses while `NINA.exe` runs |
+| **Imaging rig** (any PC that runs N.I.N.A., such as the one in the backyard) | N.I.N.A. with the Starfront plugin, installed with one line (below). No worker, no SSH, nothing for Terraform to know about |
 | **NAS** (`DXP8800PLUS-76B2.lan`) | the read-only `XPSD` share (the 16 `gdr3-*.xpsd` files, about 45 GB) |
 
 Terraform here is only the inventory, the order of the steps, change detection and teardown. Every step is a script in `scripts/` that runs over SSH from this Mac, and each one can also be run by hand. There is no cloud provider and nothing leaves the LAN. State is local and git-ignored, because the scripts pass tokens around.
@@ -53,7 +54,10 @@ Rust is not cross-compiled. Each OS's `collab-hub` and `collab-worker` are built
 scripts/fetch-binaries.sh --mac                         # this Mac: also collab-uploader
 scripts/fetch-binaries.sh --from-run <worker-release run id>   # Linux and Windows, from CI
 scripts/fetch-binaries.sh --build-on <you>@omarchy.lan  # or Linux natively (needs rustup, cmake, rapid-stacker access)
+scripts/fetch-binaries.sh --plugin                      # the N.I.N.A. plugin, from Starfront's newest green plugin CI run on main
 ```
+
+The plugin build lands in `bin/nina-plugin/`, and the next `apply` gives it to the lab server. The server's `/nina` feed then offers it, in place of the released plugin in `server/nina_plugin/`. CI stamps it `1.0.0.0`, which is how N.I.N.A. lists it.
 
 `worker-release` is the Rapid Stacker Collab workflow that you run by hand (Actions > worker-release > Run workflow). It builds the archives as workflow artifacts and signs, uploads and tags nothing. Its unsigned archives are fine here, because nothing installs them through the desktop's signed-manifest path. That path is blocked until the release key exists.
 
@@ -76,12 +80,35 @@ scripts/lab.sh night                           # the "Lab night" collaboration a
 ```
 
 Point N.I.N.A. and the desktop at `terraform output -raw server_url`:
-- N.I.N.A.: set `ServerUrl` in the plugin's `settings.json`.
+- N.I.N.A., on the Windows PC or the imaging rig: see the next section.
 - The desktop: set `collab.serverUrl`.
+
+### N.I.N.A. on any PC: one line
+
+On the PC that runs N.I.N.A., close N.I.N.A., then in an ordinary PowerShell window (not an administrator one):
+
+```powershell
+irm http://omarchy.lan:8800/_local/install-nina-plugin.ps1 | iex
+```
+
+It installs the plugin build the lab server offers, after checking it against its manifest's SHA-256, in place of any Starfront plugin already there. It sets the plugin's `ServerUrl` to the lab server and changes nothing else in the settings. If the plugin was signed in to another server, it says so: sign in again, because a sign-in belongs to one server. Run it again whenever the lab server has a newer build. The script is `install-nina-plugin.ps1` here; `run_local.py --nina-dir` serves it with the server's address filled in.
+
+The PC needs nothing else: no SSH, and no Terraform entry. It reaches `omarchy.lan` on 8800 and 8790 from the main network or from the eero's Wi-Fi. The eero hands its Wi-Fi clients only a private IPv6 address, so they go straight to IPv4. To go back to the real server, set `ServerUrl` to `""` in the settings file the script names, or install the released plugin from N.I.N.A.'s plugin list.
 
 `scripts/lab.sh upload <folder>` sends real frames from the Mac, as the Lab scope telescope.
 
 A change to the Starfront sources on this Mac, committed or not, changes the source hash, so the next `apply` copies them across and restarts the server. A new binary in `bin/` re-installs what runs it. Workers keep their tokens across re-installs.
+
+## After a reboot
+
+| Machine | What comes back by itself |
+|---|---|
+| Linux server host | everything: the server, the hub and its worker start at boot, with nobody signed in (linger) |
+| Mac | the worker, once you sign in (a LaunchAgent). `/Volumes/XPSD` does not remount by itself; add it to System Settings > General > Login Items, or reconnect it in Finder |
+| Windows PC | the worker, once the account signs in (a logon task). The share needs no drive mapping; the credential `cmdkey` stored survives reboots |
+| Imaging rig | the plugin, whenever N.I.N.A. starts |
+
+Then `scripts/lab.sh status`: three workers, each with its catalogue `ready` in real mode. A worker whose share is not mounted reports `missing` until it is.
 
 ## 3. Down
 

@@ -22,6 +22,12 @@ sees.
                     can reach the server directly
     --public-host H with --lan, the name other PCs use (e.g. omarchy.lan), instead
                     of this machine's first LAN address
+    --nina-dir DIR  a folder of plugin builds (zip + manifest) for the /nina feed
+                    to offer instead of server/nina_plugin: a test build for the
+                    PCs on this network. Its install-nina-plugin.ps1, if it has
+                    one, is served at /_local/install-nina-plugin.ps1 with this
+                    server's address filled in, so a PC that runs N.I.N.A. needs
+                    one line: irm <server>/_local/install-nina-plugin.ps1 | iex
 
 The stand-in is served by the server itself, under /_local/discord, so there
 is one address to reach. By default that is this machine only (127.0.0.1); an
@@ -160,6 +166,30 @@ def stand_in_discord(secret: str, callback: str, owner: str):
     return router
 
 
+#: What install-nina-plugin.ps1 has where this server's address goes.
+SERVER_PLACEHOLDER = "__STARFRONT_SERVER__"
+
+
+def plugin_installer(nina_dir: Path, public: str):
+    """The test plugin's install script, with this server's address in it.
+    Read on each request, so a new copy needs no restart; only the address is
+    filled in, nothing a request sends."""
+    from fastapi import APIRouter, HTTPException
+    from fastapi.responses import PlainTextResponse
+
+    router = APIRouter(prefix="/_local")
+
+    @router.get("/install-nina-plugin.ps1")
+    async def install_script():
+        path = nina_dir / "install-nina-plugin.ps1"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="no install script in --nina-dir")
+        text = path.read_text(encoding="utf-8").replace(SERVER_PLACEHOLDER, public)
+        return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+
+    return router
+
+
 def lan_addresses() -> list[str]:
     """This machine's IPv4 addresses on the network, the one the route out
     uses first. Loopback and link-local (169.254.x.x) are not reachable from
@@ -219,9 +249,16 @@ def main(argv: list[str] | None = None) -> None:
                         help="with --lan, the name other PCs reach this machine by (e.g. omarchy.lan) "
                              "instead of its first LAN address, which can change on a machine with "
                              "two network adapters or no DHCP reservation")
+    parser.add_argument("--nina-dir", default="",
+                        help="a folder of N.I.N.A. plugin builds for the /nina feed, instead of "
+                             "server/nina_plugin; its install-nina-plugin.ps1 is served at "
+                             "/_local/install-nina-plugin.ps1")
     args = parser.parse_args(argv)
     if args.public_host and not args.lan:
         parser.error("--public-host needs --lan")
+    nina_dir = Path(args.nina_dir).expanduser().resolve() if args.nina_dir else None
+    if nina_dir is not None and not nina_dir.is_dir():
+        parser.error(f"--nina-dir {args.nina_dir} is not a folder")
     if args.public_host and not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", args.public_host):
         parser.error("--public-host is a host name or address, e.g. omarchy.lan")
     missing = missing_requirements()
@@ -277,12 +314,19 @@ def main(argv: list[str] | None = None) -> None:
         "STARFRONT_DISCORD_API": base + PREFIX,
         "STARFRONT_DISCORD_AUTHORIZE": public + PREFIX + "/oauth2/authorize",
     })
+    if nina_dir is not None:
+        os.environ.pop("ASTROCOLLAB_NINA_DIR", None)
+        os.environ["STARFRONT_NINA_DIR"] = str(nina_dir)
 
     # The server reads its settings when it is imported, so only now; the
     # routes are added to the same app object run.py then serves.
     from server import app as server_app
     server_app.app.include_router(stand_in_discord(
         secret, public + "/auth/discord/callback", owner))
+    if nina_dir is not None:
+        server_app.app.include_router(plugin_installer(nina_dir, public))
+        print(f"N.I.N.A. plugin feed from {nina_dir}; install script at "
+              f"{public}/_local/install-nina-plugin.ps1")
 
     if args.lan:
         print("=" * 72)

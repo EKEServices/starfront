@@ -5,7 +5,7 @@ set -euo pipefail
 public_host="$1" port="$2"
 lab="$HOME/starfront-lab"
 units="$HOME/.config/systemd/user"
-mkdir -p "$lab/data" "$units"
+mkdir -p "$lab/data" "$lab/nina" "$units"
 
 command -v python3 >/dev/null || { echo "server host: python3 is missing; run bootstrap-linux.sh" >&2; exit 1; }
 [ -x "$lab/venv/bin/python" ] || python3 -m venv "$lab/venv"
@@ -21,7 +21,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=%h/starfront-lab/src
-ExecStart=%h/starfront-lab/venv/bin/python server/run_local.py --lan --public-host $public_host --port $port --data %h/starfront-lab/data
+ExecStart=%h/starfront-lab/venv/bin/python server/run_local.py --lan --public-host $public_host --port $port --data %h/starfront-lab/data --nina-dir %h/starfront-lab/nina
 Restart=on-failure
 RestartSec=5
 

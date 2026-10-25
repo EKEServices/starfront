@@ -326,6 +326,8 @@ try:
     authorize = get(f"{local}{login['url'][len(lan_base):]}")[1]
     case("--lan: the stand-in's sign-in page is at the LAN address too",
          authorize.startswith(f"{lan_base}/_local/discord/oauth2/authorize?"), authorize[:80])
+    case("without --nina-dir there is no plugin install script",
+         get(f"{local}/_local/install-nina-plugin.ps1")[0] == 404)
 finally:
     lan_out = lan.stop()
 
@@ -337,9 +339,25 @@ case("--lan prints the LAN URL for the other PC",
      f"http://{lan_host}:{LAN_PORT}" in lan_out)
 # --public-host: the name handed out instead of the first LAN address (a
 # machine with two adapters, or no DHCP reservation, changes address).
+# --nina-dir, on the same run: the home lab's test build of the plugin, which a
+# PC running N.I.N.A. installs with one line, so the script it fetches must
+# name the server's public address, the one that PC can reach.
+PLUGIN_ID = "896B4E28-7CEB-4731-BB97-8BADE7460268"
+NINA_DIR = Path(tempfile.mkdtemp())
+(NINA_DIR / "install-nina-plugin.ps1").write_text(
+    (ROOT / "deploy" / "home-lab" / "install-nina-plugin.ps1").read_text(encoding="utf-8"), encoding="utf-8")
+(NINA_DIR / "Starfront.Collab.1.0.0.0.zip").write_bytes(b"PK-lab-build")
+(NINA_DIR / "Starfront.Collab.1.0.0.0.manifest.json").write_text(json.dumps({
+    "Name": "Starfront", "Identifier": PLUGIN_ID,
+    "Version": {"Major": "1", "Minor": "0", "Patch": "0", "Build": "0"},
+    "Installer": {"URL": "http://lab-server.example/nina/download/Starfront.Collab.1.0.0.0.zip",
+                  "Type": "ARCHIVE", "Checksum": "00", "ChecksumType": "SHA256"}}), encoding="utf-8")
+case("the lab's install script has the server placeholder exactly once",
+     (NINA_DIR / "install-nina-plugin.ps1").read_text(encoding="utf-8").count("__STARFRONT_SERVER__") == 1)
 NAMED_PORT = free_port()
 named = Launched([sys.executable, str(LAUNCHER), "--lan", "--public-host", "lab-server.example",
-                  "--port", str(NAMED_PORT), "--data", str(Path(tempfile.mkdtemp()) / "named")],
+                  "--port", str(NAMED_PORT), "--data", str(Path(tempfile.mkdtemp()) / "named"),
+                  "--nina-dir", str(NINA_DIR)],
                  env=launcher_env())
 try:
     named_local = f"http://127.0.0.1:{NAMED_PORT}"
@@ -354,8 +372,21 @@ try:
     named_status = json.loads(get(f"{named_local}/api/v1/auth")[2]) if named.poll() is None else {}
     case("--public-host is handed out as the public address",
          named_status.get("publicUrl") == f"http://lab-server.example:{NAMED_PORT}", str(named_status)[:120])
+    code, _, script = get(f"{named_local}/_local/install-nina-plugin.ps1")
+    case("--nina-dir serves the install script with the public address filled in",
+         code == 200 and f'$server = "http://lab-server.example:{NAMED_PORT}"' in script
+         and "__STARFRONT_SERVER__" not in script, f"{code} {script[:60]!r}")
+    code, _, feed = get(f"{named_local}/nina/plugins/manifests")
+    case("--nina-dir: the /nina feed offers the folder's build, not server/nina_plugin's",
+         code == 200 and [m.get("Identifier") for m in json.loads(feed)] == [PLUGIN_ID]
+         and json.loads(feed)[0]["Version"]["Build"] == "0", feed[:120])
+    case("--nina-dir: the build's zip downloads from the feed",
+         get(f"{named_local}/nina/download/Starfront.Collab.1.0.0.0.zip")[2] == "PK-lab-build")
 finally:
     named.stop()
+refused = run_briefly("--nina-dir", str(NINA_DIR / "missing"), "--port", str(free_port()))
+case("a --nina-dir that is not a folder is refused",
+     refused.returncode != 0 and "--nina-dir" in refused.stderr, refused.stderr.strip()[-120:])
 refused = subprocess.run([sys.executable, str(LAUNCHER), "--public-host", "lab-server.example",
                           "--data", str(Path(tempfile.mkdtemp()) / "nolan")],
                          capture_output=True, text=True, env=launcher_env(), timeout=60)

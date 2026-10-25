@@ -10,6 +10,10 @@
 #   fetch-binaries.sh --build-on user@host      build on the Linux host itself, over SSH (it needs
 #                                               rustup, cmake and read access to the private
 #                                               rapid-stacker repository)
+#   fetch-binaries.sh --plugin [RUN_ID]         the N.I.N.A. plugin (zip + manifest) into bin/nina-plugin/,
+#                                               from Starfront's plugin CI: the newest green run on
+#                                               main, or the run given. The lab server's /nina feed
+#                                               offers it, for install-nina-plugin.ps1
 #
 # The worker-release workflow is manual (Actions > worker-release > Run) and
 # signs, uploads and tags nothing; its archives are unsigned, which the lab is
@@ -19,7 +23,7 @@ set -euo pipefail
 bin="$(cd "$here/.." && pwd)/bin"
 rsc="${RSC:-$(cd "$here/../../../.." && pwd)/Rust/rapid-stacker-collab}"
 [ -f "$rsc/worker/Cargo.toml" ] || die "no Rapid Stacker Collab checkout at $rsc (set RSC=...)"
-[ $# -gt 0 ] || { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -gt 0 ] || { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -56,6 +60,19 @@ while [ $# -gt 0 ]; do
       mkdir -p "$bin/linux-x64"
       copy "$2:starfront-lab/build/rsc/worker/target/release/collab-hub" "$2:starfront-lab/build/rsc/worker/target/release/collab-worker" "$bin/linux-x64/"
       shift 2 ;;
+    --plugin)
+      run=""
+      case "${2:-}" in [0-9]*) run="$2"; shift ;; esac
+      [ -n "$run" ] || run=$(gh run list -R EKEServices/starfront -w ci.yml -b main -s success -L 1 --json databaseId -q '.[0].databaseId')
+      [ -n "$run" ] || die "no green plugin CI run on Starfront's main"
+      say "the plugin from Starfront CI run $run ($(gh run view "$run" -R EKEServices/starfront --json headSha,displayTitle -q '.headSha[0:7] + " " + .displayTitle'))"
+      tmp="$(mktemp -d)"
+      gh run download "$run" -R EKEServices/starfront -n plugin-validation -D "$tmp"
+      ls "$tmp"/*.zip "$tmp"/*.manifest.json >/dev/null 2>&1 || die "run $run's plugin-validation artifact has no zip and manifest"
+      rm -rf "$bin/nina-plugin" && mkdir -p "$bin/nina-plugin"
+      cp -f "$tmp"/*.zip "$tmp"/*.manifest.json "$bin/nina-plugin/"
+      rm -rf "$tmp"
+      shift ;;
     *) die "unknown argument: $1" ;;
   esac
 done

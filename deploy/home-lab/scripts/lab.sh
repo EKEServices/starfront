@@ -25,7 +25,8 @@ case "${1:-}" in
       | head -1 | "$py" -c 'import json,sys; d=json.load(sys.stdin); [print(f"{k:16} {v}") for k,v in d.items()]'
     slug=$(remote "$server_ssh" "sed -n 's/.*\"slug\": \"\\(.*\\)\".*/\\1/p' starfront-lab/lab-night.json")
     say "project page     $server_url/stack/p/$slug"
-    say "N.I.N.A. ServerUrl / desktop collab.serverUrl: $server_url" ;;
+    say "N.I.N.A. ServerUrl / desktop collab.serverUrl: $server_url"
+    say "N.I.N.A. on any PC (close it first):  irm $server_url/_local/install-nina-plugin.ps1 | iex" ;;
   smoke)
     via="${2:-relay}"
     "$py" "$starfront/tools/lab_setup.py" smoke --server "$server_url" --via "$via" \
