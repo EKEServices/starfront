@@ -457,12 +457,15 @@ Today it binds loopback only and the notes document an SSH tunnel. Add `--lan` (
 
 ```python
 "hub": {"enabled": False, "binary": "", "configDir": "", "dataRoot": "", "catalogueDir": "",
+        "catalogueMacos": "", "catalogueWindows": "", "catalogueLinux": "",
         "bind": "0.0.0.0:8790", "publicUrl": "", "adminToken": "", "autoStart": True,
         "registeredId": "", "registeredName": ""},
 "volunteer": {"enabled": False, "hubUrl": "", "workerId": "", "idlePolicy": "when_idle",
               "pauseWhileSequencing": True, "pauseWhileNina": True, "workWindow": "",
               "scratchDir": "", "scratchCapGb": 0, "installedVersion": "", "manifestUrl": ""},
 ```
+
+`catalogueMacos`, `catalogueWindows` and `catalogueLinux` (added with the home lab) are the same catalogue share as each other OS's workers reach it (`\\nas\XPSD`, `/Volumes/XPSD`, `/mnt/xpsd`); the hub hands each worker its own OS's path, and a blank one tells that OS's workers none.
 
 ### 5.2 `astrocontrol/hub.py`: supervising `collab-hub`
 

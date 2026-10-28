@@ -29,7 +29,10 @@ def case(name, ok, detail=""):
     return ok
 
 
-HUB_KEYS = {"enabled", "binary", "configDir", "dataRoot", "catalogueDir", "bind",
+# The per-OS catalogue paths came with the home lab (0dbefe2): the share as each
+# other OS's workers reach it, which the hub hands to them (hub.py, check_hub).
+HUB_KEYS = {"enabled", "binary", "configDir", "dataRoot", "catalogueDir",
+            "catalogueMacos", "catalogueWindows", "catalogueLinux", "bind",
             "publicUrl", "adminToken", "autoStart", "registeredId", "registeredName"}
 VOLUNTEER_KEYS = {"enabled", "hubUrl", "workerId", "idlePolicy", "pauseWhileSequencing",
                   "pauseWhileNina", "workWindow", "scratchDir", "scratchCapGb",
