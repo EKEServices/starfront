@@ -1563,6 +1563,9 @@ def join_project(project_id: str, body: JoinRequest,
     sky = ({"illumination": body.moon, "upFraction": body.moonUp}
            if body.moon is not None and body.moonUp is not None else None)
     if already:
+        # A telescope still on the project that is joined again gives back a
+        # stacking membership a leave took (stack_projects.member_returned).
+        stack_projects.member_returned(store, project_id, agent.get("owner_id") or agent["id"])
         _redeal(project_id, nights, moon=sky)
         wants = collab.Requirements.read(payload.get("requirements") or {})
         return {"task": store.task(already[0]["id"]), "requirements": wants.payload(),
@@ -2057,13 +2060,19 @@ def set_task_state(task_id: str, body: TaskStateRequest,
     task["version"] = int(task.get("version", 1)) + 1
     store.set_task(task)
     if body.state == "declined":
-        # Declining the last share a telescope holds in a project is leaving
-        # it: a hub-bound collaboration marks the stacking member removed.
-        still = [t for t in store.tasks_in(task["project"]) if t["agent"] == agent["id"]
+        # Declining the last share a *person* holds in a project is leaving it:
+        # a hub-bound collaboration marks the stacking member removed. The
+        # member is the person (the owner of the telescopes), so the shares that
+        # count are all of theirs. Counting only this telescope's took the
+        # Bubble Nebula's member away on 2026-10-28 when one of the owner's two
+        # telescopes re-dealt its share, while the other was still on it.
+        person = agent.get("owner_id")
+        theirs = ({a["id"] for a in store.agents_of(person)} | {agent["id"]}) if person else {agent["id"]}
+        still = [t for t in store.tasks_in(task["project"]) if t["agent"] in theirs
                  and t["id"] != task["id"] and t.get("state") in ("offered", "accepted", "complete")]
         if not still:
             stack_projects.member_left(store, task["project"],
-                                       agent.get("owner_id") or agent["id"], by="telescope")
+                                       person or agent["id"], by="telescope")
     return {"task": task}
 
 

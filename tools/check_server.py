@@ -4217,6 +4217,46 @@ case("a removal that was not the telescope's own stays: joining again leaves it 
      got.get("status") == "removed" and not [r for r in feed_since(before)["changes"] if r["kind"] == "member"],
      f"{got}")
 
+# The member is the person, not one telescope. On 2026-10-28 the owner's
+# StellaLyra re-dealt its share (Leave, then Join four seconds later) while
+# their backyard rig still held one, and the owner's member was removed.
+PAIR_A, PAIR_A_ID = enrol("pair stellalyra", 800.0, 6248, 4176, 6.0)
+PAIR_B, PAIR_B_ID = enrol("pair backyard", 600.0, 3840, 2160, 6.0)
+server_app.store._run("UPDATE agents SET owner_id = ? WHERE id IN (?, ?)", "1777", PAIR_A_ID, PAIR_B_ID)
+status, a_join = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=PAIR_A)
+status, b_join = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=PAIR_B)
+PAIR_GRANT = project_in_listing(PAIR_B, HUBP)["stacking"]["grant"]
+status, got = front("POST", f"/projects/{FD_ID}/join", {"display_name": "Pair Owner", "accepted_terms_version": terms_now},
+                    token=PAIR_GRANT)
+PAIR_UID = (got.get("membership") or {}).get("user_id", "")
+case("a person with two telescopes on a hub collaboration is one member", status == 200 and PAIR_UID, f"{status} {got}")
+
+
+def pair_status():
+    return call("GET", f"{REC}/member/{FD_ID}/{PAIR_UID}", token=BHTOK)[1].get("status")
+
+
+before = feed_since(0)["seq"]
+status, _ = call("POST", f"/api/v1/agent/task/{(a_join.get('task') or {}).get('id')}", {"state": "declined"}, token=PAIR_A)
+case("one of a person's telescopes leaving, while the other is still on, leaves them a member",
+     status == 200 and pair_status() == "active"
+     and not [r for r in feed_since(before)["changes"] if r["kind"] == "member"], pair_status())
+
+# The state the old rule left on 2026-10-28: removed by a telescope while the
+# person was still on the collaboration. Pressing Join on a telescope that still
+# holds its share (the dock's "Already on ...") gives the membership back.
+doc = json.loads(server_app.store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?",
+                                       FD_ID, PAIR_UID)["doc"])
+doc.update(status="removed", removed_by="telescope", removed_at="2026-10-28T04:07:02.126Z", frames_disposition="keep")
+server_app.store._run("UPDATE stack_members SET doc = ? WHERE project_id = ? AND user_id = ?",
+                      json.dumps(doc), FD_ID, PAIR_UID)
+status, again = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=PAIR_B)
+case("joining again with a telescope still on the project gives back a membership a leave took",
+     status == 200 and again.get("alreadyJoined") and pair_status() == "active", f"{status} {pair_status()}")
+
+status, _ = call("POST", f"/api/v1/agent/task/{(b_join.get('task') or {}).get('id')}", {"state": "declined"}, token=PAIR_B)
+case("the last of a person's telescopes leaving does take the membership", pair_status() == "removed", pair_status())
+
 # ------------------------------------------- live stacking: push
 print("\n-- live stacking: push --")
 import io as _io                                                   # noqa: E402
