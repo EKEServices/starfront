@@ -54,7 +54,9 @@ Why each piece exists:
     `idle_policy`, `work_window`, `scratch_dir`, `scratch_cap_gb` and
     `pause_while_nina` (a TOML bool) in `collab-worker.toml` in the config dir
     (`<data_root>/collab-worker/config` - the key is the variable's name
-    without `COLLAB_`, lower-cased).  `busy_file` is
+    without `COLLAB_`, lower-cased).  A blank scratch folder or a cap of 0
+    leaves the values `enrol` proposed in place; the worker requires both.
+    `busy_file` is
     `<data_root>/collab-worker/busy` (touched by the sequencer) only while
     "pause while sequencing" is on.  `pause_while_nina` is the worker's
     "pause while N.I.N.A. runs" gate (T206).
@@ -661,15 +663,25 @@ class Volunteer:
         if not path.exists():
             return
         busy = bool(self._setting("pauseWhileSequencing", True))
-        cap = int(self._setting("scratchCapGb", 0) or 0)
-        set_toml_keys(path, {
+        values: dict[str, Any] = {
             "busy_file": str(self.busy_file()) if busy else None,
             "idle_policy": str(self._setting("idlePolicy") or "when_idle"),
             "work_window": str(self._setting("workWindow") or "") or None,
-            "scratch_dir": str(self._setting("scratchDir") or "") or None,
-            "scratch_cap_gb": cap if cap > 0 else None,
             "pause_while_nina": bool(self._setting("pauseWhileNina", True)),
-        })
+        }
+        # Scratch is required by the worker, and `enrol` writes both keys itself:
+        # a folder beside its config and half the free space, up to 200 GB. A
+        # blank folder or a cap of 0 here means "the worker's own", so the keys
+        # are left alone rather than removed. Removing them (None) was the old
+        # behaviour, and every install with the defaults then failed at
+        # `service install` with COLLAB_SCRATCH_DIR and _CAP_GB missing.
+        scratch = str(self._setting("scratchDir") or "")
+        cap = int(self._setting("scratchCapGb", 0) or 0)
+        if scratch:
+            values["scratch_dir"] = scratch
+        if cap > 0:
+            values["scratch_cap_gb"] = cap
+        set_toml_keys(path, values)
         if busy:
             self.busy_file().parent.mkdir(parents=True, exist_ok=True)
 

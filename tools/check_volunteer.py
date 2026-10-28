@@ -165,14 +165,28 @@ case("... and it is a valid Ed25519 public key, not just 32 bytes", shipped_is_a
 # ---------------------------------------------------------------- the fakes
 FAKE_WORKER = textwrap.dedent('''\
     #!%(python)s
-    import json, os, sys
+    import json, os, sys, tomllib
     from pathlib import Path
     with open(os.environ["FAKE_WORKER_LOG"], "a") as log:
         log.write(json.dumps(sys.argv[1:]) + "\\n")
     argv = sys.argv[1:]
     if argv[:1] == ["enrol"]:
+        # Like the real one: keeps a scratch folder and cap already in the file,
+        # and otherwise writes its own (a folder beside the config, a cap it picks).
         d = Path(argv[argv.index("--dir") + 1]); d.mkdir(parents=True, exist_ok=True)
-        (d / "collab-worker.toml").write_text('hub_url = "%%s"\\n\\n[x]\\nk = 1\\n' %% argv[1])
+        f = d / "collab-worker.toml"
+        old = tomllib.loads(f.read_text()) if f.exists() else {}
+        scratch = old.get("scratch_dir") or str(d.parent / "scratch")
+        cap = old.get("scratch_cap_gb") or 40
+        f.write_text("hub_url = '%%s'\\nscratch_dir = '%%s'\\nscratch_cap_gb = %%d\\n\\n[x]\\nk = 1\\n"
+                     %% (argv[1], scratch, cap))
+    if argv[:2] == ["service", "install"]:
+        # The real one runs `config check` first, which requires both scratch keys.
+        f = Path(argv[argv.index("--dir") + 1]) / "collab-worker.toml"
+        missing = [k for k in ("scratch_dir", "scratch_cap_gb") if k not in tomllib.loads(f.read_text())]
+        if missing:
+            print("collab-worker config check failed: MISSING " + " ".join(missing))
+            sys.exit(1)
     if argv[:2] == ["service", "status"]:
         print("running (fake)")
     if os.environ.get("FAKE_FAIL_START") and argv[:2] == ["service", "start"]:
@@ -359,6 +373,29 @@ vol.apply_settings()
 data = tomllib.loads(vol.toml_path().read_text())
 case("saving it back on updates the same key, not a second copy",
      data.get("pause_while_nina") is True and vol.toml_path().read_text().count("pause_while_nina") == 1)
+
+# The panel's defaults are a blank scratch folder and a cap of 0, meaning "the
+# worker's own". The desktop used to turn them into removals, deleting the
+# scratch_dir and scratch_cap_gb that `enrol` had just written, and the worker's
+# config check then refused `service install`: the first real install on the
+# home lab's Windows PC (2026-10-28) failed exactly so, after spending its code.
+cfg, vol = fresh("scratch-defaults")
+fake.publish(SRV_PATH, "1.0.0", good_archive())
+cfg.update("volunteer", {"scratchDir": "", "scratchCapGb": 0})
+try:
+    vol.install_blocking(code="ABCD-1234", hub_url=fake.url)
+    installed, why = True, ""
+except volunteer.VolunteerError as exc:
+    installed, why = False, str(exc)
+data = tomllib.loads(vol.toml_path().read_text()) if vol.toml_path().exists() else {}
+case("an install with a blank scratch folder and cap keeps the ones enrol wrote, and installs",
+     installed and data.get("scratch_dir") == str(vol.config_dir().parent / "scratch")
+     and data.get("scratch_cap_gb") == 40
+     and ["service", "install", "--dir", str(vol.config_dir())] in argv_log(), why or str(data))
+cfg.update("volunteer", {"scratchCapGb": 25})
+vol.apply_settings()
+case("...and a cap set later replaces the worker's own",
+     tomllib.loads(vol.toml_path().read_text()).get("scratch_cap_gb") == 25)
 
 print("-- refusals")
 def attempt(name, text, publish, key=PUB, hub=True):

@@ -2324,7 +2324,10 @@ exists for a machine whose administrator wants a real service.
 
 **When a volunteer's machine pauses.**  The desktop writes the settings: pause
 while sequencing, the work window, the idle policy, the scratch folder and its
-cap.  The sequencer holds a busy file for exactly as long as a night is being
+cap.  A blank scratch folder or a cap of 0 keeps what `collab-worker enrol`
+chose; the worker will not start without both, and the desktop once deleted
+them, so every install with the defaults failed after spending its code.  The
+sequencer holds a busy file for exactly as long as a night is being
 imaged, and clears it on every way a night can end, including an exception.  It
 is not held while a loop waits for dusk, so a sequence armed in the afternoon
 does not idle the volunteers all day.  The worker reads the busy file and the
