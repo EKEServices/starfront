@@ -204,6 +204,10 @@ export function buildView(doc) {
       palette: doc.combined?.palette ?? "none",
       live: previewSet(doc.combined?.live),
       gold: previewSet(doc.combined?.gold),
+      // Another palette whose channels are all stacked (contract 1.30.0): an SHO project that also has L, R, G and B shows LRGB too.
+      alternates: (Array.isArray(doc.combined?.alternates) ? doc.combined.alternates : [])
+        .filter((a) => a && typeof a.palette === "string")
+        .map((a) => ({ palette: a.palette, live: previewSet(a.live), gold: previewSet(a.gold) })),
     },
     coverage: doc.coverage ? { url: publicUrl(doc.coverage.url), updatedAt: doc.coverage.updated_at, maxN: doc.coverage.max_n } : null,
     // The index of panels.json, for a project with a mosaic layout (contract 1.17.0); null for a single field.
@@ -216,6 +220,20 @@ export function buildView(doc) {
   view.hasGold = streams.some((s) => s.previews.gold) || !!view.combined.gold;
   view.updatedAt = view.totals.lastUpdate || view.generatedAt;
   return view;
+}
+
+/** Every palette image of the project, its own palette first, then any alternate; [] when the palette is "none". Each is { palette, live, gold }. */
+export function combinedPalettes(view) {
+  const c = view?.combined;
+  if (!c || c.palette === "none") return [];
+  return [{ palette: c.palette, live: c.live, gold: c.gold }, ...(c.alternates || [])];
+}
+
+/** The palette choice to show: a palette the project has, "both" when it has two, else its own palette. */
+export function resolvePalette(choice, palettes) {
+  const names = palettes.map((p) => p.palette);
+  if (choice === "both" && names.length > 1) return "both";
+  return names.includes(choice) ? choice : names[0] ?? "none";
 }
 
 /** "live" | "gold". Anything else is treated as "live" (the safe default: it always exists first). */

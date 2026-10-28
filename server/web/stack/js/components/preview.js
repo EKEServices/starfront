@@ -76,6 +76,34 @@ export function presetSelect({ id = "preset", current = "none", hintId = "preset
     <select id="${id}" aria-describedby="${hintId}" style="background:var(--surface-1);color:var(--text);border:1px solid var(--border-input);border-radius:10px;padding:8px 12px;font:inherit">${DISPLAY_PRESETS.map(([v, l]) => html`<option value="${v}"${v === current ? html` selected` : ""}>${l}</option>`)}</select></div>`;
 }
 
+/**
+ * The combined preview's palette control (contract 1.30.0): each palette the project has, and "Both". Only worth showing with two palettes,
+ * so the caller leaves it out otherwise. A radio group, like the live / gold control.
+ */
+export function paletteToggle({ id, palettes, current, legend = "Combined preview palette" }) {
+  const opts = [...palettes.map((p) => [p, p]), ["both", "Both"]];
+  return html`<fieldset class="seg" id="${id}" data-palette-toggle><legend class="visually-hidden">${legend}</legend>
+    ${opts.map(([v, l]) => html`<input type="radio" name="${id}-palette" id="${id}-${v}" value="${v}"${current === v ? html` checked` : ""}><label for="${id}-${v}">${l}</label>`)}
+  </fieldset>`;
+}
+
+/** Calls onChange(value) when the palette group changes. */
+export function wirePaletteToggle(root, onChange) {
+  root.querySelectorAll("[data-palette-toggle] input").forEach((i) => i.addEventListener("change", () => { if (i.checked) onChange(i.value); }));
+}
+
+/** ?palette=LRGB (or "both") in the address bar, so a shared link shows the same picture; null when absent. Checked against the project's palettes by the caller. */
+export function paletteFromUrl(search = location.search) {
+  const p = new URLSearchParams(search).get("palette");
+  return p ? (p.toLowerCase() === "both" ? "both" : p.toUpperCase()) : null;
+}
+
+export function writePaletteToUrl(palette) {
+  const u = new URL(location.href);
+  u.searchParams.set("palette", palette);
+  history.replaceState(null, "", u);
+}
+
 /** ?mode=gold in the address bar, so a shared link shows the same stack. Returns "live" | "gold" | "compare" | null. */
 export function modeFromUrl(search = location.search, allowCompare = false) {
   const m = new URLSearchParams(search).get("mode");

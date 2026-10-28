@@ -16,11 +16,11 @@ import { parseProjectPath, filterUrl, projectUrl, combinedUrl } from "../route.j
 import {
   loadStatus, StatusError, previewFor, modeLabel, normaliseMode, sortStreams, leaderboard, nightsSeries,
   nightsFor, nightStreamKeys, timelineToFeed, integrationByContributor, integrationByRig, hasRigs, rigsByStream,
-  LICENCE_LABEL,
+  LICENCE_LABEL, combinedPalettes, resolvePalette,
 } from "../status.js";
 import { normaliseJoinCode, formatDuration, formatHours, formatInt, formatArcsec, formatDate, formatDateTime, relativeTime, countryFlag, countryName, filterChipClass, streamLabel, streamShortLabel, anyUnknownBandwidth } from "../format.js";
 import { barChart, stackedBarChart, timelineChart, chartDataTable, legend, seriesColor } from "../svg-charts.js";
-import { previewFigure, modeToggle, modeExplanation, wireModeToggle, modeFromUrl, writeModeToUrl } from "../components/preview.js";
+import { previewFigure, modeToggle, modeExplanation, wireModeToggle, modeFromUrl, writeModeToUrl, paletteToggle, wirePaletteToggle, paletteFromUrl, writePaletteToUrl } from "../components/preview.js";
 import { statusBadge, VISIBILITY_TEXT } from "../components/project-card.js";
 import { deletedSentence } from "../deletion-ui.js";
 import { hasMosaic, panelsSectionHtml, wirePanelsSection } from "../components/project-panels.js";
@@ -30,7 +30,7 @@ import { fetchPanelsDoc } from "../panels-doc.js";
 const $ = (id) => document.getElementById(id);
 const route = parseProjectPath(location.pathname);
 
-const state = { project: null, view: null, user: null, mode: "live", snapKey: null, snapIdx: null, timer: null, panelsDoc: null, mosaic: null };
+const state = { project: null, view: null, user: null, mode: "live", palette: null, snapKey: null, snapIdx: null, timer: null, panelsDoc: null, mosaic: null };
 
 const time = (iso) => (iso ? html`<time datetime="${iso}" title="${formatDateTime(iso)}">${relativeTime(iso)}</time>` : "never");
 
@@ -68,24 +68,36 @@ function statsHtml(view, p) {
 
 function previewSection(view, mode) {
   const p = view.project;
-  const comb = view.combined;
-  const set = previewFor(comb, mode);
-  const palette = comb.palette;
-  const figure = palette === "none"
+  const palettes = combinedPalettes(view);
+  const choice = resolvePalette(state.palette, palettes);
+  const shown = choice === "both" ? palettes : palettes.filter((x) => x.palette === choice);
+  const m = normaliseMode(mode);
+  const one = (pal) => {
+    const set = previewFor(pal, mode);
+    const href = `${combinedUrl(p.slug)}?mode=${m}&palette=${pal.palette}`;
+    return previewFigure({
+      set, mode, label: modeLabel(mode, { goldSeq: view.totals.goldSeqMax }),
+      alt: `${pal.palette} combined preview of ${p.name}, ${m} stack`, eager: true, width: 640, height: 480,
+      href, linkTitle: `Open the ${pal.palette} combined preview`,
+      caption: set ? html`${pal.palette} palette, linear per-channel stretch, no post-processing. Updated ${time(set.updatedAt)}. <a href="${href}" style="color:inherit;text-decoration:underline">Open the combined preview</a>` : "",
+    });
+  };
+  const figure = !palettes.length
     ? html`<div class="empty"><p>This project has no colour palette, so there is no combined preview. Each filter has its own stack below.</p></div>`
-    : previewFigure({
-        set, mode, label: modeLabel(mode, { goldSeq: view.totals.goldSeqMax }),
-        alt: `${palette} combined preview of ${p.name}, ${normaliseMode(mode)} stack`, eager: true, width: 640, height: 480,
-        href: `${combinedUrl(p.slug)}?mode=${normaliseMode(mode)}`, linkTitle: "Open the combined preview",
-        caption: set ? html`${palette} palette, linear per-channel stretch, no post-processing. Updated ${time(set.updatedAt)}. <a href="${combinedUrl(p.slug)}?mode=${normaliseMode(mode)}" style="color:inherit;text-decoration:underline">Open the combined preview</a>` : "",
-      });
+    : shown.length > 1
+      ? html`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))">${shown.map(one)}</div>`
+      : one(shown[0]);
+  // A second palette (contract 1.30.0) gets a control; "Both" widens the cell so the two pictures sit side by side.
+  const toggle = palettes.length > 1
+    ? paletteToggle({ id: "palette", palettes: palettes.map((x) => x.palette), current: choice, legend: "Combined preview: which palette" })
+    : "";
   const cov = view.coverage;
   const covFig = cov
     ? html`<figure class="preview"><img src="${safeUrl(cov.url)}" alt="Coverage map: frames per pixel over the project frame, up to ${cov.maxN} frames" width="400" height="300" loading="lazy" decoding="async"><figcaption>Brighter means more frames. Peak ${formatInt(cov.maxN)} frames per pixel. Updated ${time(cov.updatedAt)}.</figcaption></figure>`
     : html`<div class="empty"><p>The coverage map appears after the first accepted frames.</p></div>`;
   return html`
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))">
-      <div><h3>Combined preview</h3>${figure}</div>
+      <div${choice === "both" ? html` style="grid-column:1/-1"` : ""}><div class="toolbar" style="margin-bottom:10px"><h3 style="margin:0">Combined preview</h3>${toggle}</div>${figure}</div>
       <div><h3>Coverage</h3>${covFig}
         ${view.project.grid ? html`<p class="muted" style="margin-top:10px;font-size:14px">Project frame ${formatInt(view.project.grid.widthPx)} × ${formatInt(view.project.grid.heightPx)} px at ${view.project.grid.scaleArcsecPx}″/px, centred on RA ${view.project.grid.centerRaDeg.toFixed(3)}°, Dec ${view.project.grid.centerDecDeg.toFixed(3)}°.</p>` : ""}
       </div>
@@ -389,6 +401,12 @@ function paintBody() {
     paintBody();
     $(`mode-${state.mode}`)?.focus();
   });
+  wirePaletteToggle($("project-body"), (p) => {
+    state.palette = p;
+    writePaletteToUrl(p);
+    paintBody();
+    $(`palette-${p}`)?.focus();
+  });
   wireScrubber(view);
   wireDeepZoom($("project-body"), view);
   wirePanelsSection($("project-body"), { project: state.project, view, doc: state.panelsDoc, mosaic: state.mosaic });
@@ -446,6 +464,7 @@ async function main() {
   await loadPanelExtras();
   $("project-loading").hidden = true;
   const requested = modeFromUrl();
+  state.palette = paletteFromUrl();
   state.mode = requested || (state.view?.hasGold ? "gold" : "live");
   state.snapKey = state.view ? nightStreamKeys(state.view)[0] ?? null : null;
 

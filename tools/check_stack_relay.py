@@ -569,7 +569,12 @@ status_doc = {
                  "last_update": now, "gold_seq": 1, "live_n": 1, "median_fwhm_arcsec": 2.9,
                  "preview_urls": {"live": preview, "gold": None},
                  "by_contributor": [{"display_name": "Alice", "frames_accepted": 1, "integration_s": 300.0}]}],
-    "combined": {"palette": "HOO", "live": None, "gold": None}, "coverage": None,
+    # A second palette whose channels are complete (RSC contract 1.30.0): its images sit in a folder of their own.
+    "combined": {"palette": "HOO", "live": None, "gold": None,
+                 "alternates": [{"palette": "LRGB", "gold": None,
+                                 "live": {"full": f"/public/{PID}/combined/lrgb/live.png",
+                                          "thumb": f"/public/{PID}/combined/lrgb/live_thumb.png", "updated_at": now}}]},
+    "coverage": None,
     "contributors": [{"rank": 1, "display_name": "Alice", "integration_s": 300.0, "frames_accepted": 1, "streams": ["HA"]}],
     "timeline": [{"ts": now, "date": now[:10], "kind": "gold_published", "text": "Gold 1 for HA",
                   "frames_accepted": 1, "integration_s": 300.0}],
@@ -602,10 +607,11 @@ records = {"frames": [verdict], "events": [{"project_id": PID, "ts": iso(), "typ
            "streams": [{"project_id": PID, "stream_key": "HA", "gold_seq": 1, "gold_published_at": iso(),
                         "stats": {"integration_s": 300.0, "contributors": 1, "frames_accepted": 1}}]}
 files = [("status.json", json.dumps(status_doc).encode()), ("previews/HA/live_full.png", PNG),
+         ("combined/lrgb/live.png", PNG), ("combined/lrgb/live_thumb.png", PNG),
          ("deepzoom.tar", tar_io.getvalue())]
 status, got = HUB.push(records, files)
-case("the push is taken: a verdict, status.json, a PNG and two tiles",
-     status == 200 and got.get("frames", {}).get("merged") == 1 and got["files"]["written"] == 5, str(got)[:240])
+case("the push is taken: a verdict, status.json, three PNGs and two tiles",
+     status == 200 and got.get("frames", {}).get("merged") == 1 and got["files"]["written"] == 7, str(got)[:240])
 status, again = HUB.push(records, files)
 case("the same push again changes nothing", status == 200 and again["files"]["written"] == 0
      and again["frames"]["merged"] == 0, str(again)[:200])
@@ -640,6 +646,9 @@ case("status.json is served with a minute of cache", status == 200 and body == s
 status, body, head = http("GET", f"/stack/public/{PID}/previews/HA/live_full.png")
 case("the PNG is served as an image with a minute of cache", status == 200 and body == PNG
      and head["Content-Type"] == "image/png" and head["Cache-Control"] == "public, max-age=60")
+status, body, head = http("GET", f"/stack/public/{PID}/combined/lrgb/live.png")
+case("a second palette's image, in its own folder, is served like the first",
+     status == 200 and body == PNG and head["Content-Type"] == "image/png", str(status))
 status, body, head = http("GET", f"/stack/public/{PID}/deepzoom/HA/g000001/image_files/1/0_0.jpg")
 case("a deep-zoom tile is cached for a year, immutable", status == 200 and body == b"\xff\xd8tile-b"
      and head["Cache-Control"] == "public, max-age=31536000, immutable", str(head.get("Cache-Control")))
