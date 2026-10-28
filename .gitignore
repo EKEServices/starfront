@@ -47,5 +47,5 @@ run-test.log
 # GasTown 
 .gastown-ignore
 
-# Claude Code guidance, kept on this machine only.
-CLAUDE.md
+# Claude Code notes for one machine; CLAUDE.md is the shared guidance.
+CLAUDE.local.md

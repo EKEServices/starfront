@@ -46,7 +46,7 @@ jobs:
           # and a non-zero return mean the check is not allowed to fail.
           allowed_reason() {
             case "$1" in
-              check_coordinator) echo "four colour-camera cases fail since before live stacking was added (see CLAUDE.md)" ;;
+              check_coordinator) echo "four colour-camera cases fail since before live stacking was added: one-shot-colour data is mis-matched to a project's filters (RGB project with no filters typed, narrowband-only refusal, dark-sky night, colour Moon rule on a mono camera)" ;;
               check_night_rollover) echo "depends on the machine's timezone: 9/17 under UTC, 15/17 under America/New_York" ;;
               check_reference) echo "two reference-angle cases fail on the base commit; not yet diagnosed" ;;
               *) return 1 ;;
