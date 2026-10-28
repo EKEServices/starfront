@@ -16,8 +16,8 @@ Why each piece exists:
     The public key is embedded below (`MANIFEST_PUBLIC_KEY`).  A hub on the
     LAN or a mirror on the internet can therefore serve it without being
     trusted.  The SHA-256 and size in the signed manifest then bind the
-    archive.  Until the real key replaces the placeholder, every install is
-    refused ("no release signing key configured").
+    archive.  A build carrying the placeholder key instead refuses every
+    install ("no release signing key configured").
   * **Where it is fetched from, in order:** the `volunteer.manifestUrl`
     setting if set; the hub's mirror `{hubUrl}/hub/v1/worker-manifest`; the
     Starfront server `{serverUrl}/download/collab-worker/latest.json`.  The
@@ -90,10 +90,13 @@ from typing import Any, Callable
 from .collabadmin import CollabError
 
 #: The release-signing public key: base64 of the raw 32-byte Ed25519 key.
-#: THIS IS A PLACEHOLDER.  The real key is generated offline by the author;
-#: until it is pasted here no manifest is accepted, whatever its signature.
+#: The private half was generated offline by the author and never leaves it;
+#: the same public key is `RELEASE_PUBLIC_KEY` in the worker's
+#: `self_update.rs`, and the two must change together.
+#: `PLACEHOLDER_KEY` stays as the value that means "no key": a build carrying
+#: it accepts no manifest, whatever its signature.
 PLACEHOLDER_KEY = "PLACEHOLDER-release-signing-key-not-generated-yet"
-MANIFEST_PUBLIC_KEY = PLACEHOLDER_KEY
+MANIFEST_PUBLIC_KEY = "pjSI2HuDvFSFXjDu9u5FoJi7rT7uw5a1ZXHA6fdSDbo="
 
 #: The manifest's OS keys.
 OS_KEYS = ("macos-arm64", "windows-x64", "linux-x64")

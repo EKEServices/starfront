@@ -48,7 +48,8 @@ LOG = WORK / "worker-argv.log"
 os.environ["FAKE_WORKER_LOG"] = str(LOG)
 
 from cryptography.hazmat.primitives import serialization                     # noqa: E402
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (                 # noqa: E402
+    Ed25519PrivateKey, Ed25519PublicKey)
 
 from astrocontrol import ed25519_verify, volunteer                           # noqa: E402
 from astrocontrol.config import Config                                        # noqa: E402
@@ -149,10 +150,17 @@ case("verify_signature: both back ends accept a good one and refuse a bad one",
      and not volunteer.verify_signature(PUB, b"hellO", sig_ok)
      and not volunteer.verify_signature(PUB, b"hellO", sig_ok, force_pure=True)
      and not volunteer.verify_signature(PUB, b"hello", "not base64!!"))
-case("the shipped key is the placeholder and counts as unconfigured",
-     volunteer.MANIFEST_PUBLIC_KEY == volunteer.PLACEHOLDER_KEY
-     and not volunteer.key_configured(volunteer.MANIFEST_PUBLIC_KEY)
+case("the shipped key is a real one, and the placeholder counts as unconfigured",
+     volunteer.MANIFEST_PUBLIC_KEY != volunteer.PLACEHOLDER_KEY
+     and volunteer.key_configured(volunteer.MANIFEST_PUBLIC_KEY)
+     and not volunteer.key_configured(volunteer.PLACEHOLDER_KEY)
      and volunteer.key_configured(PUB))
+try:
+    Ed25519PublicKey.from_public_bytes(base64.b64decode(volunteer.MANIFEST_PUBLIC_KEY))
+    shipped_is_a_point = True
+except ValueError:
+    shipped_is_a_point = False
+case("... and it is a valid Ed25519 public key, not just 32 bytes", shipped_is_a_point)
 
 # ---------------------------------------------------------------- the fakes
 FAKE_WORKER = textwrap.dedent('''\
@@ -287,10 +295,10 @@ def untouched(vol):
 
 # ------------------------------------------------------- the placeholder key
 print("-- placeholder key")
-cfg, vol = fresh("placeholder", key=volunteer.MANIFEST_PUBLIC_KEY)
+cfg, vol = fresh("placeholder", key=volunteer.PLACEHOLDER_KEY)
 fake.publish(HUB_PATH, "1.0.0", good_archive())
 ok, msg = refused(vol, "no release signing key configured")
-case("the shipped placeholder key refuses to install", ok, msg)
+case("a build carrying the placeholder key refuses to install", ok, msg)
 case("... without asking the server for anything", not fake.requests, str(fake.requests))
 case("... and nothing was installed or run", untouched(vol))
 

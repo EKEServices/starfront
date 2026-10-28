@@ -2308,10 +2308,10 @@ is installed, and otherwise `astrocontrol/ed25519_verify.py`, a pure-Python
 verifier checked against the RFC 8032 vectors.  A missing wheel never turns into
 installing without checking.
 
-The public key is embedded in `volunteer.py`.  Until the release signing key is
-generated and that placeholder is replaced, every install and update is refused
-with "no release signing key configured".  That is the intended state: the key
-does not exist yet, and an unsigned worker is not run.  The hub's own binary
+The public key is embedded in `volunteer.py` (since 2026-10-28; the private
+half is kept offline by the author).  A build carrying the placeholder instead
+refuses every install and update with "no release signing key configured", so an
+unsigned worker is never run.  The hub's own binary
 goes through the same checks, from the server's `download/collab-hub/`.
 
 **The Windows worker is a logon task, not a service** (`collab-worker service
@@ -2409,10 +2409,11 @@ T706, except where the last list says otherwise):
 
 Still open:
 
-- **Signing keys.**  The release key does not exist yet: the placeholders in
-  `volunteer.py` and in the worker's `self_update.rs` refuse every install and
-  update until the author generates the key and pastes its public half into both.
-  The hub's binary goes through the same check.
+- **A first signed release.**  The release key exists (2026-10-28) and its
+  public half is in `volunteer.py` and the worker's `self_update.rs`, but no
+  release has been signed and published, so the server's
+  `download/collab-worker/` and `download/collab-hub/` are still empty and
+  every install finds nothing to fetch.
 - **A real night.**  Nothing here has been run from N.I.N.A. on the Windows PC
   against a real hub, and two real workers have not drained a hub on the home
   network (T208, T705).  `tools/local_night.py` is the way to start.
