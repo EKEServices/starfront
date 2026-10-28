@@ -2204,7 +2204,7 @@ collaboration into what the engine is told, and both the hub's document
 | requirements | `policy`: colour taken -> `osc_allowed`; calibrated only -> `calibration: required`; shortest sub -> `min_exposure_s`; star size only raises `max_fwhm_arcsec` (to twice the HFR, at most 20); the rest are the contract's defaults |
 | who may watch | `visibility` (unlisted by default, D003) |
 | open or closed | `status`: closed on a hub, `paused` on the cloud (the contract's `closed` cannot reopen) |
-| members | a telescope on the collaboration (or the owner's) is handed the grant or join code; declining its last share marks it `removed` (T419) |
+| members | a telescope on the collaboration (or the owner's) is handed the grant or join code; declining its last share (the dock's Leave) marks it `removed` (T419), and joining the collaboration again gives it back the status it had (a removal it did not make itself stays final: on 2026-10-28 one Leave took the backyard rig off the Bubble Nebula for good, so its frames stopped and a hand upload was refused) |
 | deletion | the seven-day deletion above, on a hub or the cloud |
 
 Guiding, the longest sub, the Moon, altitude, Bortle and focal-length limits

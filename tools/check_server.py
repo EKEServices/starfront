@@ -4167,6 +4167,56 @@ before = feed_since(0)["seq"]
 status, _ = call("POST", f"/api/v1/agent/task/{task.get('id')}", {"state": "declined"}, token=LEAVER_RIG)
 case("declining again changes nothing", status == 200 and not [r for r in feed_since(before)["changes"] if r["kind"] == "member"])
 
+# Joining again undoes the Leave. On 2026-10-28 one press of the dock's Leave
+# took the backyard rig off the Bubble Nebula for good: it could not rejoin
+# (membership_removed) and a hand upload was refused (not_member).
+before = feed_since(0)["seq"]
+status, rejoin = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=LEAVER_RIG)
+rows = [r for r in feed_since(before)["changes"] if r["kind"] == "member"]
+case("a telescope that left joins the collaboration again and the hub is told",
+     status == 200 and [r["key"] for r in rows] == [f"{FD_ID}/{LEAVER_UID}"], f"{status} {rows}")
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)
+case("...its stacking membership is active again, with no removal left on it",
+     status == 200 and got.get("status") == "active" and got.get("display_name") == "Leaver"
+     and not any(got.get(k) for k in ("removed_at", "removed_by", "frames_disposition")), f"{status} {got}")
+status, got = call("GET", f"{REC}/rig/{LEAVER_UID}/{LEAVER_RIGID}", token=BHTOK)
+case("...its rig is the hub's to read again", status == 200 and got.get("rig_id") == LEAVER_RIGID, f"{status} {got}")
+status, got = front("GET", f"/projects/{FD_ID}", token=project_in_listing(LEAVER_RIG, HUBP)["stacking"]["grant"])
+case("...and the front door treats it as a member again (its frames would be taken)",
+     status == 200 and (got["project"].get("my_membership") or {}).get("status") == "active", f"{status} {got}")
+
+
+def stacking_member_doc():
+    return json.loads(server_app.store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?",
+                                            FD_ID, LEAVER_UID)["doc"])
+
+
+def set_stacking_member_doc(doc):
+    server_app.store._run("UPDATE stack_members SET doc = ? WHERE project_id = ? AND user_id = ?",
+                          json.dumps(doc), FD_ID, LEAVER_UID)
+
+
+# A member still waiting for approval who leaves and comes back is waiting again, not let in.
+doc = stacking_member_doc()
+doc["status"] = "pending"
+set_stacking_member_doc(doc)
+status, _ = call("POST", f"/api/v1/agent/task/{(rejoin.get('task') or {}).get('id')}", {"state": "declined"}, token=LEAVER_RIG)
+status, rejoin = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=LEAVER_RIG)
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)
+case("a pending member who leaves and joins again is pending again", got.get("status") == "pending", f"{got}")
+
+# Any removal but the telescope's own is final: joining the collaboration again does not undo it.
+status, _ = call("POST", f"/api/v1/agent/task/{(rejoin.get('task') or {}).get('id')}", {"state": "declined"}, token=LEAVER_RIG)
+doc = stacking_member_doc()
+doc["removed_by"] = "00000000-0000-4000-8000-0000000000aa"   # an owner's id, as the contract records it
+set_stacking_member_doc(doc)
+before = feed_since(0)["seq"]
+status, rejoin = call("POST", f"/api/v1/agent/projects/{HUBP}/join", {}, token=LEAVER_RIG)
+status, got = call("GET", f"{REC}/member/{FD_ID}/{LEAVER_UID}", token=BHTOK)
+case("a removal that was not the telescope's own stays: joining again leaves it removed",
+     got.get("status") == "removed" and not [r for r in feed_since(before)["changes"] if r["kind"] == "member"],
+     f"{got}")
+
 # ------------------------------------------- live stacking: push
 print("\n-- live stacking: push --")
 import io as _io                                                   # noqa: E402

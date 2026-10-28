@@ -1640,6 +1640,9 @@ def join_project(project_id: str, body: JoinRequest,
     # somewhere else can be noticed and the cells cut again.
     stored["tiledRotation"] = profile.rotation
     store.add_task(stored)
+    # Joining again undoes a Leave: a stacking membership the telescope gave up
+    # by declining its last share comes back (an owner's removal does not).
+    stack_projects.member_returned(store, project_id, agent.get("owner_id") or agent["id"])
     _redeal(project_id, nights, moon=sky)
     return {"task": store.task(task.id), "requirements": wants.payload()}
 

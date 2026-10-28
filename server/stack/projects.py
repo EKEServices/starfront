@@ -74,28 +74,75 @@ def member_left(store: Any, sf_project: str, sf_user_id: str, by: str = "") -> b
     `sf_user_id` is the Starfront id (the owner's person id, else the agent id);
     the collab id comes from `stack_identities`. True when a row changed. A
     removed member cannot rejoin by code (`membership_removed`), as the contract
-    says."""
+    says; one the telescope removed by leaving comes back by joining the
+    collaboration again (`member_returned`)."""
+    found = _stack_member(store, sf_project, sf_user_id)
+    if found is None:
+        return False
+    row, user_id, doc = found
+    if doc.get("status") == "removed":
+        return False
+    # The status it had, for member_returned to give back: a member still
+    # waiting for approval goes back to waiting, not to active.
+    doc.update(status="removed", removed_at=now_iso(), removed_by=by or user_id,
+               frames_disposition="keep", status_before_removal=doc.get("status", "active"))
+    _save_member(store, row, user_id, doc)
+    return True
+
+
+def member_returned(store: Any, sf_project: str, sf_user_id: str) -> bool:
+    """A telescope that left a hub-bound collaboration (`member_left`, by
+    "telescope") has joined it again: its `stack_members` row gets back the
+    status it had, and the hub is told with a `member` feed row. True when a row
+    changed.
+
+    Why: leaving is the dock's Leave button (declining the last share), and it
+    used the owner's removal, which is final. On 2026-10-28 one press took the
+    backyard rig off the Bubble Nebula for good: its plugin could not rejoin
+    (`membership_removed`), its frames stopped going, and a hand upload was
+    refused (`not_member`). A person who left can now come back by joining the
+    collaboration, as they could before stacking existed. Any other removal
+    (`removed_by` not "telescope", as an owner's would be) is still final."""
+    found = _stack_member(store, sf_project, sf_user_id)
+    if found is None:
+        return False
+    row, user_id, doc = found
+    if doc.get("status") != "removed" or doc.get("removed_by") != "telescope":
+        return False
+    before = doc.pop("status_before_removal", None)
+    if before not in ("active", "pending"):
+        # A row from before the status was kept: what a new join would get.
+        before = "active" if (row["doc"] or {}).get("approval", "open") == "open" else "pending"
+    for key in ("removed_at", "removed_by", "frames_disposition"):
+        doc.pop(key, None)
+    doc.update(status=before, rejoined_at=now_iso())
+    _save_member(store, row, user_id, doc)
+    return True
+
+
+def _stack_member(store: Any, sf_project: str,
+                  sf_user_id: str) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    """The stacking project of a Starfront collaboration, the collab user id of a
+    Starfront id, and that member's doc; None when any is missing."""
     row = store.stack_project_of(sf_project)
     if row is None:
-        return False
+        return None
     ident = store._one("SELECT collab_user_id FROM stack_identities WHERE user_id = ?", sf_user_id)
     if ident is None:
-        return False
+        return None
     user_id = ident["collab_user_id"]
     member = store._one("SELECT doc FROM stack_members WHERE project_id = ? AND user_id = ?",
                         row["project_id"], user_id)
     if member is None:
-        return False
-    doc = json.loads(member["doc"] or "{}")
-    if doc.get("status") == "removed":
-        return False
-    doc.update(status="removed", removed_at=now_iso(), removed_by=by or user_id,
-               frames_disposition="keep")
+        return None
+    return row, user_id, json.loads(member["doc"] or "{}")
+
+
+def _save_member(store: Any, row: dict[str, Any], user_id: str, doc: dict[str, Any]) -> None:
     store._run("UPDATE stack_members SET doc = ?, rev = rev + 1 WHERE project_id = ? AND user_id = ?",
                json.dumps(doc), row["project_id"], user_id)
     if row["hub"]:
         store.append_change(row["hub"], "member", f"{row['project_id']}/{user_id}")
-    return True
 
 
 class Projects:
