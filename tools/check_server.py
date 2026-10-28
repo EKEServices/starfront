@@ -1890,6 +1890,8 @@ case("the download page offers the newest one, with its size, and says where N.I
      "text/html" in page[1] and 'href="/download/Starfront-Setup-0.2.35.exe"' in page[0]
      and "Download Starfront 0.2.35 for Windows" in page[0] and f"{BASE}/nina" in page[0]
      and "0.2.9" not in page[0], page[1])
+case("...and says nothing of volunteer workers while no worker release is published",
+     "Lending a computer" not in page[0] and "collab-worker" not in page[0])
 for wrong in ("secrets.txt", "..%2Fcollab.sqlite", "Starfront-Setup-9.9.9.exe", "Starfront-Setup-.exe",
               "Starfront-Setup-0.2.35.exe.bak"):
     status, _ = call("GET", f"/download/{wrong}")
@@ -1955,6 +1957,36 @@ for product in ("collab-worker", "collab-hub"):
     status, _, _ = fetch(f"{prefix}/latest.json")
     (folder / "latest.json.moved").rename(folder / "latest.json")
     case(f"{product}: a missing latest.json is a 404", status == 404, str(status))
+
+# The download page lists what a published manifest names, for people who
+# install by hand or want to check a hash, but only files that are really
+# there: a manifest naming an archive that was never copied up, or a name the
+# route would refuse, must not become a link to a 404. The hub's manifest
+# above names no assets, so the hub gets no heading.
+WIN_SHA = "ab" * 32
+(DOWNLOAD_DIR / "collab-worker" / "latest.json").write_text(json.dumps({
+    "version": "1.2.3", "contract": "1.27.0", "assets": {
+        "windows-x64": {"primary": {"url": "x", "size": 26, "sha256": WIN_SHA,
+                                    "filename": "collab-worker-1.2.3-windows-x64.zip"}},
+        "linux-x64": {"primary": {"url": "x", "size": 9, "sha256": "cd" * 32,
+                                  "filename": "collab-worker-1.2.4-linux-x64.tar.gz"}},
+        "macos-arm64": {"primary": {"url": "x", "size": 9, "sha256": "ef" * 32, "filename": "../evil.sh"}}}}),
+    encoding="utf-8")
+status, _, body = fetch("/download")
+page = body.decode("utf-8")
+case("the download page offers a published worker by platform, with its SHA-256",
+     status == 200 and "Lending a computer to live stacking" in page and "collab-worker 1.2.3" in page
+     and 'href="/download/collab-worker/collab-worker-1.2.3-windows-x64.zip"' in page
+     and f"SHA-256 {WIN_SHA}" in page and "Collaborations &rarr; Volunteer this machine" in page
+     and 'href="/download/collab-worker/latest.json"' in page, page[-1500:])
+case("...but not an archive missing from disk, a name the route refuses, or a hub with none",
+     "collab-worker-1.2.4" not in page and "evil.sh" not in page and "collab-hub 1.2.3" not in page
+     and 'href="/download/collab-hub/latest.json"' not in page, page[-1500:])
+(DOWNLOAD_DIR / "collab-worker" / "latest.json").write_text("{not json", encoding="utf-8")
+status, _, body = fetch("/download")
+case("...and a broken manifest leaves the page as it was, not a 500",
+     status == 200 and "Lending a computer" not in body.decode("utf-8"), str(status))
+(DOWNLOAD_DIR / "collab-worker" / "latest.json").write_bytes(MANIFEST_TEXT)
 
 # ======================================== a colour camera with a dual-band filter
 print("\n-- a colour camera with a dual-band filter --")

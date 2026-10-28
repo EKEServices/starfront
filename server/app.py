@@ -21,6 +21,7 @@ person's login should never be able to drive a mount.
 from __future__ import annotations
 
 import dataclasses
+import html
 import json
 import math
 import os
@@ -2799,6 +2800,69 @@ def _binary_file(product: str, name: str) -> FileResponse:
                         headers={"Cache-Control": cache})
 
 
+#: How the download page names each platform, in the order it lists them.
+_PLATFORM_NAMES = {"windows-x64": "Windows, 64-bit", "macos-arm64": "macOS, Apple silicon",
+                   "linux-x64": "Linux, x86-64"}
+
+
+def _binary_offer(product: str) -> tuple[str, list[dict[str, Any]]] | None:
+    """The version and the archives a binary's `latest.json` names, for people.
+
+    The page is not where trust comes from: the desktop checks the manifest's
+    signature and the archive's SHA-256 before running anything, and the page
+    shows the hash so that someone installing by hand can do the same. An
+    archive is offered only when it is both in the manifest and on disk under a
+    name `_binary_file` will serve, so the page never links to a 404. A missing
+    or unreadable manifest offers nothing: before the first release the page
+    looks as it always did."""
+    folder = DOWNLOAD_DIR / product
+    try:
+        manifest = json.loads((folder / "latest.json").read_text(encoding="utf-8"))
+        version, assets = str(manifest["version"]), manifest["assets"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(assets, dict):
+        return None
+    offers = []
+    for os_key, platform in _PLATFORM_NAMES.items():
+        entry = assets.get(os_key)
+        primary = entry.get("primary") if isinstance(entry, dict) else None
+        if not isinstance(primary, dict):
+            continue
+        name = str(primary.get("filename") or "")
+        if not _BINARY_ARCHIVE[product].fullmatch(name) or not (folder / name).is_file():
+            continue
+        offers.append({"platform": platform, "file": name, "size": (folder / name).stat().st_size,
+                       "sha256": str(primary.get("sha256") or "")})
+    return (version, offers) if offers else None
+
+
+def _binaries_section() -> str:
+    """The download page's part for volunteers: empty until a release is published."""
+    offered = [(product, _binary_offer(product)) for product in ("collab-worker", "collab-hub")]
+    offered = [(product, offer) for product, offer in offered if offer is not None]
+    if not offered:
+        return ""
+    parts = ["<h2>Lending a computer to live stacking</h2>",
+             "<p>Starfront installs these for you, so most people never need the files below. "
+             "In Starfront, open <em>Collaborations &rarr; Volunteer this machine</em>, enter the "
+             "hub's address and its one-time code, and press Install; the hub itself is under "
+             "<em>Live stacking hub</em> on the same page. Starfront checks the release signature "
+             "and each file's SHA-256 before it runs anything, and checks every update the same way.</p>"]
+    for product, (version, files) in offered:
+        parts.append(f"<h3>{product} {html.escape(version)}</h3><ul class=\"files\">")
+        for f in files:
+            parts.append(f"<li><a href=\"/download/{product}/{f['file']}\">{f['platform']}</a> "
+                         f"<span class=\"small\">{f['file']} &middot; {f['size'] / (1024 * 1024):.0f} MB</span>"
+                         f"<br><code class=\"hash\">SHA-256 {html.escape(f['sha256'])}</code></li>")
+        parts.append("</ul>")
+    manifests = ", ".join(f"<a href=\"/download/{product}/latest.json\">{product}</a>"
+                          for product, _ in offered)
+    parts.append(f"<p class=\"small\">Signed manifests ({manifests}), each with its "
+                 f"<code>latest.json.sig</code> beside it.</p>")
+    return "\n  ".join(parts)
+
+
 @app.get("/download/collab-worker/{name}")
 def download_collab_worker(name: str) -> FileResponse:
     return _binary_file("collab-worker", name)
@@ -2827,6 +2891,11 @@ _DOWNLOAD_PAGE = """<!doctype html>
   p, li {{ line-height: 1.5; }}
   a {{ color: #9fe4bd; }}
   code {{ background: #11161f; padding: 2px 6px; border-radius: 4px; }}
+  h3 {{ font-size: 0.95rem; margin: 20px 0 6px; }}
+  ul.files {{ padding-left: 20px; margin: 0; }}
+  ul.files li {{ margin: 0 0 10px; }}
+  .small {{ color: #8f9bb3; font-size: 0.85rem; }}
+  .hash {{ font-size: 0.75rem; word-break: break-all; }}
 </style>
 </head>
 <body>
@@ -2844,6 +2913,7 @@ _DOWNLOAD_PAGE = """<!doctype html>
   <p>There is a plugin instead. In N.I.N.A., Options &rarr; General &rarr; Plugin
   Repositories, press + and enter <code>{host}/nina</code>, then install
   &ldquo;Starfront&rdquo; from the Plugins tab.</p>
+  {binaries}
   <p><a href="/sky">Tonight at Starfront</a>: where the observatory's telescopes are pointed right now.</p>
 </main>
 </body>
@@ -2864,7 +2934,7 @@ def download_page(request: Request) -> HTMLResponse:
                   f"<p class=\"meta\">{latest['file']} &middot; {size:.0f} MB &middot; "
                   f"Windows 10 and 11, 64-bit</p>")
     host = DISCORD.public_url.rstrip("/") if DISCORD.public_url else f"{request.url.scheme}://{request.url.netloc}"
-    return HTMLResponse(_DOWNLOAD_PAGE.format(button=button, host=host))
+    return HTMLResponse(_DOWNLOAD_PAGE.format(button=button, host=host, binaries=_binaries_section()))
 
 
 # ---------------------------------------------------------------------------
