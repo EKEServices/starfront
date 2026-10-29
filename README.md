@@ -2428,8 +2428,9 @@ Still open:
 - **Updates are by hand.**  The first signed release (worker and hub 0.1.0,
   2026-10-28) is published as the GitHub releases above, but nothing checks
   for a newer one by itself: a volunteer presses Update, or runs
-  `collab-worker self-update`.  The worker's own `self-update` does not yet try
-  the GitHub release, and the hub does not yet mirror the worker's manifest
+  `collab-worker self-update`, which also tries the GitHub release last (from
+  the first worker built after Rapid Stacker Collab `2b2e2fb`; 0.1.0 predates
+  it).  The hub does not yet mirror the worker's manifest
   (`/hub/v1/worker-manifest` answers 400), so a volunteer falls through to the
   server and then GitHub.
 - **A real night.**  Nothing here has been run from N.I.N.A. on the Windows PC
