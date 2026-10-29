@@ -43,10 +43,10 @@
 
 <h2>2. What you need first</h2>
 <ul>
-  <li><b>The two repositories, side by side.</b> Starfront, and Rapid Stacker Collab at <code>../Rust/rapid-stacker-collab</code> relative to it (or set <code>RSC=/path/to/it</code>). <code>fetch-binaries.sh</code> refuses to run without the Collab checkout. Collab is private.</li>
-  <li><b>GitHub CLI</b> (<code>gh</code>), signed in with access to <code>EKE-Services/rapid-stacker-collab</code> (for the worker and hub builds) and the Starfront repository (for the plugin build).</li>
+  <li><b>The Starfront repository.</b> That is all the hub and worker need: their signed release downloads from Starfront's public GitHub releases (section 5). A Rapid Stacker Collab checkout (private) is needed only to build them yourself, or for <code>collab-uploader</code>; it goes at <code>../Rust/rapid-stacker-collab</code> relative to Starfront (or set <code>RSC=/path/to/it</code>).</li>
+  <li><b>GitHub CLI</b> (<code>gh</code>), signed in, for the N.I.N.A. plugin build from Starfront's CI (and, when building, with access to <code>EKE-Services/rapid-stacker-collab</code>).</li>
   <li><b>On the controller:</b> <code>python3</code>, <code>ssh</code>/<code>ssh-keygen</code>, <code>rsync</code>, and Terraform 1.6 or later (section 3).</li>
-  <li><b>For a worker on the Mac only:</b> Rust (rustup) and read access to the private <code>rapid-stacker</code> repository, because it is built from source there.</li>
+  <li><b>Only to build the programs yourself</b> (not needed with the public release): Rust (rustup) and read access to the private <code>rapid-stacker</code> repository.</li>
   <li><b>The network:</b> a router that hands out fixed (reserved) addresses and, ideally, answers machine names such as <code>server.lan</code>. Internet access once, for <code>terraform init</code> and the Python packages.</li>
 </ul>
 
@@ -121,10 +121,13 @@ sudo loginctl enable-linger $USER</pre>
 
 <h2>5. Get the hub and worker programs</h2>
 <p>Rust is not cross-compiled, so each system's <code>collab-hub</code> and <code>collab-worker</code> come from a build on that system. They go into <code>deploy/home-lab/bin/&lt;os&gt;/</code>, where Terraform looks:</p>
-<pre>scripts/fetch-binaries.sh --from-run &lt;run id&gt;    # Linux and Windows, from a worker-release run
-scripts/fetch-binaries.sh --mac                   # this Mac, built from source (Mac worker only)
-scripts/fetch-binaries.sh --build-on &lt;you&gt;@&lt;server&gt;.lan   # or build natively on the Linux host
+<pre>scripts/fetch-binaries.sh --from-release          # all three systems, from the public signed release
 scripts/fetch-binaries.sh --plugin                # the N.I.N.A. plugin from Starfront's CI</pre>
+<p><b>Start with <code>--from-release</code>.</b> It needs no Rapid Stacker Collab checkout and no private access: it downloads the signed release published as GitHub releases on Starfront's repository (tags <code>collab-worker</code> and <code>collab-hub</code>), checks each manifest's signature against the key built into Starfront and each archive's SHA-256, and stops before installing anything that fails. The programs are proprietary (free to use with Starfront, not covered by its MPL-2.0). The release has no <code>collab-uploader</code>, which only <code>lab.sh smoke</code> and <code>lab.sh upload</code> use; for those, build it as below. On one machine, <code>python tools/local_night.py --bin-dir deploy/home-lab/bin/macos-arm64</code> runs the same downloaded programs.</p>
+<p>With access to Rapid Stacker Collab, you can build them instead:</p>
+<pre>scripts/fetch-binaries.sh --from-run &lt;run id&gt;    # Linux and Windows, from a worker-release run
+scripts/fetch-binaries.sh --mac                   # this Mac, built from source (also collab-uploader)
+scripts/fetch-binaries.sh --build-on &lt;you&gt;@&lt;server&gt;.lan   # or build natively on the Linux host</pre>
 <p>For <code>--from-run</code>, start the Rapid Stacker Collab <code>worker-release</code> workflow on <code>master</code> and use its run id once it finishes (about 20 to 30 minutes):</p>
 <pre>gh workflow run worker-release.yml -R EKE-Services/rapid-stacker-collab --ref master
 gh run list -R EKE-Services/rapid-stacker-collab -w worker-release -L 1</pre>

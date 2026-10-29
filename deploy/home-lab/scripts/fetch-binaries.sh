@@ -3,6 +3,9 @@
 # where Terraform looks for them. Rust is not cross-compiled, so each OS's
 # binaries come from somewhere that builds natively:
 #
+#   fetch-binaries.sh --from-release            the public signed release on Starfront's GitHub, for all
+#                                               three systems: no Rapid Stacker Collab checkout and no
+#                                               private access needed (no collab-uploader, though)
 #   fetch-binaries.sh --mac                     cargo build --release here (also collab-uploader,
 #                                               which the smoke test and real uploads use)
 #   fetch-binaries.sh --from-run RUN_ID         the archives of a Rapid Stacker Collab worker-release
@@ -22,12 +25,58 @@ set -euo pipefail
 . "$(dirname "$0")/common.sh"
 bin="$(cd "$here/.." && pwd)/bin"
 rsc="${RSC:-$(cd "$here/../../../.." && pwd)/Rust/rapid-stacker-collab}"
-[ -f "$rsc/worker/Cargo.toml" ] || die "no Rapid Stacker Collab checkout at $rsc (set RSC=...)"
-[ $# -gt 0 ] || { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+# Only the options that build need the (private) checkout; --from-release and
+# the CI downloads do not, so the check is made where it is needed.
+need_rsc() { [ -f "$rsc/worker/Cargo.toml" ] || die "no Rapid Stacker Collab checkout at $rsc (set RSC=...)"; }
+[ $# -gt 0 ] || { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --from-release)
+      # Anyone can run this: the release is public, and trust comes from the
+      # signature, checked with Starfront's own verifier and embedded key, then
+      # each archive's size and SHA-256 as the signed manifest gives them. The
+      # archives are unpacked with the same safe unpacker the desktop uses.
+      base="${STARFRONT_RELEASES:-https://github.com/EKEServices/starfront/releases/download}"
+      say "the signed release from $base ..."
+      python3 - "$(cd "$here/../../.." && pwd)" "$bin" "$base" <<'PY'
+import hashlib, json, shutil, sys, tempfile, urllib.parse, urllib.request
+from pathlib import Path
+root, bin_dir, base = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+sys.path.insert(0, str(root))
+from astrocontrol import volunteer
+
+def get(url):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+for product in ("collab-worker", "collab-hub"):
+    url = f"{base}/{product}/latest.json"
+    body = get(url)
+    if not volunteer.verify_signature(volunteer.MANIFEST_PUBLIC_KEY, body, get(url + ".sig").decode()):
+        sys.exit(f"{url}: the signature does not match Starfront's release key; nothing was installed")
+    manifest = json.loads(body)
+    for os_key, asset in manifest["assets"].items():
+        a = asset["primary"]
+        data = get(urllib.parse.urljoin(url, a["url"]))
+        if len(data) != a["size"] or hashlib.sha256(data).hexdigest() != a["sha256"]:
+            sys.exit(f"{a['filename']}: size or SHA-256 differs from the signed manifest; nothing more was installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / a["filename"]
+            archive.write_bytes(data)
+            volunteer.safe_extract(archive, Path(tmp) / "x", "zip" if a["filename"].endswith(".zip") else "tar.gz")
+            name = product + (".exe" if os_key.startswith("windows") else "")
+            found = next((Path(tmp) / "x").rglob(name), None)
+            if found is None:
+                sys.exit(f"{a['filename']} holds no {name}")
+            (bin_dir / os_key).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(found, bin_dir / os_key / name)
+            (bin_dir / os_key / name).chmod(0o755)
+        print(f"  {product} {manifest['version']} {os_key}: verified")
+PY
+      shift ;;
     --mac)
+      need_rsc
       say "building the macOS binaries in $rsc/worker ..."
       (cd "$rsc/worker" && CARGO_NET_GIT_FETCH_WITH_CLI=true cargo build --release \
          -p collab-hub -p collab-worker -p collab-uploader)
@@ -53,6 +102,7 @@ while [ $# -gt 0 ]; do
       shift 2 ;;
     --build-on)
       [ $# -ge 2 ] || die "--build-on needs user@host"
+      need_rsc
       say "building on $2 (the source is copied from $rsc) ..."
       remote "$2" 'mkdir -p starfront-lab/build'
       rsync -az --delete --exclude target --exclude node_modules --exclude .git -e "$(rsh)" "$rsc/" "$2:starfront-lab/build/rsc/"

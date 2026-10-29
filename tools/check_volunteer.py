@@ -271,6 +271,10 @@ class Fake:
 
 
 fake = Fake()
+# The public GitHub release is the last source tried; the checks never leave
+# this machine, so it is the fake too, under its own path.
+SHIPPED_RELEASES_URL = volunteer.RELEASES_URL
+volunteer.RELEASES_URL = fake.url + "/releases"
 HUB_PATH = "/hub/v1/worker-manifest"
 SRV_PATH = "/download/collab-worker/latest.json"
 HUB_BIN_PATH = "/download/collab-hub/latest.json"
@@ -527,6 +531,41 @@ try:
 except volunteer.VolunteerError:
     ok = True
 case("a bad signature on the hub manifest is refused and the old hub stays",
+     ok and hub_target.read_bytes().startswith(b"#!/bin/sh"))
+
+# ------------------------------------------------- the public GitHub release
+# The signed release is also published as a GitHub release per product on
+# Starfront's own repository, so a server that does not carry it (a home
+# lab's, or a new one's) still lets its volunteers install. It is tried last,
+# after the server, under the same signature check as every other source.
+print("-- public release")
+case("the shipped release address is Starfront's own GitHub releases",
+     SHIPPED_RELEASES_URL == "https://github.com/EKEServices/starfront/releases/download")
+cfg, v = fresh("from-release")
+fake.publish("/releases/collab-worker/latest.json", "1.0.0", good_archive())
+v.install_blocking(code="ABCD-1234", hub_url=fake.url)
+tried = [r for r in fake.requests if r.endswith("latest.json")]
+case("with nothing on the hub or the server, the worker installs from the public release",
+     cfg.get("volunteer", "installedVersion") == "1.0.0" and v.bin_path().is_file(), str(tried))
+case("...which is tried after the server, not before it",
+     tried[-2:] == [SRV_PATH, "/releases/collab-worker/latest.json"], str(tried))
+cfg, v = fresh("hub-from-release")
+hub_target = WORK / "hub-from-release" / "hubroot" / "bin" / "collab-hub"
+fake.publish("/releases/collab-hub/latest.json", "0.9.0", tar_bytes([("collab-hub", b"#!/bin/sh\nexit 0\n")]),
+             product="collab-hub")
+v.install_hub_blocking(hub_target)
+case("the hub installs from its own public release when the server has none",
+     hub_target.is_file() and hub_target.with_name("collab-hub.version").read_text().strip() == "0.9.0"
+     and [r for r in fake.requests if r.endswith("latest.json")] == [HUB_BIN_PATH, "/releases/collab-hub/latest.json"],
+     str(fake.requests))
+fake.publish("/releases/collab-hub/latest.json", "0.9.1", tar_bytes([("collab-hub", b"x")]), product="collab-hub",
+             key=OTHER)
+try:
+    v.install_hub_blocking(hub_target)
+    ok = False
+except volunteer.VolunteerError:
+    ok = True
+case("...and a release signed with another key is refused there too",
      ok and hub_target.read_bytes().startswith(b"#!/bin/sh"))
 
 # ------------------------------------------------------------------- routes

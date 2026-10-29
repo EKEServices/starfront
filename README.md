@@ -2314,6 +2314,19 @@ refuses every install and update with "no release signing key configured", so an
 unsigned worker is never run.  The hub's own binary
 goes through the same checks, from the server's `download/collab-hub/`.
 
+**Where a release comes from.**  The worker's manifest is tried from the
+Volunteer page's manifest URL if one is set, then the hub's mirror, then the
+Starfront server, and last the public GitHub release on Starfront's own
+repository (one release per product, tagged `collab-worker` and `collab-hub`,
+so its address never moves).  The hub's own manifest is tried from the server,
+then its GitHub release.  Every source passes the same signature check, so a
+source adds no trust; the GitHub release is there so that a server which does
+not carry the binaries, a home lab's or a new one's, still lets its volunteers
+install.  The manifests name their archives relative to themselves, so the
+same signed files serve from every one of these places.  The programs are
+proprietary (they contain Rapid Stacker Collab and rapid-stacker), free to use
+with Starfront; Starfront's MPL-2.0 does not cover them.
+
 **The Windows worker is a logon task, not a service** (`collab-worker service
 install`, T207).  It runs
 in the volunteer's own session, so it can read the mapped drive that the catalogue
@@ -2412,11 +2425,13 @@ T706, except where the last list says otherwise):
 
 Still open:
 
-- **A first signed release.**  The release key exists (2026-10-28) and its
-  public half is in `volunteer.py` and the worker's `self_update.rs`, but no
-  release has been signed and published, so the server's
-  `download/collab-worker/` and `download/collab-hub/` are still empty and
-  every install finds nothing to fetch.
+- **Updates are by hand.**  The first signed release (worker and hub 0.1.0,
+  2026-10-28) is published as the GitHub releases above, but nothing checks
+  for a newer one by itself: a volunteer presses Update, or runs
+  `collab-worker self-update`.  The worker's own `self-update` does not yet try
+  the GitHub release, and the hub does not yet mirror the worker's manifest
+  (`/hub/v1/worker-manifest` answers 400), so a volunteer falls through to the
+  server and then GitHub.
 - **A real night.**  Nothing here has been run from N.I.N.A. on the Windows PC
   against a real hub, and two real workers have not drained a hub on the home
   network (T208, T705).  `tools/local_night.py` is the way to start.

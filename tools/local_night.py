@@ -38,7 +38,10 @@ exits 0 (non-zero on timeout or if any program dies).
 
 What it does not do: build or publish anything for release (it runs the three
 binaries from a Rapid Stacker Collab checkout, building them with cargo unless
---no-build), touch the cloud (the server is a local stand-in anyone on the
+--no-build; or, with --bin-dir, ones already there, such as the public signed
+release that `deploy/home-lab/scripts/fetch-binaries.sh --from-release` puts in
+deploy/home-lab/bin/macos-arm64, which needs no access to Collab's private
+source but has no collab-uploader, so --synthetic then wants one), touch the cloud (the server is a local stand-in anyone on the
 network can sign in to as anyone: local testing only), install the worker as a
 service, or edit your Starfront desktop settings. Like run_local.py it refuses a
 real server's data folder. The standard library only.
@@ -186,6 +189,19 @@ def find_binaries(rsc: Path, build: bool) -> dict[str, Path]:
     return found
 
 
+def binaries_in(folder: Path, need_uploader: bool) -> dict[str, Path]:
+    """Prebuilt binaries in `folder` (--bin-dir). The public release carries the
+    hub and the worker but not collab-uploader, which only --synthetic needs."""
+    found = {name: folder / name for name in BINARIES if (folder / name).exists()}
+    missing = [n for n in ("collab-hub", "collab-worker") + (("collab-uploader",) if need_uploader else ())
+               if n not in found]
+    if missing:
+        fail(f"missing {', '.join(missing)} in {folder}"
+             + ("; collab-uploader is not in the public release, so --synthetic needs one built from "
+                "Rapid Stacker Collab" if "collab-uploader" in missing else ""))
+    return found
+
+
 def refuse_real_data(data: Path) -> None:
     """The same refusals as server/run_local.py, before anything is written."""
     from server import auth
@@ -207,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Start the whole live-stacking system on this Mac")
     parser.add_argument("--rsc", help="Rapid Stacker Collab checkout (default: the sibling Rust/rapid-stacker-collab)")
     parser.add_argument("--no-build", action="store_true", help="use the binaries already built in RSC")
+    parser.add_argument("--bin-dir", help="use prebuilt binaries from this folder instead of a Collab checkout "
+                                          "(e.g. deploy/home-lab/bin/macos-arm64 after fetch-binaries.sh "
+                                          "--from-release)")
     parser.add_argument("--data", default=str(Path.home() / "starfront-local"),
                         help="everything lives here (default ~/starfront-local)")
     parser.add_argument("--port", type=int, default=8800, help="server port (default 8800)")
@@ -240,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
         region = tuple(parts) if len(parts) == 4 else (parts[0], parts[1], 1.0, 1.0)
     if args.exit_when_stacked and not args.synthetic:
         parser.error("--exit-when-stacked needs --synthetic (nothing else makes frames)")
+    if args.bin_dir and (args.rsc or args.no_build):
+        parser.error("--bin-dir takes the binaries as they are; it goes with neither --rsc nor --no-build")
 
     from server.run_local import lan_addresses, local_name
     data = Path(args.data).expanduser().resolve()
@@ -247,8 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     for port in (args.port, args.hub_port):
         if not port_free(port):
             fail(f"port {port} is already in use (an earlier run still going?)")
-    rsc = find_rsc(args.rsc)
-    bins = find_binaries(rsc, not args.no_build)
+    if args.bin_dir:
+        bins = binaries_in(Path(args.bin_dir).expanduser().resolve(), args.synthetic)
+    else:
+        bins = find_binaries(find_rsc(args.rsc), not args.no_build)
 
     data.mkdir(parents=True, exist_ok=True)
     logs = data / "logs"
@@ -348,7 +371,11 @@ def main(argv: list[str] | None = None) -> int:
         say("  Starfront desktop (local mode): collab.serverUrl = " + server_public)
         say(f"  (the enrol code is single-use and works for 1 h; mint more with: "
             f"{bins['collab-hub']} enrol-code --config {config})")
-        if not args.synthetic:
+        if not args.synthetic and "collab-uploader" not in bins:
+            say("")
+            say("  Real frames: send them from N.I.N.A. with the Starfront plugin (collab-uploader is not in")
+            say("  the public release, so there is no command-line uploader here).")
+        if not args.synthetic and "collab-uploader" in bins:
             up = (f"COLLAB_TOKEN=$(cat {grant_file}) {bins['collab-uploader']} "
                   f"--api-base {server_public}/stack/api --config-dir {data / 'uploader' / 'real'}")
             say("")

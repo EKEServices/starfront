@@ -53,6 +53,7 @@ echo '{"server":"omarchy.lan","windows":"Eds9950X.lan","nas":"DXP8800PLUS-76B2.l
 Rust is not cross-compiled. Each OS's `collab-hub` and `collab-worker` are built on that OS:
 
 ```bash
+scripts/fetch-binaries.sh --from-release                # all three systems, from the public signed release (no private access)
 scripts/fetch-binaries.sh --mac                         # this Mac: also collab-uploader
 scripts/fetch-binaries.sh --from-run <worker-release run id>   # Linux and Windows, from CI
 scripts/fetch-binaries.sh --build-on <you>@omarchy.lan  # or Linux natively (needs rustup, cmake, rapid-stacker access)
@@ -61,7 +62,9 @@ scripts/fetch-binaries.sh --plugin                      # the N.I.N.A. plugin, f
 
 The plugin build lands in `bin/nina-plugin/`, and the next `apply` gives it to the lab server. The server's `/nina` feed then offers it, in place of the released plugin in `server/nina_plugin/`. CI stamps it `1.0.0.0`, which is how N.I.N.A. lists it.
 
-`worker-release` is the Rapid Stacker Collab workflow that you run by hand (Actions > worker-release > Run workflow). It builds the archives as workflow artifacts and signs, uploads and tags nothing. Its unsigned archives are fine here, because nothing installs them through the desktop's signed-manifest path. That path is blocked until the release key exists.
+`worker-release` is the Rapid Stacker Collab workflow that you run by hand (Actions > worker-release > Run workflow). It builds the archives as workflow artifacts and signs, uploads and tags nothing. Its unsigned archives are fine here, because nothing installs them through the desktop's signed-manifest path.
+
+`--from-release` needs neither that workflow nor any private access: it downloads the signed release published as GitHub releases on Starfront's own repository (tags `collab-worker` and `collab-hub`), checks each manifest's signature with Starfront's embedded key and each archive's SHA-256, and unpacks all three systems' binaries. That release has no `collab-uploader`, which only `lab.sh smoke` and `lab.sh upload` use; build it with `--mac` for those. `tools/local_night.py --bin-dir bin/macos-arm64` runs the same downloaded binaries on one machine.
 
 ## 2. Up
 

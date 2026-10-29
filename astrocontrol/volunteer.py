@@ -20,7 +20,9 @@ Why each piece exists:
     install ("no release signing key configured").
   * **Where it is fetched from, in order:** the `volunteer.manifestUrl`
     setting if set; the hub's mirror `{hubUrl}/hub/v1/worker-manifest`; the
-    Starfront server `{serverUrl}/download/collab-worker/latest.json`.  The
+    Starfront server `{serverUrl}/download/collab-worker/latest.json`; and
+    last the public GitHub release (`RELEASES_URL`), so a server that does
+    not carry the release, a lab's say, still lets its volunteers install.  The
     signature file is always the manifest URL plus `.sig` (an assumption for
     the hub route, which the hub must honour).  The first source whose
     signature verifies is used; one that fails is skipped and reported, so a
@@ -29,8 +31,8 @@ Why each piece exists:
   * **One binary per manifest.**  The plan's manifest shape names a single
     asset per OS, so `collab-hub` has its own manifest, beside the worker's:
     `{serverUrl}/download/collab-hub/latest.json` (+ `.sig`), same key, same
-    checks.  A hub does not mirror its own binary, so the server is the only
-    source.  `POST /api/hub/install` installs it at `HubSupervisor.binary()`,
+    checks.  A hub does not mirror its own binary, so the server is tried,
+    then the GitHub release.  `POST /api/hub/install` installs it at `HubSupervisor.binary()`,
     so the supervisor keeps pointing at the installed path; the installed
     version is kept in a `<binary>.version` file beside it.
   * **Refusals before any download:** a version that is not newer than the
@@ -99,6 +101,19 @@ from .collabadmin import CollabError
 #: it accepts no manifest, whatever its signature.
 PLACEHOLDER_KEY = "PLACEHOLDER-release-signing-key-not-generated-yet"
 MANIFEST_PUBLIC_KEY = "pjSI2HuDvFSFXjDu9u5FoJi7rT7uw5a1ZXHA6fdSDbo="
+
+#: Where the signed releases are published for anyone: one GitHub release per
+#: product on Starfront's own repository, tagged with the product's name, so
+#: `{RELEASES_URL}/<product>/latest.json` never moves while its contents do.
+#: The manifests name their archives relative to themselves, so the same
+#: signed files serve from here and from any Starfront server. Tried last,
+#: after the server; check_volunteer points it at its fake.
+RELEASES_URL = "https://github.com/EKEServices/starfront/releases/download"
+
+
+def release_manifest(product: str) -> str:
+    """The public release's manifest URL for `collab-worker` or `collab-hub`."""
+    return f"{RELEASES_URL}/{product}/latest.json"
 
 #: The manifest's OS keys.
 OS_KEYS = ("macos-arm64", "windows-x64", "linux-x64")
@@ -613,6 +628,7 @@ class Volunteer:
         if hub_url:
             out.append(f"{hub_url}/hub/v1/worker-manifest")
         out.append(f"{self.server_url()}/download/collab-worker/latest.json")
+        out.append(release_manifest("collab-worker"))
         return out
 
     def _say(self, message: str, level: str = "info") -> None:
@@ -846,8 +862,8 @@ class Volunteer:
         if binary.exists() and version_file.exists():
             installed = version_file.read_text(encoding="utf-8").strip()
         work = binary.parent.parent / "releases"
-        release, program = inst.acquire([f"{self.server_url()}/download/collab-hub/latest.json"],
-                                        work, installed)
+        release, program = inst.acquire([f"{self.server_url()}/download/collab-hub/latest.json",
+                                         release_manifest("collab-hub")], work, installed)
         swap_binary(program, binary)
         version_file.write_text(release.version + "\n", encoding="utf-8")
         self._say(f"hub {release.version} installed at {binary}", "success")
