@@ -8,3 +8,4 @@ Headless Chrome on macOS prints the same PDF, with the same switches (run it fro
 
 Starfront Collaboration for NINA   the plugin guide; a copy sits in server\nina_plugin and is served at /nina/guide
 How Starfront deals exposures      how the collaboration server deals each night
+Starfront lab on another local network   setting up the home lab (server, hub, workers) on another network, Terraform included

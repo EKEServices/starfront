@@ -12,6 +12,8 @@ This folder sets up live stacking across the machines on a home network: the Sta
 
 Terraform here is only the inventory, the order of the steps, change detection and teardown. Every step is a script in `scripts/` that runs over SSH from this Mac, and each one can also be run by hand. There is no cloud provider and nothing leaves the LAN. State is local and git-ignored, because the scripts pass tokens around.
 
+The steps below assume the author's network. To set the lab up on another one, installing Terraform included, follow `docs/Starfront lab on another local network.pdf` (printed from the `.html` beside it).
+
 ## 0. Once, by hand
 
 These steps need root or administrator rights, so Terraform does not do them.
