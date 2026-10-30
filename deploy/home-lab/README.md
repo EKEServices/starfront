@@ -64,7 +64,7 @@ The plugin build lands in `bin/nina-plugin/`, and the next `apply` gives it to t
 
 `worker-release` is the Rapid Stacker Collab workflow that you run by hand (Actions > worker-release > Run workflow). It builds the archives as workflow artifacts and signs, uploads and tags nothing. Its unsigned archives are fine here, because nothing installs them through the desktop's signed-manifest path.
 
-`--from-release` needs neither that workflow nor any private access: it downloads the signed release published as GitHub releases on Starfront's own repository (tags `collab-worker` and `collab-hub`), checks each manifest's signature with Starfront's embedded key and each archive's SHA-256, and unpacks all three systems' binaries. That release has no `collab-uploader`, which only `lab.sh smoke` and `lab.sh upload` use; build it with `--mac` for those. `tools/local_night.py --bin-dir bin/macos-arm64` runs the same downloaded binaries on one machine.
+`--from-release` needs neither that workflow nor any private access: it downloads the public signed release from the desktop's own places in order (Rapid Stacker Collab's downloads, then the GitHub releases on Starfront's repository, tags `collab-worker` and `collab-hub`; `STARFRONT_RELEASES=<base>` names one instead), checks each manifest's signature with Starfront's embedded key and each archive's SHA-256, and unpacks all three systems' binaries. That release has no `collab-uploader`, which only `lab.sh smoke` and `lab.sh upload` use; build it with `--mac` for those. `tools/local_night.py --bin-dir bin/macos-arm64` runs the same downloaded binaries on one machine.
 
 ## 2. Up
 
@@ -121,4 +121,4 @@ Then `scripts/lab.sh status`: three workers, each with its catalogue `ready` in 
 
 ## The test campaign
 
-The manual tasks in `TASKS.DISTRIBUTED_STACKING.md` (T208, T310, T417, T507, T606 and T705) assume a Mac hub. Here the hub is the Linux host, so read "the Mac" in them as `omarchy.lan`. `STARFRONT_DISTRIBUTED_STACKING_CHECKLIST.md` gives the order to run them in. T507's install from the Volunteer page waits for the release signing key. Its other half, the worker pausing while N.I.N.A. is open, can be tested now with the worker installed here.
+The manual tasks in `TASKS.DISTRIBUTED_STACKING.md` (T208, T310, T417, T507, T606 and T705) assume a Mac hub. Here the hub is the Linux host, so read "the Mac" in them as `omarchy.lan`. `STARFRONT_DISTRIBUTED_STACKING_CHECKLIST.md` gives the order to run them in. T507's install from the Volunteer page can be run now: the release signing key and the signed release exist (since 2026-10-28). Its other half, the worker pausing while N.I.N.A. is open, can be tested with the worker installed here.

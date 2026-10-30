@@ -271,10 +271,11 @@ class Fake:
 
 
 fake = Fake()
-# The public GitHub release is the last source tried; the checks never leave
-# this machine, so it is the fake too, under its own path.
-SHIPPED_RELEASES_URL = volunteer.RELEASES_URL
-volunteer.RELEASES_URL = fake.url + "/releases"
+# The public releases are the last sources tried (Collab's downloads, then the
+# GitHub mirror); the checks never leave this machine, so they are the fake
+# too, each under its own path.
+SHIPPED_RELEASES_URLS = volunteer.RELEASES_URLS
+volunteer.RELEASES_URLS = (fake.url + "/releases", fake.url + "/mirror")
 HUB_PATH = "/hub/v1/worker-manifest"
 SRV_PATH = "/download/collab-worker/latest.json"
 HUB_BIN_PATH = "/download/collab-hub/latest.json"
@@ -533,22 +534,35 @@ except volunteer.VolunteerError:
 case("a bad signature on the hub manifest is refused and the old hub stays",
      ok and hub_target.read_bytes().startswith(b"#!/bin/sh"))
 
-# ------------------------------------------------- the public GitHub release
-# The signed release is also published as a GitHub release per product on
-# Starfront's own repository, so a server that does not carry it (a home
-# lab's, or a new one's) still lets its volunteers install. It is tried last,
-# after the server, under the same signature check as every other source.
+# ------------------------------------------------------ the public releases
+# The signed release is also published for anyone: in Rapid Stacker Collab's
+# own downloads, its canonical home, and as a GitHub release per product on
+# Starfront's repository, the mirror that carried 0.1.0 first. So a server
+# that does not carry it (a home lab's, or a new one's) still lets its
+# volunteers install. They are tried last, after the server, in that order,
+# under the same signature check as every other source.
 print("-- public release")
-case("the shipped release address is Starfront's own GitHub releases",
-     SHIPPED_RELEASES_URL == "https://github.com/EKEServices/starfront/releases/download")
+case("the shipped release addresses are Collab's downloads, then Starfront's GitHub releases",
+     SHIPPED_RELEASES_URLS == ("https://collab.astro.ekeservices.com/downloads",
+                               "https://github.com/EKEServices/starfront/releases/download"),
+     str(SHIPPED_RELEASES_URLS))
 cfg, v = fresh("from-release")
 fake.publish("/releases/collab-worker/latest.json", "1.0.0", good_archive())
 v.install_blocking(code="ABCD-1234", hub_url=fake.url)
 tried = [r for r in fake.requests if r.endswith("latest.json")]
 case("with nothing on the hub or the server, the worker installs from the public release",
      cfg.get("volunteer", "installedVersion") == "1.0.0" and v.bin_path().is_file(), str(tried))
-case("...which is tried after the server, not before it",
+case("...which is tried after the server, not before it, and the mirror is not needed",
      tried[-2:] == [SRV_PATH, "/releases/collab-worker/latest.json"], str(tried))
+fake.clear()
+cfg, v = fresh("from-mirror")
+fake.publish("/mirror/collab-worker/latest.json", "1.0.0", good_archive())
+v.install_blocking(code="ABCD-1234", hub_url=fake.url)
+tried = [r for r in fake.requests if r.endswith("latest.json")]
+case("with Collab's downloads empty, the GitHub mirror serves the release",
+     cfg.get("volunteer", "installedVersion") == "1.0.0"
+     and tried[-3:] == [SRV_PATH, "/releases/collab-worker/latest.json", "/mirror/collab-worker/latest.json"],
+     str(tried))
 cfg, v = fresh("hub-from-release")
 hub_target = WORK / "hub-from-release" / "hubroot" / "bin" / "collab-hub"
 fake.publish("/releases/collab-hub/latest.json", "0.9.0", tar_bytes([("collab-hub", b"#!/bin/sh\nexit 0\n")]),

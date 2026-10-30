@@ -21,8 +21,9 @@ Why each piece exists:
   * **Where it is fetched from, in order:** the `volunteer.manifestUrl`
     setting if set; the hub's mirror `{hubUrl}/hub/v1/worker-manifest`; the
     Starfront server `{serverUrl}/download/collab-worker/latest.json`; and
-    last the public GitHub release (`RELEASES_URL`), so a server that does
-    not carry the release, a lab's say, still lets its volunteers install.  The
+    last the public releases (`RELEASES_URLS`: Rapid Stacker Collab's own
+    downloads, then the GitHub release mirror), so a server that does not
+    carry the release, a lab's say, still lets its volunteers install.  The
     signature file is always the manifest URL plus `.sig` (an assumption for
     the hub route, which the hub must honour).  The first source whose
     signature verifies is used; one that fails is skipped and reported, so a
@@ -102,18 +103,26 @@ from .collabadmin import CollabError
 PLACEHOLDER_KEY = "PLACEHOLDER-release-signing-key-not-generated-yet"
 MANIFEST_PUBLIC_KEY = "pjSI2HuDvFSFXjDu9u5FoJi7rT7uw5a1ZXHA6fdSDbo="
 
-#: Where the signed releases are published for anyone: one GitHub release per
-#: product on Starfront's own repository, tagged with the product's name, so
-#: `{RELEASES_URL}/<product>/latest.json` never moves while its contents do.
-#: The manifests name their archives relative to themselves, so the same
-#: signed files serve from here and from any Starfront server. Tried last,
-#: after the server; check_volunteer points it at its fake.
-RELEASES_URL = "https://github.com/EKEServices/starfront/releases/download"
+#: Where the signed releases are published for anyone, tried in this order,
+#: after the server. First Rapid Stacker Collab's own downloads (its S3 bucket
+#: behind CloudFront): the programs are Collab's and proprietary, so their
+#: home is with their owner, not in this MPL repository, and the address
+#: stays put whichever repository Starfront lives in. Then the GitHub release
+#: per product on Starfront's repository, which carried 0.1.0 before Collab
+#: did and stays as a mirror. Either way `{base}/<product>/latest.json` never
+#: moves while its contents do, and the manifests name their archives relative
+#: to themselves, so the same signed files serve from every base and from any
+#: Starfront server. Trust comes from the signature, not from the host.
+#: check_volunteer points both at its fake.
+RELEASES_URLS = (
+    "https://collab.astro.ekeservices.com/downloads",
+    "https://github.com/EKEServices/starfront/releases/download",
+)
 
 
-def release_manifest(product: str) -> str:
-    """The public release's manifest URL for `collab-worker` or `collab-hub`."""
-    return f"{RELEASES_URL}/{product}/latest.json"
+def release_manifests(product: str) -> list[str]:
+    """The public releases' manifest URLs for `collab-worker` or `collab-hub`, in the order tried."""
+    return [f"{base}/{product}/latest.json" for base in RELEASES_URLS]
 
 #: The manifest's OS keys.
 OS_KEYS = ("macos-arm64", "windows-x64", "linux-x64")
@@ -628,7 +637,7 @@ class Volunteer:
         if hub_url:
             out.append(f"{hub_url}/hub/v1/worker-manifest")
         out.append(f"{self.server_url()}/download/collab-worker/latest.json")
-        out.append(release_manifest("collab-worker"))
+        out.extend(release_manifests("collab-worker"))
         return out
 
     def _say(self, message: str, level: str = "info") -> None:
@@ -863,7 +872,7 @@ class Volunteer:
             installed = version_file.read_text(encoding="utf-8").strip()
         work = binary.parent.parent / "releases"
         release, program = inst.acquire([f"{self.server_url()}/download/collab-hub/latest.json",
-                                         release_manifest("collab-hub")], work, installed)
+                                         *release_manifests("collab-hub")], work, installed)
         swap_binary(program, binary)
         version_file.write_text(release.version + "\n", encoding="utf-8")
         self._say(f"hub {release.version} installed at {binary}", "success")

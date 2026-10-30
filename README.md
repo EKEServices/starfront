@@ -2316,16 +2316,20 @@ goes through the same checks, from the server's `download/collab-hub/`.
 
 **Where a release comes from.**  The worker's manifest is tried from the
 Volunteer page's manifest URL if one is set, then the hub's mirror, then the
-Starfront server, and last the public GitHub release on Starfront's own
-repository (one release per product, tagged `collab-worker` and `collab-hub`,
-so its address never moves).  The hub's own manifest is tried from the server,
-then its GitHub release.  Every source passes the same signature check, so a
-source adds no trust; the GitHub release is there so that a server which does
+Starfront server, and last the public release: first Rapid Stacker Collab's
+own downloads (`https://collab.astro.ekeservices.com/downloads/`), then the
+GitHub release on Starfront's own repository (one release per product, tagged
+`collab-worker` and `collab-hub`), which carried 0.1.0 first and stays as a
+mirror.  Neither address ever moves.  The hub's own manifest is tried from the
+server, then the same two.  Every source passes the same signature check, so a
+source adds no trust; the public release is there so that a server which does
 not carry the binaries, a home lab's or a new one's, still lets its volunteers
-install.  The manifests name their archives relative to themselves, so the
-same signed files serve from every one of these places.  The programs are
-proprietary (they contain Rapid Stacker Collab and rapid-stacker), free to use
-with Starfront; Starfront's MPL-2.0 does not cover them.
+install.  It lives with Rapid Stacker Collab because the programs are
+Collab's, and so that the address does not depend on which repository
+Starfront lives in.  The manifests name their archives relative to themselves,
+so the same signed files serve from every one of these places.  The programs
+are proprietary (they contain Rapid Stacker Collab and rapid-stacker), free to
+use with Starfront; Starfront's MPL-2.0 does not cover them.
 
 **The Windows worker is a logon task, not a service** (`collab-worker service
 install`, T207).  It runs
@@ -2428,9 +2432,10 @@ Still open:
 - **Updates are by hand.**  The first signed release (worker and hub 0.1.0,
   2026-10-28) is published as the GitHub releases above, but nothing checks
   for a newer one by itself: a volunteer presses Update, or runs
-  `collab-worker self-update`, which also tries the GitHub release last (from
-  the first worker built after Rapid Stacker Collab `2b2e2fb`; 0.1.0 predates
-  it).  The hub does not yet mirror the worker's manifest
+  `collab-worker self-update`, which also tries the public release last
+  (Collab's downloads, then GitHub, from worker 0.1.1; 0.1.0 tries neither).
+  0.1.1 is built for that but not yet signed or published, and nothing is in
+  Collab's downloads yet, so for now the desktop falls through to GitHub.  The hub does not yet mirror the worker's manifest
   (`/hub/v1/worker-manifest` answers 400), so a volunteer falls through to the
   server and then GitHub.
 - **A real night.**  Nothing here has been run from N.I.N.A. on the Windows PC

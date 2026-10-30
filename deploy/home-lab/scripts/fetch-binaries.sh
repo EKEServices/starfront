@@ -3,9 +3,10 @@
 # where Terraform looks for them. Rust is not cross-compiled, so each OS's
 # binaries come from somewhere that builds natively:
 #
-#   fetch-binaries.sh --from-release            the public signed release on Starfront's GitHub, for all
-#                                               three systems: no Rapid Stacker Collab checkout and no
-#                                               private access needed (no collab-uploader, though)
+#   fetch-binaries.sh --from-release            the public signed release, for all three systems, from
+#                                               Rapid Stacker Collab's downloads (or its GitHub mirror):
+#                                               no Collab checkout and no private access needed (no
+#                                               collab-uploader, though)
 #   fetch-binaries.sh --mac                     cargo build --release here (also collab-uploader,
 #                                               which the smoke test and real uploads use)
 #   fetch-binaries.sh --from-run RUN_ID         the archives of a Rapid Stacker Collab worker-release
@@ -28,7 +29,7 @@ rsc="${RSC:-$(cd "$here/../../../.." && pwd)/Rust/rapid-stacker-collab}"
 # Only the options that build need the (private) checkout; --from-release and
 # the CI downloads do not, so the check is made where it is needed.
 need_rsc() { [ -f "$rsc/worker/Cargo.toml" ] || die "no Rapid Stacker Collab checkout at $rsc (set RSC=...)"; }
-[ $# -gt 0 ] || { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -gt 0 ] || { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,23 +38,36 @@ while [ $# -gt 0 ]; do
       # signature, checked with Starfront's own verifier and embedded key, then
       # each archive's size and SHA-256 as the signed manifest gives them. The
       # archives are unpacked with the same safe unpacker the desktop uses.
-      base="${STARFRONT_RELEASES:-https://github.com/EKEServices/starfront/releases/download}"
-      say "the signed release from $base ..."
-      python3 - "$(cd "$here/../../.." && pwd)" "$bin" "$base" <<'PY'
-import hashlib, json, shutil, sys, tempfile, urllib.parse, urllib.request
+      # The places are the desktop's own (volunteer.RELEASES_URLS: Collab's
+      # downloads, then the GitHub mirror), tried in order; STARFRONT_RELEASES
+      # names one instead.
+      say "the signed release ..."
+      python3 - "$(cd "$here/../../.." && pwd)" "$bin" "${STARFRONT_RELEASES:-}" <<'PY'
+import hashlib, json, shutil, sys, tempfile, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
-root, bin_dir, base = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+root, bin_dir, chosen = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 sys.path.insert(0, str(root))
 from astrocontrol import volunteer
+bases = [chosen] if chosen else list(volunteer.RELEASES_URLS)
 
 def get(url):
     with urllib.request.urlopen(url, timeout=120) as r:
         return r.read()
 
 for product in ("collab-worker", "collab-hub"):
-    url = f"{base}/{product}/latest.json"
-    body = get(url)
-    if not volunteer.verify_signature(volunteer.MANIFEST_PUBLIC_KEY, body, get(url + ".sig").decode()):
+    # A place that is down or does not carry the release yet is skipped; one
+    # whose signature does not verify stops everything, as a tampered mirror.
+    for base in bases:
+        url = f"{base}/{product}/latest.json"
+        try:
+            body, sig = get(url), get(url + ".sig").decode()
+        except (urllib.error.URLError, OSError) as exc:
+            print(f"  {url}: {exc}; trying the next place")
+            continue
+        break
+    else:
+        sys.exit(f"{product}: no release at any of {', '.join(bases)}")
+    if not volunteer.verify_signature(volunteer.MANIFEST_PUBLIC_KEY, body, sig):
         sys.exit(f"{url}: the signature does not match Starfront's release key; nothing was installed")
     manifest = json.loads(body)
     for os_key, asset in manifest["assets"].items():
@@ -72,7 +86,7 @@ for product in ("collab-worker", "collab-hub"):
             (bin_dir / os_key).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(found, bin_dir / os_key / name)
             (bin_dir / os_key / name).chmod(0o755)
-        print(f"  {product} {manifest['version']} {os_key}: verified")
+        print(f"  {product} {manifest['version']} {os_key}: verified, from {base}")
 PY
       shift ;;
     --mac)
