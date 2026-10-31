@@ -60,7 +60,7 @@ dotnet test tests/Starfront.Collab.Tests           # live stacking's join codes,
 
 **Line endings are mixed, file by file.** These are CRLF (checked 2026-10-24 with `git ls-files --eol`): `README.md`, `requirements.txt`, `nina/Starfront.sln`, in `astrocontrol/` `__init__.py`, `capture.py`, `livestack.py`, `main.py`, `pipeline.py`, `devices/base.py`, `devices/manager.py`, `imaging/wcs.py` and `web/` `app.js`, `index.html`, `style.css`, and `tools/check_livestack.py`, `check_plan_order.py`, `check_register.py`; `docs/README.txt` and `server/nina_plugin/README.txt` are mixed. Everything else tracked is LF. An edit that rewrites line endings turns a ten-line change into a whole-file diff.
 
-Installer: `powershell -ExecutionPolicy Bypass -File packaging\build.ps1` (PyInstaller + Inno Setup). Its version is `astrocontrol.__version__`. The installer is copied to `server/downloads/`.
+Installer: `powershell -ExecutionPolicy Bypass -File packaging\build.ps1` (PyInstaller + Inno Setup). Its version is `astrocontrol.__version__`, and each version gets an entry in `CHANGELOG.md` (the desktop's; the plugin keeps `nina/CHANGELOG.md`). The installer is copied to `server/downloads/`.
 
 ## Releasing and deploying
 

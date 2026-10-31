@@ -33,7 +33,7 @@ Why each piece exists:
     asset per OS, so `collab-hub` has its own manifest, beside the worker's:
     `{serverUrl}/download/collab-hub/latest.json` (+ `.sig`), same key, same
     checks.  A hub does not mirror its own binary, so the server is tried,
-    then the GitHub release.  `POST /api/hub/install` installs it at `HubSupervisor.binary()`,
+    then the public releases (`RELEASES_URLS`).  `POST /api/hub/install` installs it at `HubSupervisor.binary()`,
     so the supervisor keeps pointing at the installed path; the installed
     version is kept in a `<binary>.version` file beside it.
   * **Refusals before any download:** a version that is not newer than the
